@@ -1061,21 +1061,43 @@
                         </label>
                     </div>
                     <div id="bitcoind-settings" style="display: none;">
-                        <div class="form-row">
-                            <label>RPC Host</label>
-                            <input type="text" id="bitcoind-host" value="127.0.0.1" placeholder="127.0.0.1">
+                        <div class="form-row-toggle">
+                            <div>
+                                <label>Managed Mode</label>
+                                <div class="toggle-description">Auto download, install, and manage Bitcoin Core</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="bitcoind-managed">
+                                <span class="toggle-slider"></span>
+                            </label>
                         </div>
-                        <div class="form-row">
-                            <label>RPC Port</label>
-                            <input type="number" id="bitcoind-rpc-port" value="8332" placeholder="8332">
+                        <div id="bitcoind-managed-controls" style="display: none; margin-bottom: 15px;">
+                            <div class="pool-preset-info visible" style="background: rgba(0, 208, 132, 0.1); border-color: rgba(0, 208, 132, 0.3);">
+                                Managed mode will automatically download Bitcoin Core v28.0, configure it with optimal settings, and start/stop it with the miner.
+                            </div>
+                            <div class="button-group" style="margin-top: 10px;">
+                                <button class="btn btn-primary" id="btn-bitcoind-install">Install Bitcoin Core</button>
+                                <button class="btn btn-success" id="btn-bitcoind-start">Start</button>
+                                <button class="btn btn-danger" id="btn-bitcoind-stop">Stop</button>
+                            </div>
                         </div>
-                        <div class="form-row">
-                            <label>RPC Username</label>
-                            <input type="text" id="bitcoind-rpc-user" placeholder="From bitcoin.conf">
-                        </div>
-                        <div class="form-row">
-                            <label>RPC Password</label>
-                            <input type="password" id="bitcoind-rpc-password" placeholder="From bitcoin.conf">
+                        <div id="bitcoind-manual-settings">
+                            <div class="form-row">
+                                <label>RPC Host</label>
+                                <input type="text" id="bitcoind-host" value="127.0.0.1" placeholder="127.0.0.1">
+                            </div>
+                            <div class="form-row">
+                                <label>RPC Port</label>
+                                <input type="number" id="bitcoind-rpc-port" value="8332" placeholder="8332">
+                            </div>
+                            <div class="form-row">
+                                <label>RPC Username</label>
+                                <input type="text" id="bitcoind-rpc-user" placeholder="From bitcoin.conf">
+                            </div>
+                            <div class="form-row">
+                                <label>RPC Password</label>
+                                <input type="password" id="bitcoind-rpc-password" placeholder="From bitcoin.conf">
+                            </div>
                         </div>
                         <div class="form-row">
                             <label>Prune Size (MB)</label>
@@ -1096,7 +1118,7 @@
                         </div>
                         <div id="bitcoind-status" class="gpu-stats">
                             <div class="gpu-stats-row">
-                                <span class="gpu-stats-label">Connection Status</span>
+                                <span class="gpu-stats-label">Status</span>
                                 <span class="gpu-stats-value" id="bitcoind-status-text">Not connected</span>
                             </div>
                             <div class="gpu-stats-row">
@@ -1623,6 +1645,62 @@
             }
         }
 
+        // Update Bitcoin Core managed mode visibility
+        function updateBitcoindManagedMode(managed) {
+            const managedControls = document.getElementById('bitcoind-managed-controls');
+            const manualSettings = document.getElementById('bitcoind-manual-settings');
+            if (managedControls) {
+                managedControls.style.display = managed ? 'block' : 'none';
+            }
+            if (manualSettings) {
+                // In managed mode, hide manual RPC settings (auto-generated)
+                manualSettings.style.display = managed ? 'none' : 'block';
+            }
+        }
+
+        // Bitcoin Core management actions
+        async function bitcoindAction(action) {
+            const statusEl = document.getElementById('bitcoind-status-text');
+            statusEl.textContent = action === 'install' ? 'Installing...' :
+                                   action === 'start' ? 'Starting...' : 'Stopping...';
+            statusEl.style.color = 'var(--text-secondary)';
+
+            try {
+                const res = await fetch('/api/bitcoind/' + action, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prune: parseInt(document.getElementById('bitcoind-prune').value) || 10000
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = data.status || 'Success';
+                    statusEl.style.color = 'var(--success)';
+                    addLog('Bitcoin Core ' + action + ' successful', 'success');
+
+                    // Update block height and sync progress if available
+                    if (data.block_height) {
+                        document.getElementById('bitcoind-block-height').textContent = data.block_height;
+                    }
+                    if (data.sync_progress !== undefined) {
+                        document.getElementById('bitcoind-sync-progress').textContent =
+                            (data.sync_progress * 100).toFixed(1) + '%';
+                    }
+                } else {
+                    statusEl.textContent = 'Failed';
+                    statusEl.style.color = 'var(--danger)';
+                    addLog('Bitcoin Core ' + action + ' failed: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error';
+                statusEl.style.color = 'var(--danger)';
+                addLog('Bitcoin Core ' + action + ' failed: ' + e.message, 'error');
+            }
+        }
+
         // Load settings
         async function loadSettings() {
             try {
@@ -1650,6 +1728,7 @@
 
                 // Bitcoin Core settings
                 document.getElementById('bitcoind-enabled').checked = data.bitcoind_enabled || false;
+                document.getElementById('bitcoind-managed').checked = data.bitcoind_managed || false;
                 document.getElementById('bitcoind-host').value = data.bitcoind_host || '127.0.0.1';
                 document.getElementById('bitcoind-rpc-port').value = data.bitcoind_rpc_port || 8332;
                 document.getElementById('bitcoind-rpc-user').value = data.bitcoind_rpc_user || '';
@@ -1661,6 +1740,7 @@
                 updateCpuStatus(data.enable_cpu !== false);
                 updateGpuStatus(data.enable_gpu || false);
                 updateBitcoindStatus(data.bitcoind_enabled || false);
+                updateBitcoindManagedMode(data.bitcoind_managed || false);
 
                 // Validate address on load
                 if (data.address) {
@@ -1708,6 +1788,7 @@
                 stratum_version: stratumVersion,
                 // Bitcoin Core settings
                 bitcoind_enabled: document.getElementById('bitcoind-enabled').checked,
+                bitcoind_managed: document.getElementById('bitcoind-managed').checked,
                 bitcoind_host: document.getElementById('bitcoind-host').value,
                 bitcoind_rpc_port: parseInt(document.getElementById('bitcoind-rpc-port').value) || 8332,
                 bitcoind_rpc_user: document.getElementById('bitcoind-rpc-user').value,
@@ -2074,6 +2155,16 @@
 
         // Bitcoin Core test connection button
         document.getElementById('btn-test-bitcoind').addEventListener('click', testBitcoindConnection);
+
+        // Bitcoin Core managed mode toggle
+        document.getElementById('bitcoind-managed').addEventListener('change', (e) => {
+            updateBitcoindManagedMode(e.target.checked);
+        });
+
+        // Bitcoin Core management buttons
+        document.getElementById('btn-bitcoind-install').addEventListener('click', () => bitcoindAction('install'));
+        document.getElementById('btn-bitcoind-start').addEventListener('click', () => bitcoindAction('start'));
+        document.getElementById('btn-bitcoind-stop').addEventListener('click', () => bitcoindAction('stop'));
 
         // Address validation on input
         document.getElementById('payout-address').addEventListener('input', (e) => {

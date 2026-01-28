@@ -117,6 +117,15 @@ MaxReconnectDelay = 300
 # When enabled, miner will create its own block templates for maximum decentralization
 BitcoindEnabled = false
 
+# Managed mode: auto download, install, configure, and start/stop Bitcoin Core
+# When enabled, btcminer will handle everything automatically:
+#   - Downloads Bitcoin Core from bitcoincore.org
+#   - Installs to ~/.local/share/bitcoin-core (Linux) or %LOCALAPPDATA%\BitcoinCore (Windows)
+#   - Generates bitcoin.conf with optimal settings
+#   - Starts bitcoind when mining starts, stops when mining stops
+# Set to false if you want to manage Bitcoin Core yourself
+BitcoindManaged = false
+
 # Bitcoin Core RPC connection settings
 # These must match your bitcoin.conf settings
 BitcoindHost = 127.0.0.1

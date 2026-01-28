@@ -205,7 +205,7 @@ void run_all() {
     test_validation_bech32_address();
     test_validation_invalid_stratum_version();
     test_validation_ckpool_v2_warning();
-    test_validation_braiins_v1_warning();
+    test_validation_braiins_solo_v1();
     test_validation_zero_port();
     test_pool_presets();
     test_high_thread_warning();

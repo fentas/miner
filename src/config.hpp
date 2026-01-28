@@ -72,6 +72,7 @@ struct Config {
 
     // Bitcoin Core integration (for Stratum V2 with custom block templates)
     bool bitcoind_enabled = false;          // Enable local Bitcoin Core integration
+    bool bitcoind_managed = false;          // Auto download/install/start/stop Bitcoin Core
     std::string bitcoind_host = "127.0.0.1"; // Bitcoin Core RPC host
     uint16_t bitcoind_rpc_port = 8332;      // Bitcoin Core RPC port
     std::string bitcoind_rpc_user;          // RPC username
@@ -197,6 +198,10 @@ inline bool load(const std::string& filename, Config& cfg) {
             std::string val_lower = value;
             std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
             cfg.bitcoind_enabled = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
+        } else if (key_lower == "bitcoindmanaged" || key_lower == "bitcoind_managed") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.bitcoind_managed = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
         } else if (key_lower == "bitcoindhost" || key_lower == "bitcoind_host" || key_lower == "rpchost") {
             cfg.bitcoind_host = value;
         } else if (key_lower == "bitcoindrpcport" || key_lower == "bitcoind_rpc_port" || key_lower == "rpcport") {

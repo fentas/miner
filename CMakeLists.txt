@@ -150,6 +150,7 @@ if(BUILD_TESTS)
         tests/test_gpu.cpp
         tests/test_config.cpp
         tests/test_connection.cpp
+        tests/test_bitcoind.cpp
     )
 
     add_executable(btcminer_test ${TEST_SOURCES})
@@ -203,6 +204,7 @@ if(BUILD_TESTS)
     add_test(NAME test_gpu COMMAND btcminer_test --gpu)
     add_test(NAME test_config COMMAND btcminer_test --config)
     add_test(NAME test_connection COMMAND btcminer_test --connection)
+    add_test(NAME test_bitcoind COMMAND btcminer_test --bitcoind)
 
     message(STATUS "Tests enabled")
 endif()
