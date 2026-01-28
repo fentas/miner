@@ -82,27 +82,12 @@ namespace {
 int tests_passed = 0;
 int tests_failed = 0;
 
-void print_hex(const uint8_t* data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]);
-    }
-    std::cout << std::dec;
-}
-
 std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
     for (size_t i = 0; i < hex.length(); i += 2) {
         bytes.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
     }
     return bytes;
-}
-
-std::string bytes_to_hex(const uint8_t* data, size_t len) {
-    std::ostringstream oss;
-    for (size_t i = 0; i < len; i++) {
-        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]);
-    }
-    return oss.str();
 }
 
 bool compare_hash(const uint8_t* hash, const std::string& expected_hex) {
@@ -381,13 +366,7 @@ void test_mining_simulation() {
     sha256::Midstate ms;
     sha256::compute_midstate(header, ms);
 
-    // Low difficulty target (starts with at least 2 zero bytes)
-    uint8_t target[32] = {0};
-    target[29] = 0x0f;
-    target[28] = 0xff;
-    target[27] = 0xff;
-
-    // Try to find a valid nonce
+    // Try to find a valid nonce (looking for 2 leading zero bytes in hash)
     uint8_t hash[32];
     uint32_t nonce = 0;
     bool found = false;
@@ -397,7 +376,7 @@ void test_mining_simulation() {
     for (uint32_t i = 0; i < 10000000 && !found; i++) {
         sha256::sha256d_midstate(ms, i, hash);
 
-        // Check if hash meets target (simplified: just check leading zeros)
+        // Check if hash has at least 2 leading zero bytes (big-endian view)
         if (hash[31] == 0 && hash[30] == 0) {
             nonce = i;
             found = true;
@@ -557,6 +536,118 @@ void test_hex_to_bytes() {
     }
 }
 
+// ============================================================================
+// Block Height Parsing Tests (BIP34)
+// ============================================================================
+
+uint64_t parse_block_height(const std::string& coinb1_hex) {
+    auto bytes = stratum_test::hex_to_bytes(coinb1_hex);
+    // Format: version(4) + txin_count(1) + prev_txid(32) + prev_vout(4) + script_len(1) = 42 bytes
+    // At offset 42: scriptSig starts (BIP34: push_count + height bytes)
+    if (bytes.size() <= 42) return 0;
+
+    size_t script_start = 42;  // ScriptSig starts here
+    uint8_t push_count = bytes[script_start];
+    if (push_count < 1 || push_count > 4) return 0;
+    if (script_start + 1 + push_count > bytes.size()) return 0;
+
+    uint64_t height = 0;
+    for (int i = push_count - 1; i >= 0; i--) {
+        height = (height << 8) | bytes[script_start + 1 + i];
+    }
+    return height;
+}
+
+void test_block_height_parsing() {
+    // coinb1 format: version(4) + txin_count(1) + prev_txid(32) + prev_vout(4) + script_len(1) + scriptSig...
+    // At byte 42 (offset after script_len): BIP34 push_count + height_bytes
+    // So we need 84 hex chars for the prefix (42 bytes), then scriptSig data
+
+    // Build prefix: 4+1+32+4+1 = 42 bytes = 84 hex chars
+    std::string coinb1_prefix =
+        "02000000"                                                          // version (4 bytes)
+        "01"                                                                // input count (1 byte)
+        "0000000000000000000000000000000000000000000000000000000000000000"  // prev txid (32 bytes)
+        "ffffffff"                                                          // prev vout (4 bytes)
+        "04";                                                               // script_len (1 byte)
+    // Now at offset 42: scriptSig starts with push_count
+
+    // Test 1: Block 880000 (0x0D6D80 little-endian: 80 6d 0d)
+    {
+        std::string coinb1 = coinb1_prefix + "03" + "806d0d";  // push_count=3, height LE
+        uint64_t height = parse_block_height(coinb1);
+        test_result("Block height parsing (3-byte)", height == 880000);
+    }
+
+    // Test 2: Low block height (1-byte) - Block 100
+    {
+        std::string prefix =
+            "02000000"
+            "01"
+            "0000000000000000000000000000000000000000000000000000000000000000"
+            "ffffffff"
+            "02";  // script_len=2
+        std::string coinb1 = prefix + "01" + "64";  // push_count=1, height=100
+        uint64_t height = parse_block_height(coinb1);
+        test_result("Block height parsing (1-byte)", height == 100);
+    }
+
+    // Test 3: Medium block height (2-byte) - Block 1000 (0x03e8 LE: e8 03)
+    {
+        std::string prefix =
+            "02000000"
+            "01"
+            "0000000000000000000000000000000000000000000000000000000000000000"
+            "ffffffff"
+            "03";  // script_len=3
+        std::string coinb1 = prefix + "02" + "e803";  // push_count=2, height LE
+        uint64_t height = parse_block_height(coinb1);
+        test_result("Block height parsing (2-byte)", height == 1000);
+    }
+}
+
+// ============================================================================
+// Estimated Time to Share Tests
+// ============================================================================
+
+double estimate_time_to_share(double hashrate, double difficulty) {
+    if (hashrate <= 0 || difficulty <= 0) return 0;
+    return (difficulty * 4294967296.0) / hashrate;  // 2^32 = 4294967296
+}
+
+void test_estimated_time() {
+    // Test 1: At 1 MH/s with difficulty 1
+    {
+        double time = estimate_time_to_share(1e6, 1.0);
+        // Expected: 2^32 / 1e6 = 4294.967296 seconds (~71.6 minutes)
+        bool ok = time > 4290 && time < 4300;
+        test_result("ETA at 1 MH/s, diff=1", ok);
+    }
+
+    // Test 2: At 100 MH/s with difficulty 1
+    {
+        double time = estimate_time_to_share(100e6, 1.0);
+        // Expected: 2^32 / 100e6 = 42.95 seconds
+        bool ok = time > 42 && time < 44;
+        test_result("ETA at 100 MH/s, diff=1", ok);
+    }
+
+    // Test 3: With higher difficulty
+    {
+        double time = estimate_time_to_share(100e6, 10.0);
+        // Expected: 10 * 2^32 / 100e6 = 429.5 seconds
+        bool ok = time > 425 && time < 435;
+        test_result("ETA at 100 MH/s, diff=10", ok);
+    }
+
+    // Test 4: Edge cases
+    {
+        double time1 = estimate_time_to_share(0, 1.0);
+        double time2 = estimate_time_to_share(1e6, 0);
+        test_result("ETA edge cases (zero values)", time1 == 0 && time2 == 0);
+    }
+}
+
 } // anonymous namespace
 
 int main() {
@@ -582,6 +673,10 @@ int main() {
 
     std::cout << "\n[TEST GROUP] Stratum Protocol Parsing\n";
     test_stratum_notify_parsing();
+    test_block_height_parsing();
+
+    std::cout << "\n[TEST GROUP] Estimated Time Calculations\n";
+    test_estimated_time();
     test_hex_to_bytes();
 
     test_mining_simulation();

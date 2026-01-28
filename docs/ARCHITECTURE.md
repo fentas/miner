@@ -154,6 +154,11 @@ struct Config {
     std::string web_dir;
     unsigned idle_timeout;        // Screensaver mode timeout
     bool idle_mining_enabled;
+    bool colors;                  // ANSI color output
+    std::string log_file;         // File logging (empty = disabled)
+    bool system_bell;             // Audio notification on share
+    unsigned reconnect_delay;     // Initial reconnect delay (seconds)
+    unsigned max_reconnect_delay; // Max backoff delay (seconds)
 };
 ```
 
@@ -306,16 +311,25 @@ uint32_t nonce_start = nonce_base_.fetch_add(NONCE_CHUNK);
 
 nbits to 256-bit target conversion done once per job, not per hash.
 
+## Recent Features
+
+- **Pool Reconnection**: Auto-reconnects with exponential backoff
+- **File Logging**: Timestamped stats to configurable log file
+- **Block Height Parsing**: Extracts from coinb1 (BIP34 format)
+- **Estimated Time to Share**: Based on hashrate vs difficulty
+- **Random Nonce Start**: Avoids duplicate work after restart
+- **System Bell**: Terminal beep on share found
+- **Pool Difficulty Display**: Shows in UI and stats output
+
 ## Future Improvements
 
 1. **AVX2/AVX512 Multi-hashing**: Process 4-8 hashes in parallel
-2. **Stratum V2**: More efficient binary protocol
-3. **Pool Failover**: Automatic reconnection to backup pools
-4. **GPU Support**: OpenCL/CUDA for massive parallelism
-5. **Better Nonce Distribution**: Random starting points per thread
-6. **Wayland Support**: Idle detection via D-Bus idle portal
-7. **macOS Support**: IOKit idle detection
-8. **Power Management**: Reduce threads when on battery
+2. **Stratum V2**: More efficient binary protocol (config placeholder ready)
+3. **GPU Support**: OpenCL/CUDA for massive parallelism (config placeholder ready)
+4. **Wayland Support**: Idle detection via D-Bus idle portal
+5. **macOS Support**: IOKit idle detection
+6. **Power Management**: Reduce threads when on battery
+7. **Multiple Pool Support**: Failover to backup pools
 
 ## References
 
