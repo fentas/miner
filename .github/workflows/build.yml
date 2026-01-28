@@ -78,10 +78,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ocl-icd-opencl-dev
+          sudo apt-get install -y ocl-icd-opencl-dev musl-tools
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -90,12 +92,17 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
 
-          # Build standard version
+          # Build standard version (dynamic)
           cargo build --release
           mkdir -p release/standard
           cp target/release/btcminer release/standard/
 
-          # Build OpenCL version
+          # Build static version (musl)
+          RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-musl
+          mkdir -p release/static
+          cp target/x86_64-unknown-linux-musl/release/btcminer release/static/
+
+          # Build OpenCL version (dynamic only - OpenCL requires dynamic linking)
           cargo build --release --features opencl
           mkdir -p release/opencl
           cp target/release/btcminer release/opencl/
@@ -112,6 +119,16 @@ jobs:
           cp README.md LICENSE package-standard/ 2>/dev/null || true
           cd package-standard
           tar -czvf ../btcminer-${VERSION}-linux-x64.tar.gz .
+          cd ..
+
+          # Package static version
+          mkdir -p package-static
+          cp release/static/btcminer package-static/
+          cp btcminer.toml package-static/btcminer.toml.example
+          cp -r web package-static/
+          cp README.md LICENSE package-static/ 2>/dev/null || true
+          cd package-static
+          tar -czvf ../btcminer-${VERSION}-linux-x64-static.tar.gz .
           cd ..
 
           # Package OpenCL version
