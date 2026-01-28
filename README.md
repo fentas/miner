@@ -147,7 +147,23 @@ gpu_devices = []       # Empty = all GPUs, or [0, 1] for specific devices
 gpu_intensity = 80     # 1-100, higher = more GPU usage
 ```
 
-Build with GPU support:
+**Install dependencies:**
+
+```bash
+# Ubuntu/Debian - OpenCL
+sudo apt install ocl-icd-opencl-dev
+
+# Ubuntu/Debian - NVIDIA (includes OpenCL)
+sudo apt install nvidia-cuda-toolkit
+
+# Ubuntu/Debian - AMD
+sudo apt install mesa-opencl-icd
+
+# WSL2 - Just need the ICD loader (uses Windows GPU driver)
+sudo apt install ocl-icd-opencl-dev
+```
+
+**Build with GPU support:**
 
 ```bash
 # OpenCL support
