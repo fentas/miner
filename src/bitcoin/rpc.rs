@@ -182,6 +182,21 @@ impl BitcoinRpc {
         self.call("getbestblockhash", json!([])).await?;
         Ok(())
     }
+
+    /// Load UTXO snapshot for AssumeUTXO fast sync
+    pub async fn load_utxo_snapshot(&self, path: &std::path::Path) -> Result<(), BitcoinError> {
+        let path_str = path.to_string_lossy();
+        let result = self.call("loadtxoutset", json!([path_str])).await?;
+
+        // Check for errors in result
+        if let Some(error) = result.get("error") {
+            if !error.is_null() {
+                return Err(BitcoinError::RpcError(error.to_string()));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

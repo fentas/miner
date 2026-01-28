@@ -7,14 +7,14 @@ This document describes the internal architecture of BTC Miner (Rust edition).
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                               main.rs                                        │
-│  - CLI argument parsing  - Config loading  - SIMD detection  - Colored output│
+│  - CLI argument parsing  - Config loading  - SIMD detection  - TUI/Logging  │
 └────────┬──────────┬──────────┬──────────┬──────────┬──────────┬─────────────┘
          │          │          │          │          │          │
          ▼          ▼          ▼          ▼          ▼          ▼
 ┌─────────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│   Stratum   │ │ Mining │ │  Web   │ │Bitcoin │ │  GPU   │ │  Idle  │
-│   Client    │◄│Coordin-│ │ Server │ │  RPC   │ │Manager │ │Monitor │
-│  (V1/V2)    │ │  ator  │ │ (axum) │ │        │ │        │ │        │
+│   Stratum   │ │ Mining │ │  TUI   │ │Bitcoin │ │  GPU   │ │  Idle  │
+│   Client    │◄│Coordin-│ │(ratatui│ │  RPC   │ │Manager │ │Monitor │
+│  (V1/V2)    │ │  ator  │ │+Web)   │ │        │ │        │ │        │
 └──────┬──────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
        │            │          │          │          │          │
        ▼            ▼          ▼          ▼          ▼          ▼
@@ -50,6 +50,10 @@ src/
 │   └── manager.rs       # Bitcoind lifecycle management
 ├── idle/                # Idle mining support
 │   └── mod.rs           # X11/WSL2 idle detection
+├── tui/                 # Terminal UI (ratatui)
+│   ├── mod.rs           # TUI runner and event loop
+│   ├── state.rs         # Shared state (thread-safe)
+│   └── widgets.rs       # UI components (hashrate, logs, etc.)
 ├── web/                 # Web interface
 │   └── mod.rs           # REST API, WebSocket, static files
 └── stats/               # Statistics
@@ -89,6 +93,8 @@ gpu_intensity = 80
 enabled = false
 managed = false
 prune = 10000
+dbcache = 0            # 0 = auto-calculate based on RAM
+assumeutxo = false     # Fast sync via UTXO snapshot
 
 [sv2]
 enabled = false
@@ -107,6 +113,8 @@ port = 8080
 colors = true
 stats_interval = 10
 system_bell = true
+hud = true             # Enable TUI dashboard
+format = "text"        # text or json
 ```
 
 #### Pool Presets

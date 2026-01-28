@@ -13,7 +13,7 @@ preset = "ckpool"
 # address = "solo.ckpool.org:3333"
 
 # Your Bitcoin address for payouts (REQUIRED)
-payout_address = "bc1p3ce2z950wuruvpd50km5q8a9t2vtus94p3259qfq2yrxglt7ajxs8wjcjn"
+payout_address = "YOUR_BTC_ADDRESS_HERE"
 
 # Pool password (optional)
 password = "x"
@@ -65,6 +65,16 @@ rpc_port = 8332
 # Pruned node size in MB (0 = full node, min 550)
 prune = 10000
 
+# Database cache size in MB (0 = auto-calculate based on available RAM)
+# Higher values significantly speed up initial sync
+# Recommended: 4000-8000 if you have 16GB+ RAM
+dbcache = 0
+
+# Enable AssumeUTXO for fast initial sync
+# Downloads ~7GB UTXO snapshot and syncs in minutes instead of days
+# Remaining history is verified in background after node is usable
+assumeutxo = false
+
 # ============================================
 # STRATUM V2 (SRI Integration)
 # ============================================
@@ -100,13 +110,19 @@ stats_interval = 10
 colors = true
 
 # Log file (empty to disable)
-file = "miner.log"
+# file = "miner.log"
 
 # Log level: error, warn, info, debug, trace
 level = "info"
 
 # System bell on share found
 system_bell = true
+
+# Enable TUI dashboard (set to false for continuous log output)
+hud = true
+
+# Log output format: "text" or "json"
+format = "text"
 
 # ============================================
 # NETWORK
@@ -118,3 +134,17 @@ reconnect_delay = 5
 
 # Max reconnection delay (exponential backoff limit)
 max_reconnect_delay = 300
+
+# ============================================
+# IDLE MODE
+# ============================================
+
+[idle]
+# Enable idle/screensaver mining mode
+enabled = false
+
+# Idle timeout in seconds before mining starts
+timeout = 900
+
+# Pause mining when user becomes active
+pause_on_active = true

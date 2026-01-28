@@ -147,6 +147,12 @@ pub struct BitcoindConfig {
     pub datadir: Option<String>,
     #[serde(default = "default_prune")]
     pub prune: u32,
+    /// Database cache size in MB (0 = auto-calculate based on available RAM)
+    #[serde(default)]
+    pub dbcache: u32,
+    /// Enable AssumeUTXO for fast initial sync (downloads UTXO snapshot)
+    #[serde(default)]
+    pub assumeutxo: bool,
 }
 
 fn default_host() -> String {
@@ -172,6 +178,8 @@ impl Default for BitcoindConfig {
             rpc_password: None,
             datadir: None,
             prune: default_prune(),
+            dbcache: 0, // 0 = auto-calculate
+            assumeutxo: false,
         }
     }
 }

@@ -21,15 +21,16 @@
 
 ## Features
 
+- **TUI Dashboard** - Full-screen terminal UI with hashrate graph, stats, logs
 - **Multi-threaded CPU Mining** - Worker threads with optimized nonce distribution
 - **SIMD Optimizations** - SHA-NI, AVX2, and AVX512 hardware acceleration
 - **GPU Mining** - OpenCL and CUDA support for additional hashrate
 - **Stratum V1/V2** - Pool protocol support with automatic reconnection
 - **True Solo Mining** - Direct Bitcoin Core integration with managed mode
+- **Fast Sync** - AssumeUTXO support for quick initial sync (minutes vs days)
 - **Idle Mining** - Screensaver-style mining (X11/WSL2) - mine when you're away
 - **Web Dashboard** - Real-time stats with WebSocket updates
 - **Web Notifications** - Browser notifications for blocks, shares, errors
-- **Colored Output** - Pretty console output with status indicators
 - **TOML Configuration** - SRI-compatible configuration format
 
 &nbsp;
@@ -116,7 +117,15 @@ payout_address = "bc1q...your_address"
 enabled = true
 managed = true         # Auto-manages Bitcoin Core
 prune = 10000          # ~10GB pruned node
+dbcache = 0            # 0 = auto (uses 50% of available RAM)
+assumeutxo = true      # Fast sync in minutes instead of days
 ```
+
+**Performance Tips:**
+
+- `dbcache=0` auto-calculates based on your RAM (~4-8GB recommended for fast sync)
+- `assumeutxo=true` downloads a ~7GB UTXO snapshot for instant usability
+- With AssumeUTXO, you can start mining immediately while the node validates history in background
 
 **How it works:**
 
@@ -222,6 +231,8 @@ Options:
   -t, --threads <N>      Override thread count
   -d, --debug            Enable debug logging
       --no-color         Disable colored output
+      --no-hud           Disable TUI, use continuous log output
+      --log-format       Log format: text or json
   -h, --help             Show help
 ```
 

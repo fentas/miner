@@ -8,6 +8,11 @@ use super::{BitcoinError, BitcoinRpc, SyncStatus};
 const BITCOIN_CORE_VERSION: &str = "30.2";
 const DOWNLOAD_BASE_URL: &str = "https://bitcoincore.org/bin";
 
+// AssumeUTXO snapshot info (Bitcoin Core v28+)
+const ASSUMEUTXO_HEIGHT: u64 = 840000;
+const ASSUMEUTXO_HASH: &str = "0000000000000000000320283a032748cef8227873ff4872689bf23f1cda83a5";
+const ASSUMEUTXO_URL: &str = "https://bitcoincore.org/bin/utxo-snapshots/utxo-840000.dat";
+
 /// Manages Bitcoin Core installation and lifecycle
 pub struct BitcoindManager {
     data_dir: PathBuf,
@@ -15,6 +20,8 @@ pub struct BitcoindManager {
     rpc: Option<BitcoinRpc>,
     process: Option<Child>,
     prune_size: u32,
+    dbcache: u32,
+    assumeutxo: bool,
     rpc_user: String,
     rpc_password: String,
     rpc_port: u16,
@@ -25,16 +32,40 @@ impl BitcoindManager {
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
 
+        // Auto-calculate dbcache based on available RAM
+        // Use ~50% of free memory, capped between 450MB and 16GB
+        let dbcache = Self::calculate_dbcache();
+
         Self {
             data_dir: home.join(".bitcoin"),
             install_dir: home.join(".local/share/bitcoin-core"),
             rpc: None,
             process: None,
             prune_size: 10000,
+            dbcache,
+            assumeutxo: false,
             rpc_user: generate_random_string(16),
             rpc_password: generate_random_string(32),
             rpc_port: 8332,
         }
+    }
+
+    /// Calculate optimal dbcache size based on available system memory
+    fn calculate_dbcache() -> u32 {
+        use sysinfo::System;
+
+        let mut sys = System::new_all();
+        sys.refresh_memory();
+
+        let total_mem_mb = sys.total_memory() / (1024 * 1024);
+        let available_mem_mb = sys.available_memory() / (1024 * 1024);
+
+        // Use 50% of available memory or 25% of total, whichever is smaller
+        // This leaves room for the OS and mining
+        let target = ((available_mem_mb / 2) as u32).min((total_mem_mb / 4) as u32);
+
+        // Clamp between 450 MB (default) and 16384 MB (16 GB)
+        target.clamp(450, 16384)
     }
 
     /// Set custom data directory
@@ -46,6 +77,22 @@ impl BitcoindManager {
     /// Set prune size in MB
     pub fn with_prune(mut self, size: u32) -> Self {
         self.prune_size = size;
+        self
+    }
+
+    /// Set dbcache size in MB (0 = auto-calculate)
+    pub fn with_dbcache(mut self, size: u32) -> Self {
+        if size == 0 {
+            self.dbcache = Self::calculate_dbcache();
+        } else {
+            self.dbcache = size.clamp(450, 16384);
+        }
+        self
+    }
+
+    /// Enable AssumeUTXO for fast initial sync
+    pub fn with_assumeutxo(mut self, enabled: bool) -> Self {
+        self.assumeutxo = enabled;
         self
     }
 
@@ -218,8 +265,8 @@ rpcport={}
 rpcallowip=127.0.0.1
 rpcbind=127.0.0.1
 
-# Performance
-dbcache=450
+# Performance (dbcache auto-calculated based on available RAM)
+dbcache={}
 maxmempool=300
 mempoolexpiry=72
 
@@ -229,7 +276,8 @@ blockmaxweight=4000000
             self.prune_size,
             self.rpc_user,
             self.rpc_password,
-            self.rpc_port
+            self.rpc_port,
+            self.dbcache
         );
 
         std::fs::write(&config_path, config)?;
@@ -370,6 +418,66 @@ blockmaxweight=4000000
     /// Get RPC client reference
     pub fn rpc(&self) -> Option<&BitcoinRpc> {
         self.rpc.as_ref()
+    }
+
+    /// Check if AssumeUTXO is enabled
+    pub fn assumeutxo_enabled(&self) -> bool {
+        self.assumeutxo
+    }
+
+    /// Download AssumeUTXO snapshot if not already present
+    pub async fn download_assumeutxo(&self) -> Result<PathBuf, BitcoinError> {
+        let snapshot_path = self.data_dir.join("utxo-snapshot.dat");
+
+        if snapshot_path.exists() {
+            info!("AssumeUTXO snapshot already downloaded");
+            return Ok(snapshot_path);
+        }
+
+        info!("Downloading AssumeUTXO snapshot from Bitcoin Core...");
+        info!("This is a ~7GB file and may take a while");
+
+        let client = reqwest::Client::new();
+        let response = client.get(ASSUMEUTXO_URL)
+            .send()
+            .await
+            .map_err(|e| BitcoinError::DownloadError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(BitcoinError::DownloadError(
+                format!("HTTP {}: Failed to download snapshot", response.status())
+            ));
+        }
+
+        let bytes = response.bytes()
+            .await
+            .map_err(|e| BitcoinError::DownloadError(e.to_string()))?;
+
+        std::fs::write(&snapshot_path, &bytes)?;
+        info!("AssumeUTXO snapshot downloaded to {:?}", snapshot_path);
+
+        Ok(snapshot_path)
+    }
+
+    /// Load AssumeUTXO snapshot via RPC (requires Bitcoin Core to be running)
+    pub async fn load_assumeutxo(&self) -> Result<(), BitcoinError> {
+        let rpc = self.rpc.as_ref()
+            .ok_or_else(|| BitcoinError::ConnectionError("Bitcoin Core not running".into()))?;
+
+        let snapshot_path = self.data_dir.join("utxo-snapshot.dat");
+        if !snapshot_path.exists() {
+            return Err(BitcoinError::NotSynced { progress: 0.0 });
+        }
+
+        info!("Loading AssumeUTXO snapshot (height {})...", ASSUMEUTXO_HEIGHT);
+
+        // Call loadtxoutset RPC
+        rpc.load_utxo_snapshot(&snapshot_path).await?;
+
+        info!("AssumeUTXO snapshot loaded successfully!");
+        info!("Node will sync remaining blocks in background");
+
+        Ok(())
     }
 }
 
