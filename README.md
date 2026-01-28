@@ -128,46 +128,70 @@ WebPort = 8080
 
 ### 🔗 Bitcoin Core Integration (Advanced)
 
-For maximum decentralization, run your own Bitcoin Core node to create custom block templates:
+For maximum decentralization, run your own Bitcoin Core node to create custom block templates.
+
+#### Option 1: Managed Mode (Recommended)
+
+Let btcminer handle everything automatically:
 
 ```ini
 # btcminer.conf
 BitcoindEnabled = true
+BitcoindManaged = true
+BitcoindPrune = 10000        # ~10GB pruned node
+```
+
+This will:
+- Download Bitcoin Core v28.0 from bitcoincore.org
+- Install to `~/.local/share/bitcoin-core`
+- Generate `bitcoin.conf` with optimal settings
+- Start/stop bitcoind with the miner
+
+#### Option 2: Manual Setup
+
+If you prefer to manage Bitcoin Core yourself:
+
+```ini
+# btcminer.conf
+BitcoindEnabled = true
+BitcoindManaged = false
 BitcoindHost = 127.0.0.1
 BitcoindRpcPort = 8332
 BitcoindRpcUser = your_username
 BitcoindRpcPassword = your_password
-BitcoindPrune = 10000        # ~10GB pruned node (550 = minimum)
+BitcoindPrune = 10000
 ```
 
-**Quick Setup:**
+Configure your `bitcoin.conf`:
 
-1. Install [Bitcoin Core](https://bitcoin.org/en/download)
+```ini
+server=1
+rpcuser=your_username
+rpcpassword=your_password
+prune=10000
+```
 
-2. Configure `bitcoin.conf`:
+#### Stratum V2 (Experimental)
 
-   ```ini
-   server=1
-   rpcuser=your_username
-   rpcpassword=your_password
-   prune=10000
-   ```
+Native Stratum V2 requires Bitcoin Core v30+ (not yet released). Once available:
 
-3. Start `bitcoind` and wait for sync (~10GB download)
-
-4. Enable in btcminer.conf with your RPC credentials
+```ini
+BitcoindSv2 = true
+```
 
 **Benefits:**
 
 - 🎯 Full transaction selection control
 - 🔐 No pool template dependency
-- ⚡ Stratum V2 support (experimental, requires Bitcoin Core v30+)
+- 📦 Choose which transactions to include
+- ⚡ Stratum V2 support (when Bitcoin Core v30+ releases)
 
 **Requirements:**
 
 - ~10GB disk space (pruned) or 600GB+ (full node)
 - ~4GB RAM
 - SSD recommended
+- Initial sync: ~2-4 hours (pruned)
 
 &nbsp;
 
