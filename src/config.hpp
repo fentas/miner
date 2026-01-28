@@ -16,6 +16,8 @@ struct Config {
     std::string password = "x";
     unsigned threads = 0;
     unsigned stats_interval = 10;
+    uint16_t web_port = 8080;
+    std::string web_dir = "web";
 };
 
 inline std::string trim(const std::string& s) {
@@ -64,6 +66,10 @@ inline bool load(const std::string& filename, Config& cfg) {
             cfg.threads = static_cast<unsigned>(std::stoul(value));
         } else if (key_lower == "statsinterval") {
             cfg.stats_interval = static_cast<unsigned>(std::stoul(value));
+        } else if (key_lower == "webport") {
+            cfg.web_port = static_cast<uint16_t>(std::stoul(value));
+        } else if (key_lower == "webdir") {
+            cfg.web_dir = value;
         }
     }
 

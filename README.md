@@ -8,6 +8,8 @@ A high-performance CPU Bitcoin miner written in C++17 with SHA-NI hardware accel
 - **Multi-threaded Mining**: Scales across all CPU cores
 - **Stratum Protocol**: Compatible with solo.ckpool.org and other stratum pools
 - **Midstate Optimization**: Pre-computes first 64 bytes of block header
+- **Web Dashboard**: Real-time stats, hashrate chart, settings UI
+- **WebSocket Live Updates**: Stats broadcast to browser in real-time
 - **Config File Support**: Easy configuration via `btcminer.conf`
 - **Comprehensive Test Suite**: Verify correctness with `make test`
 
@@ -65,6 +67,12 @@ Threads = 0
 
 # Stats reporting interval in seconds
 StatsInterval = 10
+
+# Web interface port (0 to disable)
+WebPort = 8080
+
+# Web files directory
+WebDir = web
 ```
 
 ### Command Line Options
@@ -78,6 +86,7 @@ Options:
   -u, --user <address>     Bitcoin address for mining rewards
   -p, --pass <password>    Pool password (default: x)
   -t, --threads <n>        Number of mining threads (default: all cores)
+  -w, --web <port>         Web interface port (default: 8080, 0 to disable)
   -h, --help               Show this help message
 ```
 
@@ -112,6 +121,8 @@ make
 ├── README.md          # This file
 ├── docs/              # Documentation
 │   └── ARCHITECTURE.md
+├── web/               # Web interface
+│   └── index.html     # Dashboard UI
 └── src/
     ├── main.cpp       # Entry point and CLI
     ├── config.hpp     # Configuration parser
@@ -120,8 +131,32 @@ make
     ├── stratum.cpp
     ├── miner.hpp      # Multi-threaded miner core
     ├── miner.cpp
+    ├── webserver.hpp  # Built-in HTTP/WebSocket server
     └── test.cpp       # Test suite
 ```
+
+## Web Interface
+
+The miner includes a built-in web dashboard accessible at `http://localhost:8080`.
+
+**Dashboard Features:**
+
+- **Real-time Stats**: Hashrate, total hashes, shares, uptime
+- **Live Hashrate Chart**: Visual history of mining performance
+- **Settings Panel**: View and configure mining settings
+- **Log Viewer**: Real-time mining log output
+- **WebSocket Updates**: Stats update automatically without page refresh
+
+**API Endpoints:**
+
+| Endpoint        | Method    | Description                |
+|-----------------|-----------|----------------------------|
+| `/api/stats`    | GET       | Current mining statistics  |
+| `/api/settings` | GET       | Current configuration      |
+| `/api/settings` | POST      | Update configuration       |
+| `/ws`           | WebSocket | Real-time stats stream     |
+
+**Disabling:** Set `WebPort = 0` in config or use `-w 0` on command line.
 
 ## How It Works
 

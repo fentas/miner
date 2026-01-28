@@ -15,3 +15,9 @@ Threads = 0
 
 # Stats reporting interval in seconds
 StatsInterval = 10
+
+# Web interface port (0 to disable)
+WebPort = 8080
+
+# Web files directory
+WebDir = web
