@@ -1044,6 +1044,74 @@
                     </div>
                 </div>
 
+                <div class="settings-group">
+                    <h3>Bitcoin Core Integration <span class="stratum-badge v2">ADVANCED</span></h3>
+                    <div class="pool-preset-info visible" style="margin-bottom: 15px;">
+                        Run your own pruned Bitcoin Core node (~10GB) for true decentralization with custom block templates.
+                        This bypasses pool template control and gives you sovereignty over transaction selection.
+                    </div>
+                    <div class="form-row-toggle">
+                        <div>
+                            <label>Enable Bitcoin Core</label>
+                            <div class="toggle-description">Connect to local bitcoind for block templates</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="bitcoind-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div id="bitcoind-settings" style="display: none;">
+                        <div class="form-row">
+                            <label>RPC Host</label>
+                            <input type="text" id="bitcoind-host" value="127.0.0.1" placeholder="127.0.0.1">
+                        </div>
+                        <div class="form-row">
+                            <label>RPC Port</label>
+                            <input type="number" id="bitcoind-rpc-port" value="8332" placeholder="8332">
+                        </div>
+                        <div class="form-row">
+                            <label>RPC Username</label>
+                            <input type="text" id="bitcoind-rpc-user" placeholder="From bitcoin.conf">
+                        </div>
+                        <div class="form-row">
+                            <label>RPC Password</label>
+                            <input type="password" id="bitcoind-rpc-password" placeholder="From bitcoin.conf">
+                        </div>
+                        <div class="form-row">
+                            <label>Prune Size (MB)</label>
+                            <div>
+                                <input type="number" id="bitcoind-prune" value="10000" min="0" placeholder="10000">
+                                <div class="toggle-description">0 = full node, 550 = minimum, 10000 = recommended (~10GB)</div>
+                            </div>
+                        </div>
+                        <div class="form-row-toggle">
+                            <div>
+                                <label>Enable Stratum V2</label>
+                                <div class="toggle-description">Experimental - requires Bitcoin Core v30+</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="bitcoind-sv2">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div id="bitcoind-status" class="gpu-stats">
+                            <div class="gpu-stats-row">
+                                <span class="gpu-stats-label">Connection Status</span>
+                                <span class="gpu-stats-value" id="bitcoind-status-text">Not connected</span>
+                            </div>
+                            <div class="gpu-stats-row">
+                                <span class="gpu-stats-label">Block Height</span>
+                                <span class="gpu-stats-value" id="bitcoind-block-height">-</span>
+                            </div>
+                            <div class="gpu-stats-row">
+                                <span class="gpu-stats-label">Sync Progress</span>
+                                <span class="gpu-stats-value" id="bitcoind-sync-progress">-</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-test-bitcoind" style="margin-top: 10px;">Test Connection</button>
+                    </div>
+                </div>
+
                 <div class="button-group">
                     <button class="btn btn-primary" id="save-settings">Save Settings</button>
                     <button class="btn btn-success" id="save-restart">Save & Restart</button>
@@ -1502,6 +1570,59 @@
             }
         }
 
+        // Update Bitcoin Core settings visibility
+        function updateBitcoindStatus(enabled) {
+            const bitcoindSettings = document.getElementById('bitcoind-settings');
+            if (bitcoindSettings) {
+                bitcoindSettings.style.display = enabled ? 'block' : 'none';
+            }
+        }
+
+        // Test Bitcoin Core connection
+        async function testBitcoindConnection() {
+            const statusEl = document.getElementById('bitcoind-status-text');
+            const blockEl = document.getElementById('bitcoind-block-height');
+            const syncEl = document.getElementById('bitcoind-sync-progress');
+
+            statusEl.textContent = 'Testing...';
+            statusEl.style.color = 'var(--text-secondary)';
+
+            try {
+                const res = await fetch('/api/bitcoind/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        host: document.getElementById('bitcoind-host').value,
+                        port: parseInt(document.getElementById('bitcoind-rpc-port').value) || 8332,
+                        user: document.getElementById('bitcoind-rpc-user').value,
+                        password: document.getElementById('bitcoind-rpc-password').value
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = 'Connected';
+                    statusEl.style.color = 'var(--success)';
+                    blockEl.textContent = data.block_height || '-';
+                    syncEl.textContent = data.sync_progress ? (data.sync_progress * 100).toFixed(1) + '%' : '100%';
+                    addLog('Bitcoin Core connection successful', 'success');
+                } else {
+                    statusEl.textContent = 'Failed';
+                    statusEl.style.color = 'var(--danger)';
+                    blockEl.textContent = '-';
+                    syncEl.textContent = '-';
+                    addLog('Bitcoin Core connection failed: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error';
+                statusEl.style.color = 'var(--danger)';
+                blockEl.textContent = '-';
+                syncEl.textContent = '-';
+                addLog('Bitcoin Core test failed: ' + e.message, 'error');
+            }
+        }
+
         // Load settings
         async function loadSettings() {
             try {
@@ -1527,9 +1648,19 @@
                 document.getElementById('enable-cpu').checked = data.enable_cpu !== false; // default true
                 document.getElementById('enable-gpu').checked = data.enable_gpu || false;
 
+                // Bitcoin Core settings
+                document.getElementById('bitcoind-enabled').checked = data.bitcoind_enabled || false;
+                document.getElementById('bitcoind-host').value = data.bitcoind_host || '127.0.0.1';
+                document.getElementById('bitcoind-rpc-port').value = data.bitcoind_rpc_port || 8332;
+                document.getElementById('bitcoind-rpc-user').value = data.bitcoind_rpc_user || '';
+                document.getElementById('bitcoind-rpc-password').value = data.bitcoind_rpc_password || '';
+                document.getElementById('bitcoind-prune').value = data.bitcoind_prune || 10000;
+                document.getElementById('bitcoind-sv2').checked = data.bitcoind_sv2 || false;
+
                 updatePoolPreset();
                 updateCpuStatus(data.enable_cpu !== false);
                 updateGpuStatus(data.enable_gpu || false);
+                updateBitcoindStatus(data.bitcoind_enabled || false);
 
                 // Validate address on load
                 if (data.address) {
@@ -1574,7 +1705,15 @@
                 stats_interval: parseInt(document.getElementById('stats-interval').value) || 10,
                 enable_cpu: document.getElementById('enable-cpu').checked,
                 enable_gpu: document.getElementById('enable-gpu').checked,
-                stratum_version: stratumVersion
+                stratum_version: stratumVersion,
+                // Bitcoin Core settings
+                bitcoind_enabled: document.getElementById('bitcoind-enabled').checked,
+                bitcoind_host: document.getElementById('bitcoind-host').value,
+                bitcoind_rpc_port: parseInt(document.getElementById('bitcoind-rpc-port').value) || 8332,
+                bitcoind_rpc_user: document.getElementById('bitcoind-rpc-user').value,
+                bitcoind_rpc_password: document.getElementById('bitcoind-rpc-password').value,
+                bitcoind_prune: parseInt(document.getElementById('bitcoind-prune').value) || 10000,
+                bitcoind_sv2: document.getElementById('bitcoind-sv2').checked
             };
 
             try {
@@ -1927,6 +2066,14 @@
         document.getElementById('enable-gpu').addEventListener('change', (e) => {
             updateGpuStatus(e.target.checked);
         });
+
+        // Bitcoin Core toggle change handler
+        document.getElementById('bitcoind-enabled').addEventListener('change', (e) => {
+            updateBitcoindStatus(e.target.checked);
+        });
+
+        // Bitcoin Core test connection button
+        document.getElementById('btn-test-bitcoind').addEventListener('click', testBitcoindConnection);
 
         // Address validation on input
         document.getElementById('payout-address').addEventListener('input', (e) => {

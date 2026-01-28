@@ -106,3 +106,46 @@ ReconnectDelay = 5
 # Maximum delay between reconnection attempts (seconds)
 # Uses exponential backoff up to this limit
 MaxReconnectDelay = 300
+
+# ============================================
+# BITCOIN CORE INTEGRATION (Advanced)
+# ============================================
+# For true decentralization with Stratum V2 and custom block templates.
+# Requires running your own Bitcoin Core node (can be pruned).
+
+# Enable Bitcoin Core integration (default: false)
+# When enabled, miner will create its own block templates for maximum decentralization
+BitcoindEnabled = false
+
+# Bitcoin Core RPC connection settings
+# These must match your bitcoin.conf settings
+BitcoindHost = 127.0.0.1
+BitcoindRpcPort = 8332
+# BitcoindRpcUser = your_rpc_username
+# BitcoindRpcPassword = your_rpc_password
+
+# Bitcoin Core data directory (optional, uses default if not set)
+# Linux default: ~/.bitcoin
+# Windows default: %APPDATA%\Bitcoin
+# BitcoindDatadir = /path/to/bitcoin/data
+
+# Pruned node size in MB (default: 10000 = ~10GB)
+# Set to 0 for full archival node (requires 600GB+)
+# Minimum pruned size is 550 MB
+# Recommended: 10000 (keeps recent blocks for reorg protection)
+BitcoindPrune = 10000
+
+# Enable Stratum V2 with Bitcoin Core (EXPERIMENTAL)
+# Requires Bitcoin Core v30+ compiled with --enable-sv2
+# When enabled, uses native SV2 protocol for block template negotiation
+BitcoindSv2 = false
+
+# Quick setup for pruned Bitcoin Core node:
+# 1. Install Bitcoin Core: https://bitcoin.org/en/download
+# 2. Create bitcoin.conf:
+#    server=1
+#    rpcuser=your_username
+#    rpcpassword=your_password
+#    prune=10000
+# 3. Start bitcoind and wait for initial sync (~10GB download)
+# 4. Enable BitcoindEnabled above and set RPC credentials

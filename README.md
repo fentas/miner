@@ -126,6 +126,51 @@ WebPort = 8080
 
 &nbsp;
 
+### 🔗 Bitcoin Core Integration (Advanced)
+
+For maximum decentralization, run your own Bitcoin Core node to create custom block templates:
+
+```ini
+# btcminer.conf
+BitcoindEnabled = true
+BitcoindHost = 127.0.0.1
+BitcoindRpcPort = 8332
+BitcoindRpcUser = your_username
+BitcoindRpcPassword = your_password
+BitcoindPrune = 10000        # ~10GB pruned node (550 = minimum)
+```
+
+**Quick Setup:**
+
+1. Install [Bitcoin Core](https://bitcoin.org/en/download)
+
+2. Configure `bitcoin.conf`:
+
+   ```ini
+   server=1
+   rpcuser=your_username
+   rpcpassword=your_password
+   prune=10000
+   ```
+
+3. Start `bitcoind` and wait for sync (~10GB download)
+
+4. Enable in btcminer.conf with your RPC credentials
+
+**Benefits:**
+
+- 🎯 Full transaction selection control
+- 🔐 No pool template dependency
+- ⚡ Stratum V2 support (experimental, requires Bitcoin Core v30+)
+
+**Requirements:**
+
+- ~10GB disk space (pruned) or 600GB+ (full node)
+- ~4GB RAM
+- SSD recommended
+
+&nbsp;
+
 ### 💻 Command Line
 
 ```
