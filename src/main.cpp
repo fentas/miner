@@ -4,6 +4,7 @@
 #include "webserver.hpp"
 #include "idle_monitor.hpp"
 #include "colors.hpp"
+#include "version.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -50,6 +51,7 @@ void print_usage(const char* prog) {
               << "  -w, --web <port>         Web interface port (default: 8080, 0 to disable)\n"
               << "      --no-color           Disable colored output\n"
               << "      --color              Enable colored output (default)\n"
+              << "  -v, --version            Show version information\n"
               << "  -h, --help               Show this help message\n"
               << "\nConfig file format (btcminer.conf):\n"
               << "  Pool = solo.ckpool.org:3333\n"
@@ -522,6 +524,9 @@ int main(int argc, char* argv[]) {
         if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
+        } else if (arg == "-v" || arg == "--version") {
+            std::cout << "btcminer " << version::get_full_version() << std::endl;
+            return 0;
         } else if ((arg == "-c" || arg == "--config") && i + 1 < argc) {
             i++;  // Already handled
         } else if ((arg == "-o" || arg == "--pool") && i + 1 < argc) {
@@ -601,7 +606,7 @@ int main(int argc, char* argv[]) {
     // Print banner
     std::cout << "\n"
               << colors::cyan() << "╔══════════════════════════════════════════════════════════╗\n"
-              << "║" << colors::bright_yellow() << "            BTC Miner - CPU Solo Mining                   " << colors::cyan() << "║\n"
+              << "║" << colors::bright_yellow() << "         BTC Miner v" << std::left << std::setw(38) << version::get_version() << colors::cyan() << "║\n"
               << "╠══════════════════════════════════════════════════════════╣" << colors::reset() << "\n"
               << colors::cyan() << "║" << colors::reset() << "  Pool: " << colors::bright_green() << std::left << std::setw(49) << (cfg.pool_host + ":" + std::to_string(cfg.pool_port)) << colors::cyan() << "║" << colors::reset() << "\n"
               << colors::cyan() << "║" << colors::reset() << "  User: " << colors::bright_cyan() << std::left << std::setw(49) << cfg.payout_address.substr(0, 49) << colors::cyan() << "║" << colors::reset() << "\n"

@@ -1,9 +1,31 @@
 cmake_minimum_required(VERSION 3.16)
-project(btcminer VERSION 1.0.0 LANGUAGES CXX)
+project(btcminer VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Get git hash
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
+if(NOT GIT_HASH)
+    set(GIT_HASH "unknown")
+endif()
+
+# Build type string
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(BUILD_TYPE "release")
+else()
+    set(BUILD_TYPE "dev")
+endif()
+
+message(STATUS "Version: ${PROJECT_VERSION} (${GIT_HASH})")
 
 # Detect CPU features
 include(CheckCXXCompilerFlag)
@@ -41,6 +63,12 @@ if(ENABLE_CUDA OR ENABLE_OPENCL)
 endif()
 
 add_executable(btcminer ${SOURCES})
+
+# Version info
+target_compile_definitions(btcminer PRIVATE
+    BTCMINER_GIT_HASH="${GIT_HASH}"
+    BTCMINER_BUILD_TYPE="${BUILD_TYPE}"
+)
 
 # CPU feature flags
 if(HAVE_SHA_NI)
