@@ -9,6 +9,7 @@ namespace test_stratum { void run_all(); }
 namespace test_stratum_v2 { void run_all(); }
 namespace test_gpu { void run_all(); }
 namespace test_config { void run_all(); }
+namespace test_connection { void run_all(); }
 
 int main(int argc, char* argv[]) {
     std::cout << "╔══════════════════════════════════════════════════════════╗\n"
@@ -22,27 +23,31 @@ int main(int argc, char* argv[]) {
     bool run_stratum_v2 = true;
     bool run_gpu = true;
     bool run_config = true;
+    bool run_connection = true;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--sha256") {
             run_sha256 = true;
-            run_avx = run_stratum = run_stratum_v2 = run_gpu = run_config = false;
+            run_avx = run_stratum = run_stratum_v2 = run_gpu = run_config = run_connection = false;
         } else if (arg == "--avx") {
             run_avx = true;
-            run_sha256 = run_stratum = run_stratum_v2 = run_gpu = run_config = false;
+            run_sha256 = run_stratum = run_stratum_v2 = run_gpu = run_config = run_connection = false;
         } else if (arg == "--stratum") {
             run_stratum = true;
-            run_sha256 = run_avx = run_stratum_v2 = run_gpu = run_config = false;
+            run_sha256 = run_avx = run_stratum_v2 = run_gpu = run_config = run_connection = false;
         } else if (arg == "--stratum-v2") {
             run_stratum_v2 = true;
-            run_sha256 = run_avx = run_stratum = run_gpu = run_config = false;
+            run_sha256 = run_avx = run_stratum = run_gpu = run_config = run_connection = false;
         } else if (arg == "--gpu") {
             run_gpu = true;
-            run_sha256 = run_avx = run_stratum = run_stratum_v2 = run_config = false;
+            run_sha256 = run_avx = run_stratum = run_stratum_v2 = run_config = run_connection = false;
         } else if (arg == "--config") {
             run_config = true;
-            run_sha256 = run_avx = run_stratum = run_stratum_v2 = run_gpu = false;
+            run_sha256 = run_avx = run_stratum = run_stratum_v2 = run_gpu = run_connection = false;
+        } else if (arg == "--connection") {
+            run_connection = true;
+            run_sha256 = run_avx = run_stratum = run_stratum_v2 = run_gpu = run_config = false;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "\nUsage: " << argv[0] << " [OPTIONS]\n\n"
                       << "Options:\n"
@@ -52,6 +57,7 @@ int main(int argc, char* argv[]) {
                       << "  --stratum-v2  Run only Stratum V2 tests\n"
                       << "  --gpu         Run only GPU tests\n"
                       << "  --config      Run only config validation tests\n"
+                      << "  --connection  Run only pool connection tests\n"
                       << "  --help        Show this help\n"
                       << "\nWithout options, all tests are run.\n";
             return 0;
@@ -81,6 +87,10 @@ int main(int argc, char* argv[]) {
 
     if (run_config) {
         test_config::run_all();
+    }
+
+    if (run_connection) {
+        test_connection::run_all();
     }
 
     // Print summary

@@ -676,6 +676,115 @@
         canvas {
             display: block;
         }
+
+        /* Settings Validation */
+        .validation-message {
+            font-size: 0.85rem;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .validation-message.error {
+            display: block;
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+
+        .validation-message.warning {
+            display: block;
+            background: rgba(255, 165, 2, 0.15);
+            color: #ffa502;
+            border: 1px solid rgba(255, 165, 2, 0.3);
+        }
+
+        .validation-message.success {
+            display: block;
+            background: rgba(0, 208, 132, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(0, 208, 132, 0.3);
+        }
+
+        /* Settings Toggle Row */
+        .form-row-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+
+        .form-row-toggle label {
+            margin: 0;
+        }
+
+        .toggle-description {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Stratum Badge */
+        .stratum-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .stratum-badge.v1 {
+            background: rgba(136, 136, 136, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .stratum-badge.v2 {
+            background: rgba(0, 208, 132, 0.2);
+            color: var(--success);
+        }
+
+        /* Pool preset info */
+        .pool-preset-info {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            padding: 10px 14px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            display: none;
+        }
+
+        .pool-preset-info.visible {
+            display: block;
+        }
+
+        /* GPU Stats Card */
+        .gpu-stats {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-top: 10px;
+        }
+
+        .gpu-stats-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+        }
+
+        .gpu-stats-label {
+            color: var(--text-secondary);
+        }
+
+        .gpu-stats-value {
+            font-weight: 600;
+            color: var(--accent);
+        }
     </style>
 </head>
 <body>
@@ -729,8 +838,16 @@
                     </div>
                     <div class="benchmark-results" id="benchmark-results">
                         <div class="benchmark-stat">
-                            <span class="benchmark-stat-label">Benchmark Hashrate</span>
+                            <span class="benchmark-stat-label">Total Hashrate</span>
                             <span class="benchmark-stat-value" id="benchmark-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">CPU Hashrate</span>
+                            <span class="benchmark-stat-value" id="benchmark-cpu-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat" id="benchmark-gpu-row" style="display: none;">
+                            <span class="benchmark-stat-label">GPU Hashrate</span>
+                            <span class="benchmark-stat-value" id="benchmark-gpu-hashrate">0 H/s</span>
                         </div>
                         <div class="benchmark-stat">
                             <span class="benchmark-stat-label">Total Hashes</span>
@@ -786,9 +903,14 @@
 
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-label">Hashrate</div>
+                    <div class="stat-label">Hashrate (CPU)</div>
                     <div class="stat-value accent" id="hashrate">0 H/s</div>
-                    <div class="stat-subtitle">Current mining speed</div>
+                    <div class="stat-subtitle">CPU mining speed</div>
+                </div>
+                <div class="stat-card" id="gpu-hashrate-card" style="display: none;">
+                    <div class="stat-label">Hashrate (GPU)</div>
+                    <div class="stat-value accent" id="dashboard-gpu-hashrate">0 H/s</div>
+                    <div class="stat-subtitle" id="gpu-device-info">GPU device</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Total Hashes</div>
@@ -841,12 +963,29 @@
                 <div class="settings-group">
                     <h3>Pool Configuration</h3>
                     <div class="form-row">
-                        <label>Pool Address</label>
-                        <input type="text" id="pool-host" placeholder="solo.ckpool.org:3333">
+                        <label>Solo Pool Preset</label>
+                        <div>
+                            <select id="solo-pool-preset">
+                                <option value="ckpool">CKPool (V1, 2% fee)</option>
+                                <option value="braiins">Braiins (V1, 0.5% fee)</option>
+                                <option value="ocean">Ocean (V1, 0% fee)</option>
+                                <option value="custom">Custom Pool</option>
+                            </select>
+                            <div id="pool-preset-info" class="pool-preset-info"></div>
+                        </div>
+                    </div>
+                    <div class="form-row" id="pool-host-row">
+                        <label>Pool Address <span class="stratum-badge v1" id="stratum-badge">V1</span></label>
+                        <div>
+                            <input type="text" id="pool-host" placeholder="solo.ckpool.org:3333">
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Payout Address</label>
-                        <input type="text" id="payout-address" placeholder="Your Bitcoin address">
+                        <div>
+                            <input type="text" id="payout-address" placeholder="Your Bitcoin address">
+                            <div id="address-validation" class="validation-message"></div>
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Password</label>
@@ -856,9 +995,40 @@
 
                 <div class="settings-group">
                     <h3>Mining Configuration</h3>
-                    <div class="form-row">
-                        <label>Threads</label>
+                    <div id="mining-mode-validation" class="validation-message" style="margin-bottom: 15px;"></div>
+                    <div class="form-row-toggle">
+                        <div>
+                            <label>Enable CPU Mining</label>
+                            <div class="toggle-description">Use CPU threads for mining</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enable-cpu" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div id="cpu-threads-row" class="form-row" style="margin-left: 20px;">
+                        <label>CPU Threads</label>
                         <input type="number" id="threads-input" min="0" placeholder="0 = auto">
+                    </div>
+                    <div class="form-row-toggle">
+                        <div>
+                            <label>Enable GPU Mining</label>
+                            <div class="toggle-description">Use CUDA/OpenCL for additional hashrate</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enable-gpu">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div id="gpu-status" class="gpu-stats" style="display: none;">
+                        <div class="gpu-stats-row">
+                            <span class="gpu-stats-label">GPU Status</span>
+                            <span class="gpu-stats-value" id="gpu-status-text">Detecting...</span>
+                        </div>
+                        <div class="gpu-stats-row">
+                            <span class="gpu-stats-label">GPU Hashrate</span>
+                            <span class="gpu-stats-value" id="gpu-hashrate">-</span>
+                        </div>
                     </div>
                     <div class="form-row">
                         <label>Stats Interval (sec)</label>
@@ -1167,6 +1337,41 @@
                 uptime.textContent = formatUptime(data.uptime * 1000);
             }
 
+            // GPU stats
+            if (data.gpu_enabled !== undefined) {
+                const gpuCard = document.getElementById('gpu-hashrate-card');
+                if (gpuCard) {
+                    gpuCard.style.display = data.gpu_enabled ? 'block' : 'none';
+                }
+            }
+
+            if (data.gpu_hashrate !== undefined) {
+                // Update settings panel GPU hashrate
+                const gpuHrEl = document.getElementById('gpu-hashrate');
+                if (gpuHrEl) {
+                    gpuHrEl.textContent = data.gpu_hashrate > 0 ? formatHashrate(data.gpu_hashrate) : '-';
+                }
+                // Update dashboard GPU hashrate
+                const dashGpuHrEl = document.getElementById('dashboard-gpu-hashrate');
+                if (dashGpuHrEl) {
+                    dashGpuHrEl.textContent = data.gpu_hashrate > 0 ? formatHashrate(data.gpu_hashrate) : '0 H/s';
+                }
+            }
+
+            if (data.gpu_status !== undefined) {
+                const gpuStatusEl = document.getElementById('gpu-status-text');
+                if (gpuStatusEl) {
+                    gpuStatusEl.textContent = data.gpu_status;
+                }
+            }
+
+            if (data.gpu_device !== undefined) {
+                const gpuDeviceEl = document.getElementById('gpu-device-info');
+                if (gpuDeviceEl) {
+                    gpuDeviceEl.textContent = data.gpu_device || 'GPU device';
+                }
+            }
+
             if (data.log) {
                 addLog(data.log, data.log_type || 'info');
             }
@@ -1176,17 +1381,160 @@
             }
         }
 
+        // Pool presets configuration
+        const poolPresets = {
+            ckpool: {
+                host: 'solo.ckpool.org',
+                port: 3333,
+                stratum: 'v1',
+                description: 'Solo mining pool with Stratum V1. 2% fee on successful block rewards. Reliable and widely used.'
+            },
+            braiins: {
+                host: 'solo.stratum.braiins.com',
+                port: 3333,
+                stratum: 'v1',
+                description: 'Braiins Solo mining pool with Stratum V1. 0.5% fee on found blocks (paid to CKPool authors).'
+            },
+            ocean: {
+                host: 'mine.ocean.xyz',
+                port: 3334,
+                stratum: 'v1',
+                description: 'Ocean Pool with DATUM support. 0% pool fee - miners only pay Bitcoin transaction fees. Supports custom block templates.'
+            }
+        };
+
+        // Update pool UI based on preset selection
+        function updatePoolPreset() {
+            const preset = document.getElementById('solo-pool-preset').value;
+            const poolHostInput = document.getElementById('pool-host');
+            const stratumBadge = document.getElementById('stratum-badge');
+            const presetInfo = document.getElementById('pool-preset-info');
+
+            if (preset === 'custom') {
+                poolHostInput.disabled = false;
+                poolHostInput.placeholder = 'host:port';
+                stratumBadge.className = 'stratum-badge v1';
+                stratumBadge.textContent = 'V1';
+                presetInfo.classList.remove('visible');
+            } else {
+                const config = poolPresets[preset];
+                poolHostInput.value = `${config.host}:${config.port}`;
+                poolHostInput.disabled = true;
+                stratumBadge.className = `stratum-badge ${config.stratum}`;
+                stratumBadge.textContent = config.stratum.toUpperCase();
+                presetInfo.textContent = config.description;
+                presetInfo.classList.add('visible');
+            }
+        }
+
+        // Validate Bitcoin address
+        function validateAddress(address) {
+            const validationEl = document.getElementById('address-validation');
+
+            if (!address) {
+                validationEl.className = 'validation-message error';
+                validationEl.textContent = 'Bitcoin address is required';
+                return false;
+            }
+
+            // Basic validation patterns
+            const legacy = /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/;  // 1... or 3...
+            const bech32 = /^bc1[a-z0-9]{39,59}$/i;               // bc1...
+            const bech32m = /^bc1p[a-z0-9]{58}$/i;                // bc1p... (taproot)
+
+            if (legacy.test(address)) {
+                validationEl.className = 'validation-message success';
+                validationEl.textContent = 'Valid legacy address';
+                return true;
+            } else if (bech32.test(address) || bech32m.test(address)) {
+                validationEl.className = 'validation-message success';
+                validationEl.textContent = 'Valid SegWit address';
+                return true;
+            } else if (address.length < 26) {
+                validationEl.className = 'validation-message error';
+                validationEl.textContent = 'Address is too short';
+                return false;
+            } else {
+                validationEl.className = 'validation-message warning';
+                validationEl.textContent = 'Address format not recognized - verify before saving';
+                return true; // Allow save but warn
+            }
+        }
+
+        // Update CPU status display
+        function updateCpuStatus(enabled) {
+            const cpuThreadsRow = document.getElementById('cpu-threads-row');
+            if (cpuThreadsRow) {
+                cpuThreadsRow.style.display = enabled ? 'grid' : 'none';
+            }
+            validateMiningMode();
+        }
+
+        // Update GPU status display
+        function updateGpuStatus(enabled) {
+            // Settings panel GPU status
+            const gpuStatus = document.getElementById('gpu-status');
+            if (gpuStatus) {
+                gpuStatus.style.display = enabled ? 'block' : 'none';
+            }
+            // Dashboard GPU hashrate card
+            const gpuCard = document.getElementById('gpu-hashrate-card');
+            if (gpuCard) {
+                gpuCard.style.display = enabled ? 'block' : 'none';
+            }
+            validateMiningMode();
+        }
+
+        // Validate mining mode - at least one must be enabled
+        function validateMiningMode() {
+            const enableCpu = document.getElementById('enable-cpu').checked;
+            const enableGpu = document.getElementById('enable-gpu').checked;
+            const validationEl = document.getElementById('mining-mode-validation');
+
+            if (!enableCpu && !enableGpu) {
+                validationEl.className = 'validation-message error';
+                validationEl.textContent = 'At least one mining mode must be enabled (CPU or GPU)';
+                return false;
+            } else {
+                validationEl.className = 'validation-message';
+                validationEl.textContent = '';
+                return true;
+            }
+        }
+
         // Load settings
         async function loadSettings() {
             try {
                 const res = await fetch('/api/settings');
                 const data = await res.json();
 
-                document.getElementById('pool-host').value = data.pool || '';
+                // Determine pool preset from host
+                const poolHost = data.pool || '';
+                let detectedPreset = 'custom';
+                for (const [key, config] of Object.entries(poolPresets)) {
+                    if (poolHost.includes(config.host)) {
+                        detectedPreset = key;
+                        break;
+                    }
+                }
+
+                document.getElementById('solo-pool-preset').value = detectedPreset;
+                document.getElementById('pool-host').value = poolHost;
                 document.getElementById('payout-address').value = data.address || '';
                 document.getElementById('pool-password').value = data.password || 'x';
                 document.getElementById('threads-input').value = data.threads || 0;
                 document.getElementById('stats-interval').value = data.stats_interval || 10;
+                document.getElementById('enable-cpu').checked = data.enable_cpu !== false; // default true
+                document.getElementById('enable-gpu').checked = data.enable_gpu || false;
+
+                updatePoolPreset();
+                updateCpuStatus(data.enable_cpu !== false);
+                updateGpuStatus(data.enable_gpu || false);
+
+                // Validate address on load
+                if (data.address) {
+                    validateAddress(data.address);
+                }
             } catch (e) {
                 addLog('Failed to load settings', 'error');
             }
@@ -1194,12 +1542,39 @@
 
         // Save settings
         async function saveSettings() {
+            const address = document.getElementById('payout-address').value;
+
+            // Validate before saving
+            if (!validateAddress(address)) {
+                addLog('Please fix validation errors before saving', 'error');
+                return;
+            }
+
+            // Validate mining mode
+            if (!validateMiningMode()) {
+                addLog('Please fix mining mode errors before saving', 'error');
+                return;
+            }
+
+            const preset = document.getElementById('solo-pool-preset').value;
+            let pool = document.getElementById('pool-host').value;
+            let stratumVersion = 'v1';
+
+            if (preset !== 'custom' && poolPresets[preset]) {
+                const config = poolPresets[preset];
+                pool = `${config.host}:${config.port}`;
+                stratumVersion = config.stratum;
+            }
+
             const settings = {
-                pool: document.getElementById('pool-host').value,
-                address: document.getElementById('payout-address').value,
+                pool: pool,
+                address: address,
                 password: document.getElementById('pool-password').value,
                 threads: parseInt(document.getElementById('threads-input').value) || 0,
-                stats_interval: parseInt(document.getElementById('stats-interval').value) || 10
+                stats_interval: parseInt(document.getElementById('stats-interval').value) || 10,
+                enable_cpu: document.getElementById('enable-cpu').checked,
+                enable_gpu: document.getElementById('enable-gpu').checked,
+                stratum_version: stratumVersion
             };
 
             try {
@@ -1212,7 +1587,8 @@
                 if (res.ok) {
                     addLog('Settings saved successfully', 'success');
                 } else {
-                    addLog('Failed to save settings', 'error');
+                    const errData = await res.json().catch(() => ({}));
+                    addLog('Failed to save settings: ' + (errData.error || 'Unknown error'), 'error');
                 }
             } catch (e) {
                 addLog('Failed to save settings: ' + e.message, 'error');
@@ -1335,6 +1711,22 @@
                 document.getElementById('benchmark-hashrate').textContent = formatHashrate(data.hashrate || 0);
                 document.getElementById('benchmark-hashes').textContent = formatNumber(data.total_hashes || 0);
                 document.getElementById('benchmark-time').textContent = (data.duration || 0).toFixed(1) + 's';
+
+                // CPU hashrate (total minus GPU, or just total if no GPU)
+                const cpuHashrate = (data.hashrate || 0) - (data.gpu_hashrate || 0);
+                document.getElementById('benchmark-cpu-hashrate').textContent = formatHashrate(cpuHashrate > 0 ? cpuHashrate : data.hashrate || 0);
+
+                // GPU hashrate
+                const gpuRow = document.getElementById('benchmark-gpu-row');
+                if (data.gpu_hashrate !== undefined && data.gpu_hashrate > 0) {
+                    gpuRow.style.display = 'flex';
+                    document.getElementById('benchmark-gpu-hashrate').textContent = formatHashrate(data.gpu_hashrate);
+                } else if (document.getElementById('enable-gpu').checked) {
+                    gpuRow.style.display = 'flex';
+                    document.getElementById('benchmark-gpu-hashrate').textContent = 'Initializing...';
+                } else {
+                    gpuRow.style.display = 'none';
+                }
 
                 // Check if benchmark completed naturally
                 if (data.state && data.state !== 'benchmarking' && minerState === 'benchmarking') {
@@ -1521,6 +1913,24 @@
         document.getElementById('reload-settings').addEventListener('click', loadSettings);
         document.getElementById('clear-logs').addEventListener('click', () => {
             logOutput.innerHTML = '';
+        });
+
+        // Pool preset change handler
+        document.getElementById('solo-pool-preset').addEventListener('change', updatePoolPreset);
+
+        // CPU toggle change handler
+        document.getElementById('enable-cpu').addEventListener('change', (e) => {
+            updateCpuStatus(e.target.checked);
+        });
+
+        // GPU toggle change handler
+        document.getElementById('enable-gpu').addEventListener('change', (e) => {
+            updateGpuStatus(e.target.checked);
+        });
+
+        // Address validation on input
+        document.getElementById('payout-address').addEventListener('input', (e) => {
+            validateAddress(e.target.value);
         });
 
         // Control button listeners

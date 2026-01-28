@@ -82,23 +82,47 @@ cmake .. [OPTIONS]
 # btcminer.conf
 
 # Solo Pool Preset (recommended)
-SoloPool = ckpool         # ckpool (V1) or braiins (V2)
+SoloPool = ckpool         # ckpool or braiins (both use Stratum V1)
 
 # Or manual configuration
 # Pool = solo.ckpool.org:3333
 # Stratum = v1
 
 PayoutAddress = bc1q...   # Your Bitcoin address (required)
-Threads = 0               # 0 = auto-detect
+
+# Mining mode - at least one must be enabled
+EnableCPU = true          # CPU mining (default: on)
+EnableGPU = false         # GPU mining (default: off)
+Threads = 0               # CPU threads (0 = auto-detect)
+
 WebPort = 8080
 ```
 
 **Pool Presets:**
 
-| Preset | Pool | Protocol |
-|--------|------|----------|
-| `ckpool` | solo.ckpool.org | Stratum V1 |
-| `braiins` | solo.braiins.com | Stratum V2 |
+| Preset    | Pool                      | Protocol   | Fee  |
+|-----------|---------------------------|------------|------|
+| `ckpool`  | solo.ckpool.org           | Stratum V1 | 2%   |
+| `braiins` | solo.stratum.braiins.com  | Stratum V1 | 0.5% |
+| `ocean`   | mine.ocean.xyz:3334       | Stratum V1 | 0%*  |
+
+> **Note on Fees:**
+>
+> - **Solo.ckpool**: 2% service fee on successful block rewards
+> - **Braiins Solo**: 0.5% fee on found blocks (paid to CKPool code authors)
+> - **Ocean Pool**: 0% pool fee (miners pay only Bitcoin transaction fees via DATUM)
+>
+> **Stratum V2 Pools** (require special setup):
+>
+> - **DMND Pool** (dmnd.work): 0% fee for solo mining - community project for network decentralization. Requires SV2 proxy setup.
+
+**Mining Modes:**
+
+| Mode      | EnableCPU | EnableGPU |
+|-----------|-----------|-----------|
+| CPU only  | true      | false     |
+| GPU only  | false     | true      |
+| CPU + GPU | true      | true      |
 
 &nbsp;
 

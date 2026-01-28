@@ -149,6 +149,7 @@ if(BUILD_TESTS)
         tests/test_stratum_v2.cpp
         tests/test_gpu.cpp
         tests/test_config.cpp
+        tests/test_connection.cpp
     )
 
     add_executable(btcminer_test ${TEST_SOURCES})
@@ -201,6 +202,7 @@ if(BUILD_TESTS)
     add_test(NAME test_stratum_v2 COMMAND btcminer_test --stratum-v2)
     add_test(NAME test_gpu COMMAND btcminer_test --gpu)
     add_test(NAME test_config COMMAND btcminer_test --config)
+    add_test(NAME test_connection COMMAND btcminer_test --connection)
 
     message(STATUS "Tests enabled")
 endif()

@@ -96,16 +96,16 @@ void test_validation_ckpool_v2_warning() {
     TEST_RESULT("CKPool with V2 generates warning", !result.warnings.empty());
 }
 
-void test_validation_braiins_v1_warning() {
-    TEST_GROUP("Config Validation - Braiins V1 Warning");
+void test_validation_braiins_solo_v1() {
+    TEST_GROUP("Config Validation - Braiins Solo V1");
 
     config::Config cfg;
     cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
-    cfg.pool_host = "solo.braiins.com";
-    cfg.stratum_version = "v1";  // Braiins supports V2
+    cfg.pool_host = "solo.stratum.braiins.com";
+    cfg.stratum_version = "v1";  // Braiins Solo uses V1 (CKPool stack)
 
     auto result = config::validate(cfg);
-    TEST_RESULT("Braiins with V1 generates warning", !result.warnings.empty());
+    TEST_RESULT("Braiins Solo with V1 is valid", result.valid);
 }
 
 void test_validation_zero_port() {
@@ -132,8 +132,8 @@ void test_pool_presets() {
     TEST_RESULT("CKPool uses V1", ckpool.stratum_version == "v1");
 
     const auto& braiins = presets.at(config::SoloPool::Braiins);
-    TEST_RESULT("Braiins host is correct", braiins.host == "solo.braiins.com");
-    TEST_RESULT("Braiins uses V2", braiins.stratum_version == "v2");
+    TEST_RESULT("Braiins host is correct", braiins.host == "solo.stratum.braiins.com");
+    TEST_RESULT("Braiins uses V1", braiins.stratum_version == "v1");
 }
 
 void test_high_thread_warning() {
@@ -145,6 +145,55 @@ void test_high_thread_warning() {
 
     auto result = config::validate(cfg);
     TEST_RESULT("High thread count generates warning", !result.warnings.empty());
+}
+
+void test_mining_mode_cpu_only() {
+    TEST_GROUP("Config Validation - CPU Only Mode");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.enable_cpu = true;
+    cfg.enable_gpu = false;
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("CPU-only mode is valid", result.valid);
+}
+
+void test_mining_mode_gpu_only() {
+    TEST_GROUP("Config Validation - GPU Only Mode");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.enable_cpu = false;
+    cfg.enable_gpu = true;
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("GPU-only mode is valid", result.valid);
+}
+
+void test_mining_mode_both() {
+    TEST_GROUP("Config Validation - CPU + GPU Mode");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.enable_cpu = true;
+    cfg.enable_gpu = true;
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("CPU + GPU mode is valid", result.valid);
+}
+
+void test_mining_mode_none_disabled() {
+    TEST_GROUP("Config Validation - No Mining Mode Error");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.enable_cpu = false;
+    cfg.enable_gpu = false;
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("No mining mode fails validation", !result.valid);
+    TEST_RESULT("Error mentions mining mode", !result.errors.empty());
 }
 
 void run_all() {
@@ -160,6 +209,10 @@ void run_all() {
     test_validation_zero_port();
     test_pool_presets();
     test_high_thread_warning();
+    test_mining_mode_cpu_only();
+    test_mining_mode_gpu_only();
+    test_mining_mode_both();
+    test_mining_mode_none_disabled();
 }
 
 } // namespace test_config

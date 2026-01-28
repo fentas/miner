@@ -7,8 +7,9 @@
 
 # Solo Pool Preset (recommended way to configure)
 # Options:
-#   ckpool  - solo.ckpool.org (Stratum V1) - widely used, reliable
-#   braiins - solo.braiins.com (Stratum V2) - more efficient protocol
+#   ckpool  - solo.ckpool.org (Stratum V1) - 2% fee on block rewards
+#   braiins - solo.stratum.braiins.com (Stratum V1) - 0.5% fee on blocks
+#   ocean   - mine.ocean.xyz:3334 (Stratum V1 + DATUM) - 0% pool fee
 #   custom  - use Pool setting below for custom pool
 #
 # Using a preset automatically configures Pool and Stratum version
@@ -25,16 +26,22 @@ PayoutAddress = YOUR_BTC_ADDRESS_HERE
 Password = x
 
 # Stratum protocol version (auto-set by SoloPool, or manual override)
-# v1 = JSON-based Stratum (CKPool, most pools)
-# v2 = Binary Stratum V2 (Braiins Solo)
+# v1 = JSON-based Stratum (CKPool, Braiins Solo, most pools)
+# v2 = Binary Stratum V2 (DMND Pool with SV2 proxy, requires special setup)
 # WARNING: Using wrong version for pool will fail to connect!
+# NOTE: Both ckpool and braiins presets use Stratum V1
 # Stratum = v1
 
 # ============================================
 # CPU MINING
 # ============================================
 
+# Enable CPU mining (default: true)
+# Set to false to use GPU-only mode
+EnableCPU = true
+
 # Number of CPU mining threads (0 = auto-detect all cores)
+# Only used when EnableCPU = true
 Threads = 0
 
 # SIMD optimization level (auto-detected at compile time)
@@ -46,6 +53,7 @@ Threads = 0
 # ============================================
 
 # Enable GPU mining (requires CUDA or OpenCL build)
+# Can be used alongside CPU mining, or exclusively (set EnableCPU = false)
 EnableGPU = false
 
 # GPU devices to use (comma-separated, empty = all available)
