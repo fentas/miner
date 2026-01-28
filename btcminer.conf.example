@@ -26,3 +26,7 @@ WebDir = web
 # Starts mining when user is idle for this many seconds (0 = disabled)
 # Works on native Linux (X11) and WSL2
 IdleTimeout = 0
+
+# Enable colored console output (default: true)
+# Use --no-color flag to disable from command line
+Colors = true

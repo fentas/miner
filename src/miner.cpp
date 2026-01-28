@@ -1,4 +1,5 @@
 #include "miner.hpp"
+#include "colors.hpp"
 
 #include <iostream>
 #include <iomanip>
@@ -10,7 +11,7 @@ namespace miner {
 Miner::Miner(unsigned num_threads)
     : num_threads_(num_threads ? num_threads : std::thread::hardware_concurrency()) {
     if (num_threads_ == 0) num_threads_ = 1;
-    std::cout << "[Miner] Using " << num_threads_ << " threads" << std::endl;
+    std::cout << colors::log_prefix("Miner") << " Using " << colors::value() << num_threads_ << colors::reset() << " threads" << std::endl;
 }
 
 Miner::~Miner() {
@@ -246,17 +247,18 @@ void Miner::worker_thread(unsigned thread_id) {
 
                 stats_.shares_found++;
 
-                std::cout << "[Miner] Share found! Nonce: 0x"
+                std::cout << colors::log_prefix("Miner") << " " << colors::bright_green() << "Share found!" << colors::reset()
+                          << " Nonce: " << colors::bright_yellow() << "0x"
                           << std::hex << std::setw(8) << std::setfill('0') << nonce
-                          << std::dec << std::endl;
+                          << std::dec << colors::reset() << std::endl;
 
                 // Print hash
-                std::cout << "[Miner] Hash: ";
+                std::cout << colors::log_prefix("Miner") << " Hash: " << colors::muted();
                 for (int i = 31; i >= 0; i--) {
                     std::cout << std::hex << std::setw(2) << std::setfill('0')
                               << static_cast<int>(hash[i]);
                 }
-                std::cout << std::dec << std::endl;
+                std::cout << std::dec << colors::reset() << std::endl;
 
                 if (share_callback_) {
                     share_callback_(local_job_id, local_extranonce2,

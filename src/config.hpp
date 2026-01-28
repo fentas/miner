@@ -22,6 +22,9 @@ struct Config {
     // Idle mining (screensaver mode)
     unsigned idle_timeout = 0;      // Seconds of inactivity before starting (0 = disabled)
     bool idle_mining_enabled = false;
+
+    // Output options
+    bool colors = true;             // Enable ANSI colors in output (default: on)
 };
 
 inline std::string trim(const std::string& s) {
@@ -81,6 +84,10 @@ inline bool load(const std::string& filename, Config& cfg) {
             std::string val_lower = value;
             std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
             cfg.idle_mining_enabled = (val_lower == "true" || val_lower == "1" || val_lower == "yes");
+        } else if (key_lower == "colors" || key_lower == "color") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.colors = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
         }
     }
 

@@ -1,5 +1,6 @@
 #include "stratum.hpp"
 #include "sha256.hpp"
+#include "colors.hpp"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -167,13 +168,13 @@ bool Client::connect() {
     std::memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
 
     if (::connect(sock_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::cerr << "[Stratum] Failed to connect to " << host_ << ":" << port_ << std::endl;
+        std::cerr << colors::log_prefix("Stratum") << " " << colors::error() << "Failed to connect to " << host_ << ":" << port_ << colors::reset() << std::endl;
         close(sock_);
         sock_ = -1;
         return false;
     }
 
-    std::cout << "[Stratum] Connected to " << host_ << ":" << port_ << std::endl;
+    std::cout << colors::log_prefix("Stratum") << " " << colors::success() << "Connected to " << colors::reset() << host_ << ":" << port_ << std::endl;
 
     if (!subscribe()) {
         disconnect();
@@ -335,8 +336,8 @@ void Client::process_notify(const std::vector<std::string>& params) {
 
     // TODO: Parse merkle branch from the original message
 
-    std::cout << "[Stratum] New job: " << job.job_id
-              << " height hint from nbits" << std::endl;
+    std::cout << colors::log_prefix("Stratum") << " New job: " << colors::bright_yellow() << job.job_id << colors::reset()
+              << colors::muted() << " height hint from nbits" << colors::reset() << std::endl;
 
     // Generate a random extranonce2
     std::ostringstream en2;

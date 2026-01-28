@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "webserver.hpp"
 #include "idle_monitor.hpp"
+#include "colors.hpp"
 
 #include <iostream>
 #include <string>
@@ -26,7 +27,7 @@ std::chrono::steady_clock::time_point g_start_time;
 std::atomic<bool> g_idle_mining_active{false};
 
 void signal_handler(int) {
-    std::cout << "\n[Main] Shutting down..." << std::endl;
+    std::cout << "\n" << colors::log_prefix("Main") << " " << colors::yellow() << "Shutting down..." << colors::reset() << std::endl;
     g_shutdown = true;
 }
 
@@ -39,6 +40,8 @@ void print_usage(const char* prog) {
               << "  -p, --pass <password>    Pool password (default: x)\n"
               << "  -t, --threads <n>        Number of mining threads (default: all cores)\n"
               << "  -w, --web <port>         Web interface port (default: 8080, 0 to disable)\n"
+              << "      --no-color           Disable colored output\n"
+              << "      --color              Enable colored output (default)\n"
               << "  -h, --help               Show this help message\n"
               << "\nConfig file format (btcminer.conf):\n"
               << "  Pool = solo.ckpool.org:3333\n"
@@ -46,6 +49,7 @@ void print_usage(const char* prog) {
               << "  Password = x\n"
               << "  Threads = 0\n"
               << "  WebPort = 8080\n"
+              << "  Colors = true\n"
               << "\nExample:\n"
               << "  " << prog << " -c btcminer.conf\n"
               << "  " << prog << " -o solo.ckpool.org:3333 -u bc1q... -t 4 -w 8080\n"
@@ -374,12 +378,19 @@ int main(int argc, char* argv[]) {
             cfg.threads = static_cast<unsigned>(std::stoul(argv[++i]));
         } else if ((arg == "-w" || arg == "--web") && i + 1 < argc) {
             cfg.web_port = static_cast<uint16_t>(std::stoul(argv[++i]));
+        } else if (arg == "--no-color" || arg == "--no-colors") {
+            cfg.colors = false;
+        } else if (arg == "--color" || arg == "--colors") {
+            cfg.colors = true;
         } else {
             std::cerr << "Unknown option: " << arg << std::endl;
             print_usage(argv[0]);
             return 1;
         }
     }
+
+    // Apply color settings
+    colors::enabled = cfg.colors;
 
     // Store config globally for web API
     g_config = cfg;
@@ -415,25 +426,25 @@ int main(int argc, char* argv[]) {
 
     // Print banner
     std::cout << "\n"
-              << "╔══════════════════════════════════════════════════════════╗\n"
-              << "║            BTC Miner - CPU Solo Mining                   ║\n"
-              << "╠══════════════════════════════════════════════════════════╣\n"
-              << "║  Pool: " << std::left << std::setw(49) << (cfg.pool_host + ":" + std::to_string(cfg.pool_port)) << "║\n"
-              << "║  User: " << std::left << std::setw(49) << cfg.payout_address.substr(0, 49) << "║\n"
-              << "║  Threads: " << std::left << std::setw(46) << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << "║\n";
+              << colors::cyan() << "╔══════════════════════════════════════════════════════════╗\n"
+              << "║" << colors::bright_yellow() << "            BTC Miner - CPU Solo Mining                   " << colors::cyan() << "║\n"
+              << "╠══════════════════════════════════════════════════════════╣" << colors::reset() << "\n"
+              << colors::cyan() << "║" << colors::reset() << "  Pool: " << colors::bright_green() << std::left << std::setw(49) << (cfg.pool_host + ":" + std::to_string(cfg.pool_port)) << colors::cyan() << "║" << colors::reset() << "\n"
+              << colors::cyan() << "║" << colors::reset() << "  User: " << colors::bright_cyan() << std::left << std::setw(49) << cfg.payout_address.substr(0, 49) << colors::cyan() << "║" << colors::reset() << "\n"
+              << colors::cyan() << "║" << colors::reset() << "  Threads: " << colors::value() << std::left << std::setw(46) << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << colors::cyan() << "║" << colors::reset() << "\n";
 
     if (web_started) {
         std::ostringstream web_info;
         web_info << "http://localhost:" << cfg.web_port;
-        std::cout << "║  Web UI: " << std::left << std::setw(47) << web_info.str() << "║\n";
+        std::cout << colors::cyan() << "║" << colors::reset() << "  Web UI: " << colors::bright_blue() << std::left << std::setw(47) << web_info.str() << colors::cyan() << "║" << colors::reset() << "\n";
     }
 
-    std::cout << "╚══════════════════════════════════════════════════════════╝\n"
+    std::cout << colors::cyan() << "╚══════════════════════════════════════════════════════════╝" << colors::reset() << "\n"
               << std::endl;
 
     if (cfg.web_port > 0 && !web_started) {
-        std::cerr << "[Web] Failed to start server on port " << cfg.web_port
-                  << " (port in use?)" << std::endl;
+        std::cerr << colors::log_prefix("Web") << " " << colors::error() << "Failed to start server on port " << cfg.web_port
+                  << " (port in use?)" << colors::reset() << std::endl;
     }
 
     // Create miner
@@ -528,9 +539,9 @@ int main(int argc, char* argv[]) {
         uint64_t current_hashes = stats.hashes.load();
         double hashrate = (current_hashes - last_hashes) / elapsed;
 
-        std::cout << "[Stats] Hashrate: " << format_hashrate(hashrate)
-                  << " | Total: " << (current_hashes / 1000000) << "M hashes"
-                  << " | Shares: " << stats.shares_found.load()
+        std::cout << colors::log_prefix("Stats") << " Hashrate: " << colors::bright_green() << format_hashrate(hashrate) << colors::reset()
+                  << " | Total: " << colors::value() << (current_hashes / 1000000) << "M" << colors::reset() << " hashes"
+                  << " | Shares: " << colors::bright_cyan() << stats.shares_found.load() << colors::reset()
                   << std::endl;
 
         // Broadcast to WebSocket clients
