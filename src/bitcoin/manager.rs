@@ -212,22 +212,60 @@ blockmaxweight=4000000
         Ok(())
     }
 
-    /// Wait for Bitcoin Core to be ready
+    /// Wait for Bitcoin Core to be ready and synced
+    /// Shows sync progress while waiting
     pub async fn wait_ready(&self, timeout_secs: u64) -> Result<(), BitcoinError> {
         let rpc = self.rpc.as_ref()
             .ok_or_else(|| BitcoinError::ConnectionError("Not started".into()))?;
 
         let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+        let mut connected = false;
+        let mut last_progress_time = std::time::Instant::now();
 
         while std::time::Instant::now() < deadline {
-            if rpc.ping().await.is_ok() {
-                info!("Bitcoin Core is ready");
-                return Ok(());
+            match rpc.get_blockchain_info().await {
+                Ok(status) => {
+                    if !connected {
+                        info!("Bitcoin Core responding, waiting for sync...");
+                        connected = true;
+                    }
+
+                    if status.synced {
+                        info!("Bitcoin Core synced at height {}", status.blocks);
+                        return Ok(());
+                    }
+
+                    // Show progress every 5 seconds
+                    if last_progress_time.elapsed() >= Duration::from_secs(5) {
+                        info!(
+                            "Syncing: {:.2}% ({}/{} blocks)",
+                            status.progress,
+                            status.blocks,
+                            status.headers
+                        );
+                        last_progress_time = std::time::Instant::now();
+                    }
+                }
+                Err(_) if !connected => {
+                    // Still waiting for Bitcoin Core to start accepting connections
+                }
+                Err(e) => {
+                    warn!("RPC error during sync: {}", e);
+                }
             }
             sleep(Duration::from_secs(1)).await;
         }
 
-        Err(BitcoinError::ConnectionError("Timeout waiting for Bitcoin Core".into()))
+        if !connected {
+            Err(BitcoinError::ConnectionError("Timeout waiting for Bitcoin Core to start".into()))
+        } else {
+            // Connected but not synced - return NotSynced error instead of connection error
+            if let Ok(status) = rpc.get_blockchain_info().await {
+                Err(BitcoinError::NotSynced { progress: status.progress })
+            } else {
+                Err(BitcoinError::ConnectionError("Lost connection to Bitcoin Core".into()))
+            }
+        }
     }
 
     /// Get sync status

@@ -130,29 +130,94 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
         bitcoind.write_config()?;
         bitcoind.start()?;
-        bitcoind.wait_ready(120).await?;
+
+        // Wait for Bitcoin Core to start (30 seconds for RPC, then poll for sync)
+        println!(
+            "{} {}",
+            "⏳".bright_yellow(),
+            "Waiting for Bitcoin Core to start...".bright_white()
+        );
+
+        // First wait for RPC to become available (shorter timeout)
+        let start = std::time::Instant::now();
+        loop {
+            match bitcoind.get_sync_status().await {
+                Ok(status) => {
+                    if status.synced {
+                        println!(
+                            "{} {} {}",
+                            "✓".bright_green(),
+                            "Bitcoin Core synced at height".bright_white(),
+                            status.blocks.to_string().bright_cyan()
+                        );
+                        break;
+                    } else {
+                        // Show sync progress with progress bar
+                        let bar_width: usize = 30;
+                        let filled = (status.progress / 100.0 * bar_width as f64) as usize;
+                        let empty = bar_width.saturating_sub(filled);
+                        let bar = format!(
+                            "[{}{}]",
+                            "█".repeat(filled).bright_cyan(),
+                            "░".repeat(empty).dimmed()
+                        );
+                        println!(
+                            "\r{} {} {:.2}% ({}/{})",
+                            "⏳".bright_yellow(),
+                            bar,
+                            status.progress,
+                            status.blocks.to_string().bright_cyan(),
+                            status.headers.to_string().dimmed()
+                        );
+                    }
+                }
+                Err(e) => {
+                    if start.elapsed() > Duration::from_secs(60) {
+                        return Err(anyhow::anyhow!("Bitcoin Core failed to start: {}", e));
+                    }
+                    // Still starting up, show waiting message
+                    if start.elapsed().as_secs() % 10 == 0 {
+                        println!(
+                            "{} {} ({:.0}s)",
+                            "⏳".bright_yellow(),
+                            "Waiting for Bitcoin Core RPC...".dimmed(),
+                            start.elapsed().as_secs_f64()
+                        );
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
 
-    // Wait for sync
-    loop {
-        let status = bitcoind.get_sync_status().await?;
-        if status.synced {
-            println!(
-                "{} {} {}",
-                "✓".bright_green(),
-                "Bitcoin Core synced at height".bright_white(),
-                status.blocks.to_string().bright_cyan()
-            );
-            break;
+    // For non-managed mode, check sync status
+    if !cfg.bitcoind.managed {
+        loop {
+            match bitcoind.get_sync_status().await {
+                Ok(status) if status.synced => {
+                    println!(
+                        "{} {} {}",
+                        "✓".bright_green(),
+                        "Bitcoin Core synced at height".bright_white(),
+                        status.blocks.to_string().bright_cyan()
+                    );
+                    break;
+                }
+                Ok(status) => {
+                    println!(
+                        "{} {:.2}% ({}/{})",
+                        "Syncing:".bright_yellow(),
+                        status.progress,
+                        status.blocks,
+                        status.headers
+                    );
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to get sync status: {}", e));
+                }
+            }
         }
-        println!(
-            "{} {:.2}% ({}/{})",
-            "Syncing:".bright_yellow(),
-            status.progress,
-            status.blocks,
-            status.headers
-        );
-        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 
     // Start mining coordinator
