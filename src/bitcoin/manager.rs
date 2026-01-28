@@ -9,9 +9,13 @@ const BITCOIN_CORE_VERSION: &str = "30.2";
 const DOWNLOAD_BASE_URL: &str = "https://bitcoincore.org/bin";
 
 // AssumeUTXO snapshot info (Bitcoin Core v28+)
+// The hash is verified by Bitcoin Core when loading via loadtxoutset RPC.
+// Alternative sources if primary fails:
+// - https://blog.lopp.net/bitcoin-node-sync-with-utxo-snapshots/
+// - Torrent: magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat
+// - Generate: bitcoin-cli dumptxoutset utxo-840000.dat
 const ASSUMEUTXO_HEIGHT: u64 = 840000;
-const ASSUMEUTXO_HASH: &str = "0000000000000000000320283a032748cef8227873ff4872689bf23f1cda83a5";
-const ASSUMEUTXO_URL: &str = "https://bitcoincore.org/bin/utxo-snapshots/utxo-840000.dat";
+const ASSUMEUTXO_URL: &str = "https://utxo.download/utxo-840000.dat";
 
 /// Manages Bitcoin Core installation and lifecycle
 pub struct BitcoindManager {
@@ -516,7 +520,8 @@ blockmaxweight=4000000
         // Ensure data directory exists
         std::fs::create_dir_all(&self.data_dir)?;
 
-        info!("Downloading AssumeUTXO snapshot from Bitcoin Core...");
+        info!("Downloading AssumeUTXO snapshot (height {})...", ASSUMEUTXO_HEIGHT);
+        info!("Source: {}", ASSUMEUTXO_URL);
         info!("This is a ~7GB file and may take a while");
 
         let client = reqwest::Client::new();
@@ -526,9 +531,14 @@ blockmaxweight=4000000
             .map_err(|e| BitcoinError::DownloadError(e.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(BitcoinError::DownloadError(
-                format!("HTTP {}: Failed to download snapshot", response.status())
-            ));
+            return Err(BitcoinError::DownloadError(format!(
+                "HTTP {}: Failed to download snapshot. \
+                You can download manually from: https://blog.lopp.net/bitcoin-node-sync-with-utxo-snapshots/ \
+                or via torrent: magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat \
+                Then place it at: {:?}",
+                response.status(),
+                self.assumeutxo_snapshot_path()
+            )));
         }
 
         // Get content length for progress
