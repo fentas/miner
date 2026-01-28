@@ -15,7 +15,8 @@ enum class SoloPool {
     Custom,     // User-defined pool
     CKPool,     // solo.ckpool.org (Stratum V1)
     Braiins,    // solo.stratum.braiins.com (Stratum V1)
-    Ocean       // mine.ocean.xyz (Stratum V1 + DATUM)
+    Ocean,      // mine.ocean.xyz (Stratum V1 + DATUM)
+    None        // True solo mining - direct to network via local Bitcoin Core
 };
 
 // Pool preset info
@@ -79,7 +80,9 @@ struct Config {
     std::string bitcoind_rpc_password;      // RPC password
     std::string bitcoind_datadir;           // Bitcoin Core data directory (optional)
     unsigned bitcoind_prune = 10000;        // Prune size in MB (0 = no pruning, 550 = minimum)
-    bool bitcoind_sv2 = false;              // Enable Stratum V2 with Bitcoin Core (experimental)
+    bool bitcoind_sv2 = false;              // Enable Stratum V2 with Bitcoin Core
+    std::string sv2_proxy_host = "127.0.0.1"; // SV2 proxy (SRI) host
+    uint16_t sv2_proxy_port = 34255;          // SV2 proxy (SRI) port (default SRI port)
 };
 
 // Validation result
@@ -185,6 +188,12 @@ inline bool load(const std::string& filename, Config& cfg) {
                 cfg.pool_host = preset.host;
                 cfg.pool_port = preset.port;
                 cfg.stratum_version = preset.stratum_version;
+            } else if (val_lower == "none" || val_lower == "solo" || val_lower == "local") {
+                cfg.solo_pool = SoloPool::None;
+                // No pool - direct to network via local Bitcoin Core
+                cfg.pool_host = "";
+                cfg.pool_port = 0;
+                cfg.bitcoind_enabled = true;  // Required for true solo mode
             } else if (val_lower == "custom") {
                 cfg.solo_pool = SoloPool::Custom;
             }
@@ -214,10 +223,23 @@ inline bool load(const std::string& filename, Config& cfg) {
             cfg.bitcoind_datadir = value;
         } else if (key_lower == "bitcoindprune" || key_lower == "bitcoind_prune" || key_lower == "prune") {
             cfg.bitcoind_prune = static_cast<unsigned>(std::stoul(value));
-        } else if (key_lower == "bitcoindsv2" || key_lower == "bitcoind_sv2") {
+        } else if (key_lower == "bitcoindsv2" || key_lower == "bitcoind_sv2" || key_lower == "sv2") {
             std::string val_lower = value;
             std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
             cfg.bitcoind_sv2 = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
+        } else if (key_lower == "sv2proxyhost" || key_lower == "sv2_proxy_host" || key_lower == "sv2host") {
+            cfg.sv2_proxy_host = value;
+        } else if (key_lower == "sv2proxyport" || key_lower == "sv2_proxy_port" || key_lower == "sv2port") {
+            cfg.sv2_proxy_port = static_cast<uint16_t>(std::stoul(value));
+        } else if (key_lower == "sv2proxy" || key_lower == "sv2_proxy") {
+            // Parse host:port format
+            size_t colon = value.rfind(':');
+            if (colon != std::string::npos) {
+                cfg.sv2_proxy_host = value.substr(0, colon);
+                cfg.sv2_proxy_port = static_cast<uint16_t>(std::stoul(value.substr(colon + 1)));
+            } else {
+                cfg.sv2_proxy_host = value;
+            }
         }
     }
 
@@ -249,30 +271,46 @@ inline ValidationResult validate(const Config& cfg) {
         result.errors.push_back("At least one mining mode must be enabled (EnableCPU or EnableGPU)");
     }
 
-    // Stratum version validation
-    if (cfg.stratum_version != "v1" && cfg.stratum_version != "v2") {
-        result.valid = false;
-        result.errors.push_back("Stratum version must be 'v1' or 'v2', got: " + cfg.stratum_version);
-    }
+    // True solo mode validation (SoloPool = none)
+    bool is_solo_mode = (cfg.solo_pool == SoloPool::None);
 
-    // Pool/Stratum compatibility warnings
-    // Note: Both CKPool and Braiins Solo use Stratum V1 (CKPool software stack)
-    bool is_ckpool = (cfg.pool_host.find("ckpool") != std::string::npos);
-    bool is_braiins_solo = (cfg.pool_host.find("solo.stratum.braiins") != std::string::npos);
+    if (is_solo_mode) {
+        // Solo mode requires Bitcoin Core
+        if (!cfg.bitcoind_enabled) {
+            result.valid = false;
+            result.errors.push_back("SoloPool=none requires BitcoindEnabled=true (local Bitcoin Core node)");
+        }
 
-    if (cfg.stratum_version == "v2" && (is_ckpool || is_braiins_solo)) {
-        result.warnings.push_back("This pool uses Stratum V1. Change Stratum to 'v1'");
+        // Warn about the difficulty of solo mining
+        result.warnings.push_back("True solo mining mode - blocks submitted directly to network via your Bitcoin Core node");
+        result.warnings.push_back("Ensure Bitcoin Core is fully synced before mining");
+    } else {
+        // Pool mode validation
+        // Stratum version validation
+        if (cfg.stratum_version != "v1" && cfg.stratum_version != "v2") {
+            result.valid = false;
+            result.errors.push_back("Stratum version must be 'v1' or 'v2', got: " + cfg.stratum_version);
+        }
+
+        // Pool/Stratum compatibility warnings
+        // Note: Both CKPool and Braiins Solo use Stratum V1 (CKPool software stack)
+        bool is_ckpool = (cfg.pool_host.find("ckpool") != std::string::npos);
+        bool is_braiins_solo = (cfg.pool_host.find("solo.stratum.braiins") != std::string::npos);
+
+        if (cfg.stratum_version == "v2" && (is_ckpool || is_braiins_solo)) {
+            result.warnings.push_back("This pool uses Stratum V1. Change Stratum to 'v1'");
+        }
+
+        // Port validation (only for pool mode)
+        if (cfg.pool_port == 0) {
+            result.valid = false;
+            result.errors.push_back("Pool port cannot be 0");
+        }
     }
 
     // Thread validation
     if (cfg.threads > 256) {
         result.warnings.push_back("Thread count (" + std::to_string(cfg.threads) + ") is unusually high");
-    }
-
-    // Port validation
-    if (cfg.pool_port == 0) {
-        result.valid = false;
-        result.errors.push_back("Pool port cannot be 0");
     }
 
     // Stats interval
@@ -282,22 +320,27 @@ inline ValidationResult validate(const Config& cfg) {
         result.warnings.push_back("StatsInterval is very low (" + std::to_string(cfg.stats_interval) + "s), may cause excessive output");
     }
 
-    // Reconnect delay
-    if (cfg.reconnect_delay == 0) {
-        result.warnings.push_back("ReconnectDelay is 0, will reconnect immediately on disconnect");
-    }
+    // Reconnect delay (only relevant for pool mode)
+    if (!is_solo_mode) {
+        if (cfg.reconnect_delay == 0) {
+            result.warnings.push_back("ReconnectDelay is 0, will reconnect immediately on disconnect");
+        }
 
-    if (cfg.max_reconnect_delay < cfg.reconnect_delay) {
-        result.warnings.push_back("MaxReconnectDelay is less than ReconnectDelay");
+        if (cfg.max_reconnect_delay < cfg.reconnect_delay) {
+            result.warnings.push_back("MaxReconnectDelay is less than ReconnectDelay");
+        }
     }
 
     // Bitcoin Core validation
     if (cfg.bitcoind_enabled) {
-        if (cfg.bitcoind_rpc_user.empty()) {
-            result.warnings.push_back("BitcoindRpcUser not set - RPC authentication may fail");
-        }
-        if (cfg.bitcoind_rpc_password.empty()) {
-            result.warnings.push_back("BitcoindRpcPassword not set - RPC authentication may fail");
+        // Managed mode auto-generates credentials, so only warn for manual mode
+        if (!cfg.bitcoind_managed) {
+            if (cfg.bitcoind_rpc_user.empty()) {
+                result.warnings.push_back("BitcoindRpcUser not set - RPC authentication may fail");
+            }
+            if (cfg.bitcoind_rpc_password.empty()) {
+                result.warnings.push_back("BitcoindRpcPassword not set - RPC authentication may fail");
+            }
         }
         if (cfg.bitcoind_prune > 0 && cfg.bitcoind_prune < 550) {
             result.warnings.push_back("BitcoindPrune minimum is 550 MB, got " + std::to_string(cfg.bitcoind_prune));
@@ -321,9 +364,14 @@ inline void print_validation(const ValidationResult& result) {
 }
 
 inline void print(const Config& cfg) {
-    std::cout << "[Config] Pool: " << cfg.pool_host << ":" << cfg.pool_port << "\n"
-              << "[Config] Stratum: " << cfg.stratum_version << "\n"
-              << "[Config] Address: " << cfg.payout_address << "\n"
+    if (cfg.solo_pool == SoloPool::None) {
+        std::cout << "[Config] Mode: TRUE SOLO (direct to network)\n"
+                  << "[Config] Bitcoin Core: " << cfg.bitcoind_host << ":" << cfg.bitcoind_rpc_port << "\n";
+    } else {
+        std::cout << "[Config] Pool: " << cfg.pool_host << ":" << cfg.pool_port << "\n"
+                  << "[Config] Stratum: " << cfg.stratum_version << "\n";
+    }
+    std::cout << "[Config] Address: " << cfg.payout_address << "\n"
               << "[Config] Threads: " << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << "\n"
               << "[Config] Stats interval: " << cfg.stats_interval << "s\n"
               << std::endl;

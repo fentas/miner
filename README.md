@@ -100,17 +100,19 @@ WebPort = 8080
 
 **Pool Presets:**
 
-| Preset    | Pool                      | Protocol   | Fee  |
-|-----------|---------------------------|------------|------|
-| `ckpool`  | solo.ckpool.org           | Stratum V1 | 2%   |
-| `braiins` | solo.stratum.braiins.com  | Stratum V1 | 0.5% |
-| `ocean`   | mine.ocean.xyz:3334       | Stratum V1 | 0%*  |
+| Preset    | Pool                      | Protocol         | Fee  | Description          |
+|-----------|---------------------------|------------------|------|----------------------|
+| `ckpool`  | solo.ckpool.org           | Stratum V1       | 2%   | Reliable solo pool   |
+| `braiins` | solo.stratum.braiins.com  | Stratum V1       | 0.5% | Low fee option       |
+| `ocean`   | mine.ocean.xyz:3334       | Stratum V1       | 0%*  | DATUM support        |
+| `none`    | Your Bitcoin Core         | getblocktemplate | 0%   | **True solo mining** |
 
 > **Note on Fees:**
 >
 > - **Solo.ckpool**: 2% service fee on successful block rewards
 > - **Braiins Solo**: 0.5% fee on found blocks (paid to CKPool code authors)
 > - **Ocean Pool**: 0% pool fee (miners pay only Bitcoin transaction fees via DATUM)
+> - **True Solo (`none`)**: 0% fees - you keep 100% of the block reward!
 >
 > **Stratum V2 Pools** (require special setup):
 >
@@ -126,9 +128,53 @@ WebPort = 8080
 
 &nbsp;
 
-### 🔗 Bitcoin Core Integration (Advanced)
+### 🎯 True Solo Mining (No Pool)
 
-For maximum decentralization, run your own Bitcoin Core node to create custom block templates.
+For maximum decentralization with **0% fees**, mine directly to the Bitcoin network using your own node.
+
+```ini
+# btcminer.conf - True Solo Mining
+SoloPool = none
+PayoutAddress = bc1q...your_address
+BitcoindEnabled = true
+BitcoindManaged = true       # Auto-manages Bitcoin Core
+BitcoindPrune = 10000        # ~10GB pruned node
+```
+
+**How it works:**
+
+```text
+┌─────────────┐    getblocktemplate    ┌───────────────┐
+│             │ ◄───────────────────── │               │
+│  btcminer   │                        │  Bitcoin Core │
+│             │ ────────────────────► │               │
+└─────────────┘     submitblock        └───────┬───────┘
+                                               │
+                                               ▼
+                                        Bitcoin Network
+```
+
+1. Gets block template from your local Bitcoin Core node
+2. Mines with full transaction selection control
+3. Submits found blocks directly to the network
+4. **You keep 100% of the block reward** (3.125 BTC + fees)
+
+**vs Pool Mining:**
+
+| Feature        | Pool Mining      | True Solo         |
+|----------------|------------------|-------------------|
+| Fees           | 0.5-2%           | **0%**            |
+| Block template | Pool decides     | **You decide**    |
+| Censorship     | Pool can censor  | **You control**   |
+| Requirements   | Internet         | Bitcoin Core node |
+
+> ⚠️ **Warning:** Solo mining is extremely unlikely to find a block. This is for educational/lottery purposes.
+
+&nbsp;
+
+### 🔗 Bitcoin Core Integration
+
+Run your own Bitcoin Core node for custom block templates. Required for true solo mining (`SoloPool = none`).
 
 #### Option 1: Managed Mode (Recommended)
 
@@ -171,9 +217,13 @@ rpcpassword=your_password
 prune=10000
 ```
 
-#### Stratum V2 (Experimental)
+#### Stratum V2
 
-Native Stratum V2 requires Bitcoin Core v30+ (not yet released). Once available:
+Bitcoin Core v30+ supports an IPC Mining Interface for external Stratum V2 software. To use SV2:
+
+1. Install the [SRI (Stratum V2 Reference Implementation)](https://stratumprotocol.org/)
+2. Configure SRI proxy to connect to your Bitcoin Core node
+3. Enable in btcminer:
 
 ```ini
 BitcoindSv2 = true

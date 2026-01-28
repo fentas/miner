@@ -84,6 +84,29 @@ struct SyncInfo {
     bool initial_block_download = true;
 };
 
+// Block template for solo mining
+struct BlockTemplate {
+    bool valid = false;
+    std::string version;            // Block version (hex, 4 bytes)
+    std::string prev_block_hash;    // Previous block hash (hex, 32 bytes LE)
+    std::string bits;               // Compact target (hex, 4 bytes)
+    std::string target;             // Full target (hex, 32 bytes)
+    uint32_t curtime = 0;           // Current time
+    uint64_t height = 0;            // Block height
+    uint64_t coinbase_value = 0;    // Block reward + fees (satoshis)
+    std::vector<std::string> transactions;  // Serialized transactions (hex)
+    std::vector<std::string> tx_hashes;     // Transaction hashes for merkle tree
+    std::string coinbase_aux;       // Coinbase auxiliary data
+    std::string error;              // Error message if invalid
+};
+
+// Block submission result
+struct SubmitResult {
+    bool accepted = false;
+    std::string message;
+    std::string block_hash;
+};
+
 // RPC response
 struct RpcResponse {
     bool success = false;
@@ -443,8 +466,205 @@ public:
     Status get_status() const { return status_; }
     std::string get_status_message() const { return status_message_; }
 
+    // ========================================
+    // Solo Mining Methods
+    // ========================================
+
+    // Get block template for mining (getblocktemplate RPC)
+    BlockTemplate get_block_template(const std::string& payout_address) {
+        BlockTemplate tmpl;
+
+        // Check if node is synced
+        auto sync_info = get_sync_info();
+        if (sync_info.initial_block_download) {
+            tmpl.error = "Node is still syncing (IBD). Wait for sync to complete.";
+            return tmpl;
+        }
+
+        // Call getblocktemplate with segwit rules
+        auto resp = rpc_call("getblocktemplate", "[{\"rules\": [\"segwit\"]}]");
+        if (!resp.success) {
+            tmpl.error = "getblocktemplate failed: " + resp.error;
+            return tmpl;
+        }
+
+        // Parse JSON response (simple parsing)
+        auto get_string = [&resp](const std::string& key) -> std::string {
+            size_t pos = resp.result.find("\"" + key + "\"");
+            if (pos == std::string::npos) return "";
+            pos = resp.result.find(":", pos);
+            if (pos == std::string::npos) return "";
+            pos++;
+            while (pos < resp.result.size() && (resp.result[pos] == ' ' || resp.result[pos] == '"')) pos++;
+            size_t end = pos;
+            bool in_quotes = (pos > 0 && resp.result[pos - 1] == '"');
+            if (in_quotes) {
+                end = resp.result.find("\"", pos);
+            } else {
+                while (end < resp.result.size() && resp.result[end] != ',' &&
+                       resp.result[end] != '}' && resp.result[end] != '\n') end++;
+            }
+            return resp.result.substr(pos, end - pos);
+        };
+
+        auto get_number = [&resp](const std::string& key) -> uint64_t {
+            size_t pos = resp.result.find("\"" + key + "\"");
+            if (pos == std::string::npos) return 0;
+            pos = resp.result.find(":", pos);
+            if (pos == std::string::npos) return 0;
+            pos++;
+            while (pos < resp.result.size() && (resp.result[pos] == ' ')) pos++;
+            try {
+                return std::stoull(resp.result.substr(pos));
+            } catch (...) {
+                return 0;
+            }
+        };
+
+        try {
+            tmpl.version = get_string("version");
+            if (tmpl.version.empty()) {
+                // Version might be a number, convert to hex
+                uint32_t ver = static_cast<uint32_t>(get_number("version"));
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%08x", ver);
+                tmpl.version = buf;
+            }
+
+            tmpl.prev_block_hash = get_string("previousblockhash");
+            tmpl.bits = get_string("bits");
+            tmpl.target = get_string("target");
+            tmpl.curtime = static_cast<uint32_t>(get_number("curtime"));
+            tmpl.height = get_number("height");
+            tmpl.coinbase_value = get_number("coinbasevalue");
+
+            // Parse transactions array
+            size_t tx_start = resp.result.find("\"transactions\"");
+            if (tx_start != std::string::npos) {
+                tx_start = resp.result.find("[", tx_start);
+                if (tx_start != std::string::npos) {
+                    size_t tx_end = resp.result.find("]", tx_start);
+                    std::string tx_array = resp.result.substr(tx_start, tx_end - tx_start + 1);
+
+                    // Extract data fields from transactions
+                    size_t pos = 0;
+                    while ((pos = tx_array.find("\"data\"", pos)) != std::string::npos) {
+                        pos = tx_array.find(":", pos);
+                        if (pos == std::string::npos) break;
+                        pos = tx_array.find("\"", pos);
+                        if (pos == std::string::npos) break;
+                        pos++;
+                        size_t end = tx_array.find("\"", pos);
+                        if (end != std::string::npos) {
+                            tmpl.transactions.push_back(tx_array.substr(pos, end - pos));
+                        }
+                        pos = end;
+                    }
+
+                    // Extract txid fields for merkle tree
+                    pos = 0;
+                    while ((pos = tx_array.find("\"txid\"", pos)) != std::string::npos) {
+                        pos = tx_array.find(":", pos);
+                        if (pos == std::string::npos) break;
+                        pos = tx_array.find("\"", pos);
+                        if (pos == std::string::npos) break;
+                        pos++;
+                        size_t end = tx_array.find("\"", pos);
+                        if (end != std::string::npos) {
+                            tmpl.tx_hashes.push_back(tx_array.substr(pos, end - pos));
+                        }
+                        pos = end;
+                    }
+                }
+            }
+
+            tmpl.valid = !tmpl.prev_block_hash.empty() && !tmpl.bits.empty();
+
+        } catch (const std::exception& e) {
+            tmpl.error = "Failed to parse block template: " + std::string(e.what());
+            tmpl.valid = false;
+        }
+
+        return tmpl;
+    }
+
+    // Submit a mined block to the network (submitblock RPC)
+    SubmitResult submit_block(const std::string& block_hex) {
+        SubmitResult result;
+
+        if (block_hex.empty()) {
+            result.message = "Empty block data";
+            return result;
+        }
+
+        // submitblock returns null on success, or an error string on failure
+        auto resp = rpc_call("submitblock", "\"" + block_hex + "\"");
+
+        if (resp.success) {
+            // Check response - null or empty means success
+            std::string trimmed = resp.result;
+            // Trim whitespace
+            size_t start = trimmed.find_first_not_of(" \t\n\r");
+            if (start == std::string::npos) {
+                trimmed = "";
+            } else {
+                size_t end = trimmed.find_last_not_of(" \t\n\r");
+                trimmed = trimmed.substr(start, end - start + 1);
+            }
+
+            if (trimmed.empty() || trimmed == "null") {
+                result.accepted = true;
+                result.message = "Block accepted!";
+
+                // Get the block hash
+                auto hash_resp = rpc_call("getbestblockhash");
+                if (hash_resp.success) {
+                    result.block_hash = hash_resp.result;
+                    // Trim newline
+                    size_t nl = result.block_hash.find('\n');
+                    if (nl != std::string::npos) {
+                        result.block_hash = result.block_hash.substr(0, nl);
+                    }
+                }
+            } else {
+                result.message = "Block rejected: " + trimmed;
+            }
+        } else {
+            result.message = "submitblock failed: " + resp.error;
+        }
+
+        return result;
+    }
+
+    // Get network info (for displaying in UI)
+    std::string get_network_difficulty() {
+        auto resp = rpc_call("getdifficulty");
+        if (resp.success) {
+            // Trim newline
+            size_t nl = resp.result.find('\n');
+            if (nl != std::string::npos) {
+                return resp.result.substr(0, nl);
+            }
+            return resp.result;
+        }
+        return "unknown";
+    }
+
+    // Get best block hash
+    std::string get_best_block_hash() {
+        auto resp = rpc_call("getbestblockhash");
+        if (resp.success) {
+            size_t nl = resp.result.find('\n');
+            if (nl != std::string::npos) {
+                return resp.result.substr(0, nl);
+            }
+            return resp.result;
+        }
+        return "";
+    }
+
     // RPC call
-    RpcResponse rpc_call(const std::string& method, const std::string& params = "[]") {
+    RpcResponse rpc_call(const std::string& method, const std::string& params = "") {
         RpcResponse response;
 
         std::string data_dir = get_data_dir();
@@ -458,6 +678,18 @@ public:
         cli += " -rpcpassword=" + rpc_password_;
         cli += " -rpcport=" + std::to_string(rpc_port_);
         cli += " " + method;
+
+        // Add parameters if provided
+        if (!params.empty()) {
+            // For bitcoin-cli, parameters are passed directly (not as JSON array)
+            // Handle both raw params and JSON-formatted params
+            if (params[0] == '[' || params[0] == '{' || params[0] == '"') {
+                // JSON params - need to escape for shell and use -stdin for complex objects
+                cli += " '" + params + "'";
+            } else {
+                cli += " " + params;
+            }
+        }
 
         // Execute and capture output
         std::string cmd = cli + " 2>&1";

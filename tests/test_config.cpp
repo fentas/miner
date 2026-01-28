@@ -196,6 +196,152 @@ void test_mining_mode_none_disabled() {
     TEST_RESULT("Error mentions mining mode", !result.errors.empty());
 }
 
+// ===========================================
+// True Solo Mode (SoloPool::None) Tests
+// ===========================================
+
+void test_solo_mode_valid_config() {
+    TEST_GROUP("Config Validation - Solo Mode Valid");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.solo_pool = config::SoloPool::None;
+    cfg.pool_host = "";
+    cfg.pool_port = 0;
+    cfg.bitcoind_enabled = true;
+    cfg.bitcoind_managed = true;
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("Solo mode with bitcoind enabled is valid", result.valid);
+}
+
+void test_solo_mode_requires_bitcoind() {
+    TEST_GROUP("Config Validation - Solo Mode Requires Bitcoind");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.solo_pool = config::SoloPool::None;
+    cfg.pool_host = "";
+    cfg.pool_port = 0;
+    cfg.bitcoind_enabled = false;  // Missing required bitcoind
+
+    auto result = config::validate(cfg);
+    TEST_RESULT("Solo mode without bitcoind fails validation", !result.valid);
+
+    bool has_bitcoind_error = false;
+    for (const auto& e : result.errors) {
+        if (e.find("BitcoindEnabled") != std::string::npos) {
+            has_bitcoind_error = true;
+        }
+    }
+    TEST_RESULT("Error mentions BitcoindEnabled requirement", has_bitcoind_error);
+}
+
+void test_solo_mode_zero_port_allowed() {
+    TEST_GROUP("Config Validation - Solo Mode Zero Port Allowed");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.solo_pool = config::SoloPool::None;
+    cfg.pool_host = "";
+    cfg.pool_port = 0;  // Zero port is OK for solo mode
+    cfg.bitcoind_enabled = true;
+
+    auto result = config::validate(cfg);
+
+    // Should not have error about port (that's only for pool mode)
+    bool has_port_error = false;
+    for (const auto& e : result.errors) {
+        if (e.find("port") != std::string::npos || e.find("Port") != std::string::npos) {
+            has_port_error = true;
+        }
+    }
+    TEST_RESULT("Solo mode accepts zero port", !has_port_error);
+}
+
+void test_solo_mode_has_warnings() {
+    TEST_GROUP("Config Validation - Solo Mode Warnings");
+
+    config::Config cfg;
+    cfg.payout_address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+    cfg.solo_pool = config::SoloPool::None;
+    cfg.bitcoind_enabled = true;
+
+    auto result = config::validate(cfg);
+
+    bool has_solo_warning = false;
+    for (const auto& w : result.warnings) {
+        if (w.find("solo") != std::string::npos || w.find("Solo") != std::string::npos) {
+            has_solo_warning = true;
+        }
+    }
+    TEST_RESULT("Solo mode has informational warnings", has_solo_warning);
+}
+
+void test_solo_mode_config_parsing() {
+    TEST_GROUP("Config Parsing - Solo Mode");
+
+    // Create temp config file
+    std::string tmp_conf = "/tmp/test_solo_mode.conf";
+    {
+        std::ofstream f(tmp_conf);
+        f << "SoloPool = none\n"
+          << "PayoutAddress = bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh\n"
+          << "BitcoindEnabled = true\n"
+          << "BitcoindManaged = true\n";
+    }
+
+    config::Config cfg;
+    bool loaded = config::load(tmp_conf, cfg);
+
+    TEST_RESULT("Config file loaded successfully", loaded);
+    TEST_RESULT("SoloPool parsed as None", cfg.solo_pool == config::SoloPool::None);
+    TEST_RESULT("Pool host is empty for solo mode", cfg.pool_host.empty());
+    TEST_RESULT("Pool port is 0 for solo mode", cfg.pool_port == 0);
+    TEST_RESULT("BitcoindEnabled auto-enabled", cfg.bitcoind_enabled == true);
+
+    std::remove(tmp_conf.c_str());
+}
+
+void test_solo_mode_config_aliases() {
+    TEST_GROUP("Config Parsing - Solo Mode Aliases");
+
+    // Test "solo" alias
+    std::string tmp_conf = "/tmp/test_solo_alias.conf";
+    {
+        std::ofstream f(tmp_conf);
+        f << "SoloPool = solo\n"
+          << "PayoutAddress = bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh\n";
+    }
+
+    config::Config cfg;
+    config::load(tmp_conf, cfg);
+    TEST_RESULT("'solo' alias maps to SoloPool::None", cfg.solo_pool == config::SoloPool::None);
+
+    // Test "local" alias
+    {
+        std::ofstream f(tmp_conf);
+        f << "SoloPool = local\n"
+          << "PayoutAddress = bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh\n";
+    }
+
+    config::Config cfg2;
+    config::load(tmp_conf, cfg2);
+    TEST_RESULT("'local' alias maps to SoloPool::None", cfg2.solo_pool == config::SoloPool::None);
+
+    std::remove(tmp_conf.c_str());
+}
+
+void test_solo_pool_none_enum() {
+    TEST_GROUP("SoloPool Enum - None Value");
+
+    TEST_RESULT("SoloPool::None exists", static_cast<int>(config::SoloPool::None) >= 0);
+    TEST_RESULT("SoloPool::None is different from Custom",
+                config::SoloPool::None != config::SoloPool::Custom);
+    TEST_RESULT("SoloPool::None is different from CKPool",
+                config::SoloPool::None != config::SoloPool::CKPool);
+}
+
 void run_all() {
     test_validation_valid_config();
     test_validation_missing_address();
@@ -213,6 +359,15 @@ void run_all() {
     test_mining_mode_gpu_only();
     test_mining_mode_both();
     test_mining_mode_none_disabled();
+
+    // True Solo Mode (SoloPool::None) tests
+    test_solo_mode_valid_config();
+    test_solo_mode_requires_bitcoind();
+    test_solo_mode_zero_port_allowed();
+    test_solo_mode_has_warnings();
+    test_solo_mode_config_parsing();
+    test_solo_mode_config_aliases();
+    test_solo_pool_none_enum();
 }
 
 } // namespace test_config

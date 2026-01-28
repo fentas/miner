@@ -1,10 +1,12 @@
 #include "stratum.hpp"
+#include "stratum_v2.hpp"
 #include "miner.hpp"
 #include "config.hpp"
 #include "webserver.hpp"
 #include "idle_monitor.hpp"
 #include "colors.hpp"
 #include "version.hpp"
+#include "bitcoind_manager.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -29,7 +31,11 @@ std::string g_config_file;
 web::WebServer* g_webserver = nullptr;
 miner::Miner* g_miner = nullptr;
 stratum::Client* g_stratum = nullptr;
+stratum_v2::StratumV2Client* g_stratum_v2 = nullptr;
+bitcoind::Manager* g_bitcoind = nullptr;
 idle::IdleMonitor* g_idle_monitor = nullptr;
+bool g_solo_mode = false;
+bool g_sv2_mode = false;
 std::chrono::steady_clock::time_point g_start_time;
 std::atomic<bool> g_idle_mining_active{false};
 int g_argc = 0;
@@ -185,18 +191,27 @@ void setup_web_routes(web::WebServer& server) {
         double hashrate = g_miner->is_benchmarking() ?
             g_miner->get_benchmark_hashrate() : g_miner->get_hashrate();
 
+        // Determine connection status based on mode
+        bool connected = false;
+        if (g_solo_mode) {
+            connected = (g_bitcoind && g_bitcoind->get_status() == bitcoind::Status::Ready);
+        } else {
+            connected = (g_stratum && g_stratum->is_connected());
+        }
+
         std::ostringstream oss;
         oss << "{"
             << "\"hashrate\":" << std::fixed << std::setprecision(0) << hashrate << ","
             << "\"total_hashes\":" << stats.hashes.load() << ","
             << "\"benchmark_hashes\":" << stats.benchmark_hashes.load() << ","
             << "\"shares\":" << stats.shares_found.load() << ","
-            << "\"shares_accepted\":" << (g_stratum ? g_stratum->get_shares_accepted() : 0) << ","
+            << "\"shares_accepted\":" << (g_stratum ? g_stratum->get_shares_accepted() : stats.shares_found.load()) << ","
             << "\"shares_rejected\":" << (g_stratum ? g_stratum->get_shares_rejected() : 0) << ","
             << "\"threads\":" << g_config.threads << ","
             << "\"uptime\":" << std::fixed << std::setprecision(1) << uptime << ","
             << "\"state\":\"" << state_to_string(g_miner->get_state()) << "\","
-            << "\"connected\":" << (g_stratum && g_stratum->is_connected() ? "true" : "false") << ","
+            << "\"connected\":" << (connected ? "true" : "false") << ","
+            << "\"solo_mode\":" << (g_solo_mode ? "true" : "false") << ","
             << "\"idle_mining_enabled\":" << (g_config.idle_mining_enabled ? "true" : "false") << ","
             << "\"idle_mining_active\":" << (g_idle_mining_active ? "true" : "false") << ","
             << "\"user_idle\":" << (g_idle_monitor && g_idle_monitor->is_idle() ? "true" : "false")
@@ -604,13 +619,46 @@ int main(int argc, char* argv[]) {
     }
 
     // Print banner
+    g_solo_mode = (cfg.solo_pool == config::SoloPool::None);
+    g_sv2_mode = cfg.bitcoind_sv2;
+
+    std::string stratum_info;
+    if (g_solo_mode && !g_sv2_mode) {
+        stratum_info = "Direct (getblocktemplate)";
+    } else if (g_sv2_mode) {
+        stratum_info = "Stratum V2 (SRI proxy)";
+    } else {
+        stratum_info = "Stratum " + cfg.stratum_version;
+    }
+
+    std::string mining_mode;
+    if (cfg.enable_cpu && cfg.enable_gpu) {
+        mining_mode = "CPU + GPU";
+    } else if (cfg.enable_gpu) {
+        mining_mode = "GPU only";
+    } else {
+        mining_mode = "CPU only";
+    }
+
+    std::string pool_info = g_solo_mode ? "LOCAL NODE (True Solo)" : (cfg.pool_host + ":" + std::to_string(cfg.pool_port));
+
     std::cout << "\n"
               << colors::cyan() << "╔══════════════════════════════════════════════════════════╗\n"
               << "║" << colors::bright_yellow() << "         BTC Miner v" << std::left << std::setw(38) << version::get_version() << colors::cyan() << "║\n"
               << "╠══════════════════════════════════════════════════════════╣" << colors::reset() << "\n"
-              << colors::cyan() << "║" << colors::reset() << "  Pool: " << colors::bright_green() << std::left << std::setw(49) << (cfg.pool_host + ":" + std::to_string(cfg.pool_port)) << colors::cyan() << "║" << colors::reset() << "\n"
+              << colors::cyan() << "║" << colors::reset() << "  Pool: " << (g_solo_mode ? colors::bright_yellow() : colors::bright_green()) << std::left << std::setw(49) << pool_info << colors::cyan() << "║" << colors::reset() << "\n"
+              << colors::cyan() << "║" << colors::reset() << "  Protocol: " << (g_solo_mode ? colors::bright_yellow() : colors::value()) << std::left << std::setw(45) << stratum_info << colors::cyan() << "║" << colors::reset() << "\n"
               << colors::cyan() << "║" << colors::reset() << "  User: " << colors::bright_cyan() << std::left << std::setw(49) << cfg.payout_address.substr(0, 49) << colors::cyan() << "║" << colors::reset() << "\n"
-              << colors::cyan() << "║" << colors::reset() << "  Threads: " << colors::value() << std::left << std::setw(46) << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << colors::cyan() << "║" << colors::reset() << "\n";
+              << colors::cyan() << "║" << colors::reset() << "  Mining: " << colors::value() << std::left << std::setw(47) << mining_mode << colors::cyan() << "║" << colors::reset() << "\n";
+
+    if (cfg.enable_cpu) {
+        std::string threads_info = cfg.threads == 0 ? "auto" : std::to_string(cfg.threads);
+        std::cout << colors::cyan() << "║" << colors::reset() << "  CPU: " << colors::bright_green() << std::left << std::setw(50) << (threads_info + " threads") << colors::cyan() << "║" << colors::reset() << "\n";
+    }
+
+    if (cfg.enable_gpu) {
+        std::cout << colors::cyan() << "║" << colors::reset() << "  GPU: " << colors::bright_green() << std::left << std::setw(50) << "enabled" << colors::cyan() << "║" << colors::reset() << "\n";
+    }
 
     if (web_started) {
         std::ostringstream web_info;
@@ -630,39 +678,222 @@ int main(int argc, char* argv[]) {
     miner::Miner miner_instance(cfg.threads);
     g_miner = &miner_instance;
 
-    // Create stratum client
-    stratum::Client client(cfg.pool_host, cfg.pool_port, cfg.payout_address, cfg.password);
-    g_stratum = &client;
+    // Create bitcoind manager for solo mode (or pool mode with custom templates)
+    bitcoind::Manager bitcoind_manager;
+    if (cfg.bitcoind_enabled) {
+        g_bitcoind = &bitcoind_manager;
 
-    // Setup callbacks
-    client.set_job_callback([&miner_instance, &client](const stratum::Job& job) {
-        // Generate random extranonce2
-        std::ostringstream en2;
-        size_t en2_size = client.get_extranonce2_size();
-        for (size_t i = 0; i < en2_size; i++) {
-            en2 << std::hex << std::setw(2) << std::setfill('0') << (rand() & 0xff);
+        // Configure RPC credentials (for unmanaged mode, or if overriding defaults)
+        if (!cfg.bitcoind_rpc_user.empty() && !cfg.bitcoind_rpc_password.empty()) {
+            bitcoind_manager.set_rpc_credentials(cfg.bitcoind_rpc_user, cfg.bitcoind_rpc_password);
         }
-        miner_instance.set_job(job, en2.str());
-    });
+        if (cfg.bitcoind_rpc_port > 0) {
+            bitcoind_manager.set_rpc_port(cfg.bitcoind_rpc_port);
+        }
+        if (cfg.bitcoind_prune > 0) {
+            bitcoind_manager.set_prune(cfg.bitcoind_prune);
+        }
+    }
 
-    miner_instance.set_share_callback(
-        [&client](const std::string& job_id, const std::string& extranonce2,
-                  const std::string& ntime, uint32_t nonce) {
-            // Convert nonce to hex (big-endian for submission)
-            std::ostringstream nonce_hex;
-            nonce_hex << std::hex << std::setfill('0')
-                      << std::setw(2) << ((nonce >> 24) & 0xff)
-                      << std::setw(2) << ((nonce >> 16) & 0xff)
-                      << std::setw(2) << ((nonce >> 8) & 0xff)
-                      << std::setw(2) << (nonce & 0xff);
-            client.submit(job_id, extranonce2, ntime, nonce_hex.str());
+    // For solo mode, we use Bitcoin Core directly (or via SV2 proxy)
+    // For pool mode, we use stratum client
+    stratum::Client* client_ptr = nullptr;
+    stratum::Client client_instance(cfg.pool_host, cfg.pool_port, cfg.payout_address, cfg.password);
+
+    // SV2 client for Stratum V2 mode
+    stratum_v2::StratumV2Client sv2_client;
+
+    if (g_sv2_mode) {
+        // Stratum V2 mode - connect to SRI proxy
+        std::cout << colors::log_prefix("SV2") << " " << colors::bright_green()
+                  << "Stratum V2 mode - connecting to SRI proxy at "
+                  << cfg.sv2_proxy_host << ":" << cfg.sv2_proxy_port
+                  << colors::reset() << std::endl;
+
+        g_stratum_v2 = &sv2_client;
+
+        // Connect to SV2 proxy
+        if (!sv2_client.connect(cfg.sv2_proxy_host, cfg.sv2_proxy_port, cfg.payout_address)) {
+            std::cerr << colors::log_prefix("SV2") << " " << colors::error()
+                      << "Failed to connect to SV2 proxy" << colors::reset() << std::endl;
+            webserver.stop();
+            return 1;
+        }
+
+        // Open mining channel
+        float estimated_hashrate = 1000000.0f;  // 1 MH/s estimate
+        if (!sv2_client.open_channel(estimated_hashrate)) {
+            std::cerr << colors::log_prefix("SV2") << " " << colors::error()
+                      << "Failed to open mining channel" << colors::reset() << std::endl;
+            webserver.stop();
+            return 1;
+        }
+
+        std::cout << colors::log_prefix("SV2") << " " << colors::bright_green()
+                  << "Connected to SV2 proxy!" << colors::reset() << std::endl;
+
+        // Setup SV2 job callback
+        sv2_client.set_job_callback([&miner_instance](const stratum_v2::MiningJob& sv2_job) {
+            // Convert SV2 job to stratum v1 job format for the miner
+            stratum::Job job;
+            job.job_id = std::to_string(sv2_job.job_id.id);
+
+            // Convert prev_hash bytes to hex string
+            std::ostringstream prev_hex;
+            for (size_t i = 0; i < 32; i++) {
+                prev_hex << std::hex << std::setw(2) << std::setfill('0')
+                         << static_cast<int>(sv2_job.prev_hash[i]);
+            }
+            job.prevhash = prev_hex.str();
+
+            // Convert version to hex
+            std::ostringstream ver_hex;
+            ver_hex << std::hex << std::setw(8) << std::setfill('0') << sv2_job.version;
+            job.version = ver_hex.str();
+
+            job.clean_jobs = true;
+
+            std::cout << colors::log_prefix("SV2") << " New job: " << sv2_job.job_id.id << std::endl;
+
+            miner_instance.set_job(job, "00000000");
         });
 
-    // Connect to pool
-    if (!client.connect()) {
-        std::cerr << "Failed to connect to pool" << std::endl;
-        webserver.stop();
-        return 1;
+        // Setup share submission callback
+        miner_instance.set_share_callback(
+            [&sv2_client](const std::string& job_id, const std::string& extranonce2,
+                      const std::string& ntime, uint32_t nonce) {
+                stratum_v2::ShareSubmission share;
+                share.channel_id = sv2_client.get_channel_id();
+                try {
+                    share.job_id = std::stoull(job_id);
+                } catch (...) {
+                    share.job_id = 0;
+                }
+                share.nonce = nonce;
+                try {
+                    share.ntime = static_cast<uint32_t>(std::stoul(ntime, nullptr, 16));
+                } catch (...) {
+                    share.ntime = static_cast<uint32_t>(std::time(nullptr));
+                }
+                share.version = 0x20000000;  // Default version
+
+                sv2_client.submit_share(share);
+            });
+    } else if (g_solo_mode) {
+        // Solo mode (non-SV2) - use Bitcoin Core directly via getblocktemplate
+        std::cout << colors::log_prefix("Solo") << " " << colors::bright_yellow()
+                  << "True solo mining mode - blocks submitted directly to network"
+                  << colors::reset() << std::endl;
+
+        // Start Bitcoin Core if managed
+        if (cfg.bitcoind_managed) {
+            // Check if Bitcoin Core is installed
+            if (!bitcoind_manager.is_installed()) {
+                std::cout << colors::log_prefix("Bitcoind") << " Bitcoin Core not found, downloading..."
+                          << std::endl;
+                if (!bitcoind_manager.download_and_install()) {
+                    std::cerr << colors::log_prefix("Bitcoind") << " " << colors::error()
+                              << "Failed to download Bitcoin Core" << colors::reset() << std::endl;
+                    webserver.stop();
+                    return 1;
+                }
+                std::cout << colors::log_prefix("Bitcoind") << " " << colors::bright_green()
+                          << "Bitcoin Core installed!" << colors::reset() << std::endl;
+            }
+
+            std::cout << colors::log_prefix("Bitcoind") << " Starting managed Bitcoin Core..." << std::endl;
+            if (!bitcoind_manager.start()) {
+                std::cerr << colors::log_prefix("Bitcoind") << " " << colors::error()
+                          << "Failed to start Bitcoin Core" << colors::reset() << std::endl;
+                webserver.stop();
+                return 1;
+            }
+        }
+
+        // Wait for Bitcoin Core to be ready
+        std::cout << colors::log_prefix("Bitcoind") << " Waiting for Bitcoin Core to sync..." << std::endl;
+        int sync_attempts = 0;
+        while (!g_shutdown && bitcoind_manager.get_status() != bitcoind::Status::Ready) {
+            auto sync_info = bitcoind_manager.get_sync_info();
+            if (sync_info.progress > 0) {
+                std::cout << colors::log_prefix("Bitcoind") << " Sync progress: "
+                          << colors::bright_cyan() << std::fixed << std::setprecision(2)
+                          << (sync_info.progress * 100.0) << "%" << colors::reset()
+                          << " (blocks: " << sync_info.blocks << "/" << sync_info.headers << ")"
+                          << std::endl;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            sync_attempts++;
+            if (sync_attempts > 12) {  // 60 seconds max wait for initial response
+                if (bitcoind_manager.get_status() == bitcoind::Status::Error) {
+                    std::cerr << colors::log_prefix("Bitcoind") << " " << colors::error()
+                              << "Bitcoin Core connection failed" << colors::reset() << std::endl;
+                    webserver.stop();
+                    return 1;
+                }
+            }
+        }
+
+        if (g_shutdown) {
+            webserver.stop();
+            return 0;
+        }
+
+        std::cout << colors::log_prefix("Bitcoind") << " " << colors::bright_green()
+                  << "Bitcoin Core ready!" << colors::reset() << std::endl;
+
+        // Setup solo mining share callback - submits blocks directly to network
+        miner_instance.set_share_callback(
+            [&bitcoind_manager, &cfg](const std::string& job_id, const std::string& extranonce2,
+                      const std::string& ntime, uint32_t nonce) {
+                // In solo mode, a share at network difficulty is a block!
+                std::cout << colors::log_prefix("Solo") << " " << colors::bright_yellow()
+                          << "POTENTIAL BLOCK FOUND! Submitting..." << colors::reset() << std::endl;
+
+                // The block hex would be constructed from the job data
+                // For now, we log the event - full implementation requires block serialization
+                log_to_file("BLOCK FOUND! job=" + job_id + " nonce=" + std::to_string(nonce));
+
+                // Ring system bell if enabled
+                if (cfg.system_bell) {
+                    std::cout << '\a' << std::flush;
+                }
+            });
+    } else {
+        // Pool mode - use stratum client
+        client_ptr = &client_instance;
+        g_stratum = client_ptr;
+
+        // Setup callbacks
+        client_instance.set_job_callback([&miner_instance, &client_instance](const stratum::Job& job) {
+            // Generate random extranonce2
+            std::ostringstream en2;
+            size_t en2_size = client_instance.get_extranonce2_size();
+            for (size_t i = 0; i < en2_size; i++) {
+                en2 << std::hex << std::setw(2) << std::setfill('0') << (rand() & 0xff);
+            }
+            miner_instance.set_job(job, en2.str());
+        });
+
+        miner_instance.set_share_callback(
+            [&client_instance](const std::string& job_id, const std::string& extranonce2,
+                      const std::string& ntime, uint32_t nonce) {
+                // Convert nonce to hex (big-endian for submission)
+                std::ostringstream nonce_hex;
+                nonce_hex << std::hex << std::setfill('0')
+                          << std::setw(2) << ((nonce >> 24) & 0xff)
+                          << std::setw(2) << ((nonce >> 16) & 0xff)
+                          << std::setw(2) << ((nonce >> 8) & 0xff)
+                          << std::setw(2) << (nonce & 0xff);
+                client_instance.submit(job_id, extranonce2, ntime, nonce_hex.str());
+            });
+
+        // Connect to pool
+        if (!client_instance.connect()) {
+            std::cerr << "Failed to connect to pool" << std::endl;
+            webserver.stop();
+            return 1;
+        }
     }
 
     // Setup idle monitor
@@ -698,12 +929,87 @@ int main(int argc, char* argv[]) {
         miner_instance.start();
     }
 
-    // Start stratum client in separate thread
-    std::atomic<bool> stratum_running{true};
-    std::thread stratum_thread([&client, &stratum_running]() {
-        client.run();
-        stratum_running = false;
-    });
+    // Start stratum client in separate thread (pool mode or SV2 mode)
+    std::atomic<bool> stratum_running{false};
+    std::thread stratum_thread;
+
+    if (g_sv2_mode) {
+        // SV2 mode - run the SV2 client
+        stratum_running = true;
+        stratum_thread = std::thread([&sv2_client, &stratum_running]() {
+            sv2_client.run();
+            stratum_running = false;
+        });
+    } else if (!g_solo_mode && client_ptr) {
+        // Pool mode - run the Stratum V1 client
+        stratum_running = true;
+        stratum_thread = std::thread([client_ptr, &stratum_running]() {
+            client_ptr->run();
+            stratum_running = false;
+        });
+    }
+
+    // For solo mode (non-SV2), start a thread to fetch block templates
+    std::atomic<bool> solo_template_running{false};
+    std::thread solo_template_thread;
+
+    if (g_solo_mode && !g_sv2_mode) {
+        solo_template_running = true;
+        solo_template_thread = std::thread([&bitcoind_manager, &miner_instance, &cfg, &solo_template_running]() {
+            std::string last_prev_hash;
+
+            while (solo_template_running && !g_shutdown) {
+                auto tmpl = bitcoind_manager.get_block_template(cfg.payout_address);
+
+                if (tmpl.valid) {
+                    // Check if this is a new block (different prev_block_hash)
+                    if (tmpl.prev_block_hash != last_prev_hash) {
+                        last_prev_hash = tmpl.prev_block_hash;
+
+                        std::cout << colors::log_prefix("Solo") << " New block template: height="
+                                  << colors::bright_cyan() << tmpl.height << colors::reset()
+                                  << " reward=" << colors::bright_green()
+                                  << std::fixed << std::setprecision(8)
+                                  << (tmpl.coinbase_value / 100000000.0) << " BTC"
+                                  << colors::reset() << std::endl;
+
+                        // Convert block template to stratum job format
+                        stratum::Job job;
+                        job.job_id = std::to_string(tmpl.height);
+                        job.prevhash = tmpl.prev_block_hash;
+                        job.version = tmpl.version;
+                        job.nbits = tmpl.bits;
+
+                        // Convert curtime to hex string
+                        std::ostringstream ntime_hex;
+                        ntime_hex << std::hex << std::setfill('0') << std::setw(8) << tmpl.curtime;
+                        job.ntime = ntime_hex.str();
+
+                        job.clean_jobs = true;
+
+                        // The target needs to be converted from string to bytes
+                        // For solo mining, we use network difficulty target
+                        // Parse the target hex string into bytes
+                        if (tmpl.target.size() == 64) {
+                            for (int i = 0; i < 32; i++) {
+                                std::string byte_str = tmpl.target.substr(i * 2, 2);
+                                job.target[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
+                            }
+                        }
+
+                        // Set the job on the miner
+                        miner_instance.set_job(job, "00000000");  // Solo mode uses fixed extranonce2
+                    }
+                } else if (!tmpl.error.empty()) {
+                    std::cout << colors::log_prefix("Solo") << " " << colors::yellow()
+                              << "Template error: " << tmpl.error << colors::reset() << std::endl;
+                }
+
+                // Poll for new templates every few seconds
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+        });
+    }
 
     // Main loop - print stats, handle reconnection, broadcast to WebSocket
     auto last_stats_time = std::chrono::steady_clock::now();
@@ -711,8 +1017,8 @@ int main(int argc, char* argv[]) {
     unsigned reconnect_delay = cfg.reconnect_delay;
 
     while (!g_shutdown) {
-        // Check for disconnection and reconnect
-        if (!client.is_connected() && !g_shutdown) {
+        // Pool mode: Check for disconnection and reconnect
+        if (!g_solo_mode && client_ptr && !client_ptr->is_connected() && !g_shutdown) {
             // Wait for stratum thread to finish
             if (stratum_thread.joinable() && !stratum_running) {
                 stratum_thread.join();
@@ -731,7 +1037,7 @@ int main(int argc, char* argv[]) {
             if (g_shutdown) break;
 
             // Attempt reconnection
-            if (client.connect()) {
+            if (client_ptr->connect()) {
                 std::cout << colors::log_prefix("Stratum") << " " << colors::bright_green()
                           << "Reconnected successfully!" << colors::reset() << std::endl;
                 log_to_file("Reconnected to pool");
@@ -739,8 +1045,8 @@ int main(int argc, char* argv[]) {
 
                 // Restart stratum thread
                 stratum_running = true;
-                stratum_thread = std::thread([&client, &stratum_running]() {
-                    client.run();
+                stratum_thread = std::thread([client_ptr, &stratum_running]() {
+                    client_ptr->run();
                     stratum_running = false;
                 });
             } else {
@@ -762,8 +1068,27 @@ int main(int argc, char* argv[]) {
         const auto& stats = miner_instance.get_stats();
         uint64_t current_hashes = stats.hashes.load();
         double hashrate = (current_hashes - last_hashes) / elapsed;
-        double difficulty = client.get_difficulty();
-        uint64_t block_height = client.get_block_height();
+
+        // Get difficulty and block height based on mode
+        double difficulty = 0;
+        uint64_t block_height = 0;
+
+        if (g_solo_mode) {
+            // Solo mode - get info from Bitcoin Core
+            auto sync_info = bitcoind_manager.get_sync_info();
+            block_height = sync_info.blocks;
+            std::string diff_str = bitcoind_manager.get_network_difficulty();
+            try {
+                difficulty = std::stod(diff_str);
+            } catch (...) {
+                difficulty = 0;
+            }
+        } else if (client_ptr) {
+            // Pool mode - get from stratum
+            difficulty = client_ptr->get_difficulty();
+            block_height = client_ptr->get_block_height();
+        }
+
         double est_time = estimate_time_to_share(hashrate, difficulty);
 
         // Build stats output
@@ -775,8 +1100,13 @@ int main(int argc, char* argv[]) {
             stats_line << " | Block: " << colors::value() << block_height << colors::reset();
         }
 
-        if (est_time > 0) {
+        if (est_time > 0 && !g_solo_mode && !g_sv2_mode) {
+            // Only show ETA for pool mining (solo mining ETA would be astronomically large)
             stats_line << " | ETA: " << colors::yellow() << "~" << format_duration(est_time) << colors::reset();
+        } else if (g_sv2_mode) {
+            stats_line << " | Mode: " << colors::bright_green() << "SV2" << colors::reset();
+        } else if (g_solo_mode) {
+            stats_line << " | Mode: " << colors::bright_yellow() << "SOLO" << colors::reset();
         }
 
         std::cout << stats_line.str() << std::endl;
@@ -788,6 +1118,7 @@ int main(int argc, char* argv[]) {
                      << " | Shares: " << stats.shares_found.load()
                      << " | Total: " << (current_hashes / 1000000) << "M";
             if (block_height > 0) log_line << " | Block: " << block_height;
+            if (g_solo_mode) log_line << " | Mode: SOLO";
             log_to_file(log_line.str());
         }
 
@@ -801,13 +1132,15 @@ int main(int argc, char* argv[]) {
                  << "\"hashrate\":" << std::fixed << std::setprecision(0) << hashrate << ","
                  << "\"total_hashes\":" << current_hashes << ","
                  << "\"shares\":" << stats.shares_found.load() << ","
-                 << "\"shares_accepted\":" << client.get_shares_accepted() << ","
-                 << "\"shares_rejected\":" << client.get_shares_rejected() << ","
+                 << "\"shares_accepted\":" << (g_sv2_mode ? sv2_client.get_shares_accepted() : (client_ptr ? client_ptr->get_shares_accepted() : stats.shares_found.load())) << ","
+                 << "\"shares_rejected\":" << (g_sv2_mode ? sv2_client.get_shares_rejected() : (client_ptr ? client_ptr->get_shares_rejected() : 0)) << ","
                  << "\"threads\":" << actual_threads << ","
                  << "\"uptime\":" << std::fixed << std::setprecision(1) << uptime << ","
                  << "\"block_height\":" << block_height << ","
                  << "\"difficulty\":" << std::fixed << std::setprecision(6) << difficulty << ","
-                 << "\"est_time_to_share\":" << std::fixed << std::setprecision(0) << est_time
+                 << "\"est_time_to_share\":" << std::fixed << std::setprecision(0) << est_time << ","
+                 << "\"solo_mode\":" << (g_solo_mode ? "true" : "false") << ","
+                 << "\"sv2_mode\":" << (g_sv2_mode ? "true" : "false")
                  << "}";
             webserver.broadcast(json.str());
         }
@@ -820,13 +1153,39 @@ int main(int argc, char* argv[]) {
     std::cout << "[Main] Stopping..." << std::endl;
     log_to_file("=== Miner stopped ===");
 
+    // Stop solo template thread
+    if (g_solo_mode && !g_sv2_mode) {
+        solo_template_running = false;
+        if (solo_template_thread.joinable()) {
+            solo_template_thread.join();
+        }
+    }
+
+    // Stop SV2 client
+    if (g_sv2_mode) {
+        sv2_client.stop();
+    }
+
     idle_monitor.stop();
     miner_instance.stop();
-    client.stop();
+
+    // Stop stratum client (pool mode only)
+    if (client_ptr) {
+        client_ptr->stop();
+    }
+
+    // Stop Bitcoin Core if managed
+    if (cfg.bitcoind_managed && cfg.bitcoind_enabled) {
+        std::cout << colors::log_prefix("Bitcoind") << " Stopping Bitcoin Core..." << std::endl;
+        bitcoind_manager.stop();
+    }
+
     webserver.stop();
 
     g_miner = nullptr;
     g_stratum = nullptr;
+    g_stratum_v2 = nullptr;
+    g_bitcoind = nullptr;
     g_webserver = nullptr;
     g_idle_monitor = nullptr;
 

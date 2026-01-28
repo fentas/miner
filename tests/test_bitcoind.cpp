@@ -204,6 +204,105 @@ void test_manager_initial_status() {
 }
 
 // ===========================================
+// Solo Mining Structure Tests
+// ===========================================
+
+void test_block_template_default() {
+    TEST_GROUP("BlockTemplate Default Values");
+
+    bitcoind::BlockTemplate tmpl;
+
+    TEST_RESULT("BlockTemplate defaults to invalid", tmpl.valid == false);
+    TEST_RESULT("BlockTemplate version is empty", tmpl.version.empty());
+    TEST_RESULT("BlockTemplate prev_block_hash is empty", tmpl.prev_block_hash.empty());
+    TEST_RESULT("BlockTemplate bits is empty", tmpl.bits.empty());
+    TEST_RESULT("BlockTemplate curtime is 0", tmpl.curtime == 0);
+    TEST_RESULT("BlockTemplate height is 0", tmpl.height == 0);
+    TEST_RESULT("BlockTemplate coinbase_value is 0", tmpl.coinbase_value == 0);
+    TEST_RESULT("BlockTemplate transactions is empty", tmpl.transactions.empty());
+    TEST_RESULT("BlockTemplate tx_hashes is empty", tmpl.tx_hashes.empty());
+    TEST_RESULT("BlockTemplate error is empty", tmpl.error.empty());
+}
+
+void test_submit_result_default() {
+    TEST_GROUP("SubmitResult Default Values");
+
+    bitcoind::SubmitResult result;
+
+    TEST_RESULT("SubmitResult defaults to not accepted", result.accepted == false);
+    TEST_RESULT("SubmitResult message is empty", result.message.empty());
+    TEST_RESULT("SubmitResult block_hash is empty", result.block_hash.empty());
+}
+
+void test_block_template_with_data() {
+    TEST_GROUP("BlockTemplate With Data");
+
+    bitcoind::BlockTemplate tmpl;
+    tmpl.valid = true;
+    tmpl.version = "20000000";
+    tmpl.prev_block_hash = "0000000000000000000123456789abcdef0123456789abcdef0123456789abcdef";
+    tmpl.bits = "170b3ce9";
+    tmpl.target = "00000000000000000007b3ce00000000000000000000000000000000000000000";
+    tmpl.curtime = 1700000000;
+    tmpl.height = 800000;
+    tmpl.coinbase_value = 312500000;  // 3.125 BTC in satoshis
+
+    TEST_RESULT("BlockTemplate valid is set", tmpl.valid == true);
+    TEST_RESULT("BlockTemplate version is set", tmpl.version == "20000000");
+    TEST_RESULT("BlockTemplate height is set", tmpl.height == 800000);
+    TEST_RESULT("BlockTemplate coinbase_value is 3.125 BTC", tmpl.coinbase_value == 312500000);
+}
+
+void test_submit_result_accepted() {
+    TEST_GROUP("SubmitResult Accepted");
+
+    bitcoind::SubmitResult result;
+    result.accepted = true;
+    result.message = "Block accepted!";
+    result.block_hash = "0000000000000000000abcdef123456789abcdef123456789abcdef123456789";
+
+    TEST_RESULT("SubmitResult accepted is set", result.accepted == true);
+    TEST_RESULT("SubmitResult message is set", result.message == "Block accepted!");
+    TEST_RESULT("SubmitResult block_hash is set", !result.block_hash.empty());
+}
+
+void test_submit_result_rejected() {
+    TEST_GROUP("SubmitResult Rejected");
+
+    bitcoind::SubmitResult result;
+    result.accepted = false;
+    result.message = "Block rejected: high-hash";
+
+    TEST_RESULT("SubmitResult rejected", result.accepted == false);
+    TEST_RESULT("SubmitResult has rejection message", result.message.find("rejected") != std::string::npos);
+}
+
+void test_sync_info_default() {
+    TEST_GROUP("SyncInfo Default Values");
+
+    bitcoind::SyncInfo info;
+
+    TEST_RESULT("SyncInfo progress defaults to 0", info.progress == 0.0);
+    TEST_RESULT("SyncInfo headers defaults to 0", info.headers == 0);
+    TEST_RESULT("SyncInfo blocks defaults to 0", info.blocks == 0);
+    TEST_RESULT("SyncInfo initial_block_download defaults to true", info.initial_block_download == true);
+}
+
+void test_sync_info_synced() {
+    TEST_GROUP("SyncInfo Fully Synced");
+
+    bitcoind::SyncInfo info;
+    info.progress = 1.0;
+    info.headers = 800000;
+    info.blocks = 800000;
+    info.initial_block_download = false;
+
+    TEST_RESULT("SyncInfo shows 100% progress", info.progress == 1.0);
+    TEST_RESULT("SyncInfo headers equals blocks", info.headers == info.blocks);
+    TEST_RESULT("SyncInfo IBD is complete", info.initial_block_download == false);
+}
+
+// ===========================================
 // Run All Tests
 // ===========================================
 
@@ -222,6 +321,15 @@ void run_all() {
     test_manager_status_strings();
     test_manager_is_installed_false();
     test_manager_initial_status();
+
+    // Solo mining structure tests
+    test_block_template_default();
+    test_submit_result_default();
+    test_block_template_with_data();
+    test_submit_result_accepted();
+    test_submit_result_rejected();
+    test_sync_info_default();
+    test_sync_info_synced();
 }
 
 } // namespace test_bitcoind

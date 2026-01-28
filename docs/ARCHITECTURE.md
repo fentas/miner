@@ -280,14 +280,14 @@ Key-value config parser with pool presets and validation.
 enum class SoloPool {
     Custom,     // User-defined pool
     CKPool,     // solo.ckpool.org (Stratum V1)
-    Braiins     // solo.braiins.com (Stratum V2)
+    Braiins     // solo.stratum.braiins.com (Stratum V1)
 };
 ```
 
 | Preset | Host | Port | Protocol |
 | ------ | ---- | ---- | -------- |
 | CKPool | solo.ckpool.org | 3333 | Stratum V1 |
-| Braiins | solo.braiins.com | 3333 | Stratum V2 |
+| Braiins | solo.stratum.braiins.com | 3333 | Stratum V1 |
 
 #### Config Struct
 

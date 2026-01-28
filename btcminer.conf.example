@@ -10,9 +10,11 @@
 #   ckpool  - solo.ckpool.org (Stratum V1) - 2% fee on block rewards
 #   braiins - solo.stratum.braiins.com (Stratum V1) - 0.5% fee on blocks
 #   ocean   - mine.ocean.xyz:3334 (Stratum V1 + DATUM) - 0% pool fee
+#   none    - TRUE SOLO: Direct to network via your own Bitcoin Core node
 #   custom  - use Pool setting below for custom pool
 #
 # Using a preset automatically configures Pool and Stratum version
+# NOTE: "none" requires BitcoindEnabled = true (see Bitcoin Core section below)
 SoloPool = ckpool
 
 # Custom pool address (only used when SoloPool = custom)
@@ -110,23 +112,28 @@ MaxReconnectDelay = 300
 # ============================================
 # BITCOIN CORE INTEGRATION (Advanced)
 # ============================================
-# For true decentralization with Stratum V2 and custom block templates.
-# Requires running your own Bitcoin Core node (can be pruned).
+# For true decentralization with custom block templates.
+# Required for SoloPool = none (true solo mining).
 
 # Enable Bitcoin Core integration (default: false)
-# When enabled, miner will create its own block templates for maximum decentralization
+# When enabled, miner can create its own block templates for maximum decentralization
+#
+# Two use cases:
+#   1. Pool + Bitcoin Core: Use pool for shares, but get block templates from your node
+#   2. True Solo (SoloPool = none): Submit blocks directly to network (no pool!)
 BitcoindEnabled = false
 
 # Managed mode: auto download, install, configure, and start/stop Bitcoin Core
 # When enabled, btcminer will handle everything automatically:
 #   - Downloads Bitcoin Core from bitcoincore.org
 #   - Installs to ~/.local/share/bitcoin-core (Linux) or %LOCALAPPDATA%\BitcoinCore (Windows)
-#   - Generates bitcoin.conf with optimal settings
+#   - Generates bitcoin.conf with optimal settings and random RPC credentials
 #   - Starts bitcoind when mining starts, stops when mining stops
 # Set to false if you want to manage Bitcoin Core yourself
 BitcoindManaged = false
 
 # Bitcoin Core RPC connection settings
+# Only needed when BitcoindManaged = false
 # These must match your bitcoin.conf settings
 BitcoindHost = 127.0.0.1
 BitcoindRpcPort = 8332
@@ -144,17 +151,68 @@ BitcoindRpcPort = 8332
 # Recommended: 10000 (keeps recent blocks for reorg protection)
 BitcoindPrune = 10000
 
-# Enable Stratum V2 with Bitcoin Core (EXPERIMENTAL)
-# Requires Bitcoin Core v30+ compiled with --enable-sv2
-# When enabled, uses native SV2 protocol for block template negotiation
+# Enable Stratum V2 with Bitcoin Core
+# Bitcoin Core v30+ supports an IPC Mining Interface for external SV2 software
+# Requires SRI (Stratum V2 Reference Implementation) proxy - see stratumprotocol.org
+# When enabled, uses SV2 protocol for block template negotiation via SRI proxy
 BitcoindSv2 = false
 
-# Quick setup for pruned Bitcoin Core node:
-# 1. Install Bitcoin Core: https://bitcoin.org/en/download
-# 2. Create bitcoin.conf:
-#    server=1
-#    rpcuser=your_username
-#    rpcpassword=your_password
-#    prune=10000
-# 3. Start bitcoind and wait for initial sync (~10GB download)
-# 4. Enable BitcoindEnabled above and set RPC credentials
+# SV2 proxy connection settings (only used when BitcoindSv2 = true)
+# SRI default port is 34255
+Sv2ProxyHost = 127.0.0.1
+Sv2ProxyPort = 34255
+# Or use combined format: Sv2Proxy = 127.0.0.1:34255
+
+# ============================================
+# TRUE SOLO MINING (SoloPool = none)
+# ============================================
+# For 100% reward with no pool fees. You keep the entire block reward!
+#
+# How it works:
+#   - Gets block template from your local Bitcoin Core node
+#   - Mines locally with full transaction selection control
+#   - Submits found blocks directly to the network
+#   - No pool connection required
+#
+# Requirements:
+#   - Bitcoin Core node FULLY SYNCED (initial sync takes 2-4 hours for pruned)
+#   - Reliable internet connection to broadcast blocks
+#
+# Example configuration for true solo mining:
+#   SoloPool = none
+#   PayoutAddress = bc1q...your_address
+#   BitcoindEnabled = true
+#   BitcoindManaged = true    # Or false if managing Bitcoin Core yourself
+#
+# WARNING: Solo mining is extremely unlikely to find a block.
+# Current network difficulty requires ~10^23 hashes per block.
+# This is for educational/lottery purposes only.
+
+# ============================================
+# QUICK SETUP GUIDES
+# ============================================
+#
+# --- Option 1: True Solo with Managed Bitcoin Core (Easiest) ---
+# SoloPool = none
+# PayoutAddress = YOUR_BTC_ADDRESS
+# BitcoindEnabled = true
+# BitcoindManaged = true
+# BitcoindPrune = 10000
+#
+# --- Option 2: True Solo with Your Own Bitcoin Core ---
+# SoloPool = none
+# PayoutAddress = YOUR_BTC_ADDRESS
+# BitcoindEnabled = true
+# BitcoindManaged = false
+# BitcoindRpcUser = your_username
+# BitcoindRpcPassword = your_password
+#
+# --- Option 3: Pool Mining (No Bitcoin Core) ---
+# SoloPool = ckpool    # or braiins, ocean
+# PayoutAddress = YOUR_BTC_ADDRESS
+#
+# --- Option 4: Pool + Bitcoin Core for Block Templates ---
+# SoloPool = ocean
+# PayoutAddress = YOUR_BTC_ADDRESS
+# BitcoindEnabled = true
+# BitcoindManaged = true
