@@ -83,7 +83,8 @@ pub struct TuiState {
     worker_count: AtomicUsize,
 
     // GPU info
-    gpu_enabled: AtomicBool,
+    gpu_configured: AtomicBool,  // User enabled GPU in config
+    gpu_available: AtomicBool,   // GPU actually detected and usable
     gpu_devices: RwLock<Vec<String>>,
     gpu_hashrate: AtomicU64,
 
@@ -92,6 +93,12 @@ pub struct TuiState {
     connected: AtomicBool,
     syncing: AtomicBool,
     sync_progress: AtomicU64, // Stored as progress * 100 (for decimal precision)
+
+    // Download progress (e.g., for AssumeUTXO)
+    downloading: AtomicBool,
+    download_name: RwLock<String>,
+    download_bytes: AtomicU64,
+    download_total: AtomicU64,
 
     // Timing
     start_time: Instant,
@@ -120,13 +127,18 @@ impl TuiState {
             mode: RwLock::new("Initializing".to_string()),
             simd_level: RwLock::new("Unknown".to_string()),
             worker_count: AtomicUsize::new(0),
-            gpu_enabled: AtomicBool::new(false),
+            gpu_configured: AtomicBool::new(false),
+            gpu_available: AtomicBool::new(false),
             gpu_devices: RwLock::new(Vec::new()),
             gpu_hashrate: AtomicU64::new(0),
             paused: AtomicBool::new(false),
             connected: AtomicBool::new(false),
             syncing: AtomicBool::new(false),
             sync_progress: AtomicU64::new(0),
+            downloading: AtomicBool::new(false),
+            download_name: RwLock::new(String::new()),
+            download_bytes: AtomicU64::new(0),
+            download_total: AtomicU64::new(0),
             start_time: Instant::now(),
             last_share_time: RwLock::new(None),
             last_block_time: RwLock::new(None),
@@ -199,8 +211,18 @@ impl TuiState {
         self.worker_count.store(count, Ordering::Relaxed);
     }
 
+    pub fn set_gpu_configured(&self, configured: bool) {
+        self.gpu_configured.store(configured, Ordering::Relaxed);
+    }
+
+    pub fn set_gpu_available(&self, available: bool) {
+        self.gpu_available.store(available, Ordering::Relaxed);
+    }
+
+    /// Convenience method: set both configured and available
     pub fn set_gpu_enabled(&self, enabled: bool) {
-        self.gpu_enabled.store(enabled, Ordering::Relaxed);
+        self.gpu_configured.store(enabled, Ordering::Relaxed);
+        self.gpu_available.store(enabled, Ordering::Relaxed);
     }
 
     pub fn set_gpu_devices(&self, devices: Vec<String>) {
@@ -220,6 +242,22 @@ impl TuiState {
     pub fn set_syncing(&self, syncing: bool, progress: f64) {
         self.syncing.store(syncing, Ordering::Relaxed);
         self.sync_progress.store((progress * 100.0) as u64, Ordering::Relaxed);
+    }
+
+    pub fn set_downloading(&self, downloading: bool, name: impl Into<String>) {
+        self.downloading.store(downloading, Ordering::Relaxed);
+        if let Ok(mut n) = self.download_name.write() {
+            *n = name.into();
+        }
+        if !downloading {
+            self.download_bytes.store(0, Ordering::Relaxed);
+            self.download_total.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub fn set_download_progress(&self, bytes: u64, total: u64) {
+        self.download_bytes.store(bytes, Ordering::Relaxed);
+        self.download_total.store(total, Ordering::Relaxed);
     }
 
     pub fn toggle_pause(&self) -> bool {
@@ -275,8 +313,17 @@ impl TuiState {
         self.worker_count.load(Ordering::Relaxed)
     }
 
+    pub fn is_gpu_configured(&self) -> bool {
+        self.gpu_configured.load(Ordering::Relaxed)
+    }
+
+    pub fn is_gpu_available(&self) -> bool {
+        self.gpu_available.load(Ordering::Relaxed)
+    }
+
+    /// Alias for is_gpu_available for backwards compatibility
     pub fn is_gpu_enabled(&self) -> bool {
-        self.gpu_enabled.load(Ordering::Relaxed)
+        self.gpu_available.load(Ordering::Relaxed)
     }
 
     pub fn get_gpu_devices(&self) -> Vec<String> {
@@ -301,6 +348,21 @@ impl TuiState {
 
     pub fn get_sync_progress(&self) -> f64 {
         self.sync_progress.load(Ordering::Relaxed) as f64 / 100.0
+    }
+
+    pub fn is_downloading(&self) -> bool {
+        self.downloading.load(Ordering::Relaxed)
+    }
+
+    pub fn get_download_name(&self) -> String {
+        self.download_name.read().map(|n| n.clone()).unwrap_or_default()
+    }
+
+    pub fn get_download_progress(&self) -> (u64, u64) {
+        (
+            self.download_bytes.load(Ordering::Relaxed),
+            self.download_total.load(Ordering::Relaxed),
+        )
     }
 
     pub fn get_uptime(&self) -> std::time::Duration {

@@ -76,22 +76,23 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
         Span::raw("")
     };
 
-    // GPU info
-    let gpu_enabled = state.is_gpu_enabled();
+    // GPU info - distinguish between "user disabled" vs "not available"
+    let gpu_configured = state.is_gpu_configured();
+    let gpu_available = state.is_gpu_available();
     let gpu_devices = state.get_gpu_devices();
-    let gpu_text = if gpu_enabled && !gpu_devices.is_empty() {
-        format!("{} GPU(s)", gpu_devices.len())
-    } else if gpu_enabled {
-        "Enabled (no devices)".to_string()
+
+    let (gpu_text, gpu_color) = if gpu_available && !gpu_devices.is_empty() {
+        // GPU working with devices
+        (format!("{} GPU(s)", gpu_devices.len()), Color::Green)
+    } else if gpu_configured && !gpu_available {
+        // User enabled GPU but OpenCL not available
+        ("N/A".to_string(), Color::Red)
+    } else if !gpu_configured {
+        // User explicitly disabled GPU in config
+        ("Off".to_string(), Color::DarkGray)
     } else {
-        "Disabled".to_string()
-    };
-    let gpu_color = if gpu_enabled && !gpu_devices.is_empty() {
-        Color::Green
-    } else if gpu_enabled {
-        Color::Yellow
-    } else {
-        Color::DarkGray
+        // GPU configured but no devices found (edge case)
+        ("No devices".to_string(), Color::Yellow)
     };
 
     let status_lines = vec![
@@ -339,8 +340,32 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
+    // Download progress bar (e.g., AssumeUTXO)
+    if state.is_downloading() {
+        let (bytes, total) = state.get_download_progress();
+        let name = state.get_download_name();
+        let percent = if total > 0 {
+            ((bytes as f64 / total as f64) * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+
+        let label = format!(
+            "{:.1}% ({:.1} GB / {:.1} GB)",
+            percent,
+            bytes as f64 / 1_000_000_000.0,
+            total as f64 / 1_000_000_000.0
+        );
+
+        let gauge = Gauge::default()
+            .block(Block::default().title(format!(" Downloading {} ", name)).borders(Borders::ALL))
+            .gauge_style(Style::default().fg(Color::Cyan))
+            .percent(percent as u16)
+            .label(label);
+        f.render_widget(gauge, area);
+    }
     // Sync progress bar if syncing
-    if state.is_syncing() {
+    else if state.is_syncing() {
         let progress = state.get_sync_progress();
         let gauge = Gauge::default()
             .block(Block::default().title(" Syncing Blockchain ").borders(Borders::ALL))

@@ -425,14 +425,37 @@ blockmaxweight=4000000
         self.assumeutxo
     }
 
-    /// Download AssumeUTXO snapshot if not already present
-    pub async fn download_assumeutxo(&self) -> Result<PathBuf, BitcoinError> {
+    /// Check if AssumeUTXO snapshot exists
+    pub fn has_assumeutxo_snapshot(&self) -> bool {
+        self.data_dir.join("utxo-snapshot.dat").exists()
+    }
+
+    /// Get AssumeUTXO snapshot path
+    pub fn assumeutxo_snapshot_path(&self) -> PathBuf {
+        self.data_dir.join("utxo-snapshot.dat")
+    }
+
+    /// Download AssumeUTXO snapshot with progress callback
+    /// Callback receives (bytes_downloaded, total_bytes)
+    pub async fn download_assumeutxo_with_progress<F>(
+        &self,
+        progress_callback: F,
+    ) -> Result<PathBuf, BitcoinError>
+    where
+        F: Fn(u64, u64) + Send + Sync,
+    {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
         let snapshot_path = self.data_dir.join("utxo-snapshot.dat");
 
         if snapshot_path.exists() {
             info!("AssumeUTXO snapshot already downloaded");
             return Ok(snapshot_path);
         }
+
+        // Ensure data directory exists
+        std::fs::create_dir_all(&self.data_dir)?;
 
         info!("Downloading AssumeUTXO snapshot from Bitcoin Core...");
         info!("This is a ~7GB file and may take a while");
@@ -449,14 +472,46 @@ blockmaxweight=4000000
             ));
         }
 
-        let bytes = response.bytes()
+        // Get content length for progress
+        let total_size = response.content_length().unwrap_or(7_500_000_000); // ~7GB estimate
+
+        // Open file for streaming write
+        let temp_path = self.data_dir.join("utxo-snapshot.dat.tmp");
+        let mut file = tokio::fs::File::create(&temp_path)
             .await
-            .map_err(|e| BitcoinError::DownloadError(e.to_string()))?;
+            .map_err(|e| BitcoinError::IoError(e))?;
 
-        std::fs::write(&snapshot_path, &bytes)?;
+        let mut downloaded: u64 = 0;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    file.write_all(&chunk).await.map_err(BitcoinError::IoError)?;
+                    downloaded += chunk.len() as u64;
+                    progress_callback(downloaded, total_size);
+                }
+                Err(e) => {
+                    return Err(BitcoinError::DownloadError(e.to_string()));
+                }
+            }
+        }
+
+        file.flush().await.map_err(BitcoinError::IoError)?;
+        drop(file);
+
+        // Rename temp file to final name
+        tokio::fs::rename(&temp_path, &snapshot_path)
+            .await
+            .map_err(BitcoinError::IoError)?;
+
         info!("AssumeUTXO snapshot downloaded to {:?}", snapshot_path);
-
         Ok(snapshot_path)
+    }
+
+    /// Download AssumeUTXO snapshot if not already present (simple version)
+    pub async fn download_assumeutxo(&self) -> Result<PathBuf, BitcoinError> {
+        self.download_assumeutxo_with_progress(|_, _| {}).await
     }
 
     /// Load AssumeUTXO snapshot via RPC (requires Bitcoin Core to be running)

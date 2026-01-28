@@ -113,8 +113,8 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
         tui_state.set_pool_address(&addr);
     }
 
-    // Set GPU info
-    tui_state.set_gpu_enabled(cfg.mining.enable_gpu);
+    // Set GPU info - track configured vs available separately
+    tui_state.set_gpu_configured(cfg.mining.enable_gpu);
     if cfg.mining.enable_gpu {
         let gpu_manager = gpu::GpuManager::new();
         let devices: Vec<String> = gpu_manager.devices()
@@ -122,15 +122,18 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
             .map(|d| d.name.clone())
             .collect();
         if !devices.is_empty() {
+            tui_state.set_gpu_available(true);
             tui_state.log_info(format!("GPU: {} device(s) detected", devices.len()));
             for (i, name) in devices.iter().enumerate() {
                 tui_state.log_info(format!("  GPU {}: {}", i, name));
             }
             tui_state.set_gpu_devices(devices);
         } else {
+            tui_state.set_gpu_available(false);
             tui_state.log_warn("GPU enabled but no OpenCL devices found - using CPU only");
-            tui_state.set_gpu_enabled(false);
         }
+    } else {
+        tui_state.set_gpu_available(false);
     }
 
     tui_state.log_info(format!("Loading configuration from btcminer.toml"));
@@ -229,9 +232,11 @@ async fn run_solo_mode_with_tui(
 
     tui_state.set_pool_address("Bitcoin Network (direct)");
 
-    // Setup Bitcoin Core
+    // Setup Bitcoin Core with all configured options
     let mut bitcoind = BitcoindManager::new()
-        .with_prune(cfg.bitcoind.prune);
+        .with_prune(cfg.bitcoind.prune)
+        .with_dbcache(cfg.bitcoind.dbcache)
+        .with_assumeutxo(cfg.bitcoind.assumeutxo);
 
     if cfg.bitcoind.managed {
         if !bitcoind.is_installed() {
@@ -243,11 +248,37 @@ async fn run_solo_mode_with_tui(
             bitcoind.download_and_install().await?;
         }
 
+        // Download AssumeUTXO snapshot if enabled and not already present
+        if cfg.bitcoind.assumeutxo && !bitcoind.has_assumeutxo_snapshot() {
+            tui_state.log_info("AssumeUTXO enabled - downloading UTXO snapshot (~7GB)...");
+            tui_state.set_downloading(true, "AssumeUTXO");
+
+            let tui_state_clone = Arc::clone(&tui_state);
+            bitcoind.download_assumeutxo_with_progress(move |bytes, total| {
+                tui_state_clone.set_download_progress(bytes, total);
+            }).await?;
+
+            tui_state.set_downloading(false, "");
+            tui_state.log_success("AssumeUTXO snapshot downloaded");
+        } else if cfg.bitcoind.assumeutxo {
+            tui_state.log_info("AssumeUTXO snapshot already present");
+        }
+
         bitcoind.write_config()?;
         bitcoind.start()?;
 
         tui_state.log_info("Starting Bitcoin Core...");
         tui_state.set_syncing(true, 0.0);
+
+        // Load AssumeUTXO if enabled (after Bitcoin Core starts)
+        if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
+            // Wait a moment for RPC to be ready
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            match bitcoind.load_assumeutxo().await {
+                Ok(_) => tui_state.log_success("AssumeUTXO snapshot loaded - fast sync enabled"),
+                Err(e) => tui_state.log_warn(format!("AssumeUTXO load skipped: {}", e)),
+            }
+        }
 
         // Wait for sync
         loop {

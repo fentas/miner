@@ -25,7 +25,7 @@ tokio = { version = "1.49", features = ["full"] }
 tokio-tungstenite = "0.28"
 
 # Networking
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 
 # Logging
 tracing = "0.1"
