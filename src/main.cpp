@@ -396,6 +396,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Setup signal handler
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    // Record start time
+    g_start_time = std::chrono::steady_clock::now();
+
+    // Start web server if enabled (before banner so we know if it succeeded)
+    web::WebServer webserver(cfg.web_port);
+    bool web_started = false;
+    if (cfg.web_port > 0) {
+        g_webserver = &webserver;
+        setup_web_routes(webserver);
+        webserver.set_static_dir(cfg.web_dir);
+        web_started = webserver.start();
+    }
+
     // Print banner
     std::cout << "\n"
               << "╔══════════════════════════════════════════════════════════╗\n"
@@ -405,7 +422,7 @@ int main(int argc, char* argv[]) {
               << "║  User: " << std::left << std::setw(49) << cfg.payout_address.substr(0, 49) << "║\n"
               << "║  Threads: " << std::left << std::setw(46) << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << "║\n";
 
-    if (cfg.web_port > 0) {
+    if (web_started) {
         std::ostringstream web_info;
         web_info << "http://localhost:" << cfg.web_port;
         std::cout << "║  Web UI: " << std::left << std::setw(47) << web_info.str() << "║\n";
@@ -414,25 +431,9 @@ int main(int argc, char* argv[]) {
     std::cout << "╚══════════════════════════════════════════════════════════╝\n"
               << std::endl;
 
-    // Setup signal handler
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
-
-    // Record start time
-    g_start_time = std::chrono::steady_clock::now();
-
-    // Start web server if enabled
-    web::WebServer webserver(cfg.web_port);
-    if (cfg.web_port > 0) {
-        g_webserver = &webserver;
-        setup_web_routes(webserver);
-        webserver.set_static_dir(cfg.web_dir);
-
-        if (webserver.start()) {
-            std::cout << "[Web] Server started on port " << cfg.web_port << std::endl;
-        } else {
-            std::cerr << "[Web] Failed to start server on port " << cfg.web_port << std::endl;
-        }
+    if (cfg.web_port > 0 && !web_started) {
+        std::cerr << "[Web] Failed to start server on port " << cfg.web_port
+                  << " (port in use?)" << std::endl;
     }
 
     // Create miner
