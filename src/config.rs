@@ -533,4 +533,237 @@ mod tests {
         assert_eq!(config.idle.timeout, 300);
         assert!(!config.idle.pause_on_active);
     }
+
+    #[test]
+    fn test_pool_preset_stratum_version() {
+        assert_eq!(PoolPreset::Ckpool.stratum_version(), StratumVersion::V1);
+        assert_eq!(PoolPreset::Braiins.stratum_version(), StratumVersion::V1);
+        assert_eq!(PoolPreset::Ocean.stratum_version(), StratumVersion::V1);
+        assert_eq!(PoolPreset::None.stratum_version(), StratumVersion::V1);
+        assert_eq!(PoolPreset::Custom.stratum_version(), StratumVersion::V1);
+    }
+
+    #[test]
+    fn test_pool_preset_requires_bitcoind() {
+        assert!(!PoolPreset::Ckpool.requires_bitcoind());
+        assert!(!PoolPreset::Braiins.requires_bitcoind());
+        assert!(!PoolPreset::Ocean.requires_bitcoind());
+        assert!(PoolPreset::None.requires_bitcoind());
+        assert!(!PoolPreset::Custom.requires_bitcoind());
+    }
+
+    #[test]
+    fn test_pool_preset_custom_address() {
+        assert_eq!(PoolPreset::Custom.address(), None);
+    }
+
+    #[test]
+    fn test_pool_config_effective_address_custom() {
+        let pool = PoolConfig {
+            preset: PoolPreset::Custom,
+            address: Some("custom.pool.com:3333".to_string()),
+            payout_address: "bc1qtest".to_string(),
+            password: "x".to_string(),
+            stratum_version: None,
+        };
+        assert_eq!(pool.effective_address(), Some("custom.pool.com:3333".to_string()));
+    }
+
+    #[test]
+    fn test_pool_config_effective_address_preset() {
+        let pool = PoolConfig {
+            preset: PoolPreset::Ckpool,
+            address: None,
+            payout_address: "bc1qtest".to_string(),
+            password: "x".to_string(),
+            stratum_version: None,
+        };
+        assert_eq!(pool.effective_address(), Some("solo.ckpool.org:3333".to_string()));
+    }
+
+    #[test]
+    fn test_pool_config_effective_stratum_version_override() {
+        let pool = PoolConfig {
+            preset: PoolPreset::Ckpool,
+            address: None,
+            payout_address: "bc1qtest".to_string(),
+            password: "x".to_string(),
+            stratum_version: Some(StratumVersion::V2),
+        };
+        assert_eq!(pool.effective_stratum_version(), StratumVersion::V2);
+    }
+
+    #[test]
+    fn test_config_validation_placeholder_address() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "YOUR_BTC_ADDRESS_HERE"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validation_custom_without_address() {
+        let toml_content = r#"
+            [pool]
+            preset = "custom"
+            payout_address = "bc1qtest"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validation_no_mining_enabled() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            enable_cpu = false
+            enable_gpu = false
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_is_solo_mode() {
+        let toml_content = r#"
+            [pool]
+            preset = "none"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            enabled = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.is_solo_mode());
+    }
+
+    #[test]
+    fn test_config_is_sv2_mode() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [sv2]
+            enabled = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.is_sv2_mode());
+    }
+
+    #[test]
+    fn test_config_is_sv2_mode_via_stratum_version() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+            stratum_version = "v2"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.is_sv2_mode());
+    }
+
+    #[test]
+    fn test_config_effective_threads_auto() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            threads = 0
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        // Should return number of CPUs
+        assert!(config.effective_threads() > 0);
+    }
+
+    #[test]
+    fn test_config_effective_threads_manual() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            threads = 4
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.effective_threads(), 4);
+    }
+
+    #[test]
+    fn test_mining_config_default() {
+        let mining = MiningConfig::default();
+        assert!(mining.enable_cpu);
+        assert_eq!(mining.threads, 0);
+        assert!(!mining.enable_gpu);
+        assert!(mining.gpu_devices.is_empty());
+        assert_eq!(mining.gpu_intensity, 80);
+    }
+
+    #[test]
+    fn test_bitcoind_config_default() {
+        let bitcoind = BitcoindConfig::default();
+        assert!(!bitcoind.enabled);
+        assert!(!bitcoind.managed);
+        assert_eq!(bitcoind.host, "127.0.0.1");
+        assert_eq!(bitcoind.rpc_port, 8332);
+        assert_eq!(bitcoind.prune, 10000);
+        assert_eq!(bitcoind.dbcache, 0);
+        assert!(!bitcoind.assumeutxo);
+    }
+
+    #[test]
+    fn test_sv2_config_default() {
+        let sv2 = Sv2Config::default();
+        assert!(!sv2.enabled);
+        assert_eq!(sv2.proxy_host, "127.0.0.1");
+        assert_eq!(sv2.proxy_port, 34255);
+    }
+
+    #[test]
+    fn test_web_config_default() {
+        let web = WebConfig::default();
+        assert_eq!(web.port, 8080);
+        assert_eq!(web.dir, "web");
+    }
+
+    #[test]
+    fn test_network_config_default() {
+        let network = NetworkConfig::default();
+        assert_eq!(network.reconnect_delay, 5);
+        assert_eq!(network.max_reconnect_delay, 300);
+    }
+
+    #[test]
+    fn test_logging_config_default() {
+        let logging = LoggingConfig::default();
+        assert_eq!(logging.stats_interval, 10);
+        assert!(logging.colors);
+        assert!(logging.file.is_none());
+        assert_eq!(logging.level, "info");
+        assert!(logging.system_bell);
+        assert!(logging.hud);
+        assert_eq!(logging.format, LogFormat::Text);
+    }
+
+    #[test]
+    fn test_stratum_version_default() {
+        let version = StratumVersion::default();
+        assert_eq!(version, StratumVersion::V1);
+    }
+
+    #[test]
+    fn test_pool_preset_default() {
+        let preset = PoolPreset::default();
+        assert_eq!(preset, PoolPreset::Ckpool);
+    }
 }

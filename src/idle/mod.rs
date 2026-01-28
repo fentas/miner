@@ -258,3 +258,119 @@ fn monitor_loop(
         thread::sleep(poll_interval);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_environment_name() {
+        assert_eq!(Environment::Unknown.name(), "unknown");
+        assert_eq!(Environment::NativeLinux.name(), "linux");
+        assert_eq!(Environment::WSL2.name(), "wsl2");
+        assert_eq!(Environment::Headless.name(), "headless");
+    }
+
+    #[test]
+    fn test_idle_monitor_new() {
+        let monitor = IdleMonitor::new();
+        assert!(!monitor.is_idle());
+        assert_eq!(monitor.timeout_sec, 900); // Default 15 minutes
+    }
+
+    #[test]
+    fn test_idle_monitor_default() {
+        let monitor = IdleMonitor::default();
+        assert!(!monitor.is_idle());
+    }
+
+    #[test]
+    fn test_idle_monitor_set_timeout() {
+        let mut monitor = IdleMonitor::new();
+        monitor.set_timeout(600);
+        assert_eq!(monitor.timeout_sec, 600);
+    }
+
+    #[test]
+    fn test_idle_monitor_environment() {
+        let monitor = IdleMonitor::new();
+        let env = monitor.environment();
+        // Should detect some environment (may vary by system)
+        assert!(matches!(
+            env,
+            Environment::Unknown | Environment::NativeLinux |
+            Environment::WSL2 | Environment::Headless
+        ));
+    }
+
+    #[test]
+    fn test_idle_monitor_is_idle_initial() {
+        let monitor = IdleMonitor::new();
+        // Initially not idle
+        assert!(!monitor.is_idle());
+    }
+
+    #[test]
+    fn test_idle_monitor_zero_timeout_doesnt_start() {
+        let mut monitor = IdleMonitor::new();
+        monitor.set_timeout(0);
+        monitor.start();
+        // With timeout 0, monitor shouldn't actually start
+        // (the running flag should still be false since start returns early)
+        assert!(!monitor.running.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_idle_monitor_stop_when_not_running() {
+        let mut monitor = IdleMonitor::new();
+        // Should not panic when stopping a monitor that was never started
+        monitor.stop();
+        assert!(!monitor.is_idle());
+    }
+
+    #[test]
+    fn test_get_idle_time_unknown_env() {
+        let result = get_idle_time(Environment::Unknown);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_idle_time_headless_env() {
+        let result = get_idle_time(Environment::Headless);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_idle_monitor_set_callback() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        let mut monitor = IdleMonitor::new();
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = Arc::clone(&called);
+
+        monitor.set_callback(move |_idle| {
+            called_clone.store(true, Ordering::Relaxed);
+        });
+
+        assert!(monitor.callback.is_some());
+    }
+
+    #[test]
+    fn test_environment_equality() {
+        assert_eq!(Environment::WSL2, Environment::WSL2);
+        assert_ne!(Environment::WSL2, Environment::NativeLinux);
+    }
+
+    #[test]
+    fn test_detect_environment_returns_valid() {
+        let env = detect_environment();
+        // The function should always return a valid Environment variant
+        let valid = matches!(
+            env,
+            Environment::Unknown | Environment::NativeLinux |
+            Environment::WSL2 | Environment::Headless
+        );
+        assert!(valid);
+    }
+}

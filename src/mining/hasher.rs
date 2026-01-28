@@ -196,4 +196,146 @@ mod tests {
         assert!(meets_target(&hash, &easy_target));
         assert!(!meets_target(&hash, &hard_target));
     }
+
+    #[test]
+    fn test_meets_target_equal() {
+        let target = [0x11u8; 32];
+        let hash = [0x11u8; 32];
+        // Equal should pass
+        assert!(meets_target(&hash, &target));
+    }
+
+    #[test]
+    fn test_meets_target_boundary() {
+        // Test boundary condition - first byte differs
+        let target = [0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff,
+                      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+
+        // Hash with leading zeros passes
+        let good_hash = [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(meets_target(&good_hash, &target));
+
+        // Hash with higher value in 4th byte fails
+        let bad_hash = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(!meets_target(&bad_hash, &target));
+    }
+
+    #[test]
+    fn test_hex_to_hash_valid() {
+        let hex_str = "0000000000000000000000000000000000000000000000000000000000000000";
+        let result = hex_to_hash(hex_str);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0u8; 32]);
+    }
+
+    #[test]
+    fn test_hex_to_hash_nonzero() {
+        let hex_str = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
+        let result = hex_to_hash(hex_str);
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash[0], 0x00);
+        assert_eq!(hash[5], 0x19);
+    }
+
+    #[test]
+    fn test_hex_to_hash_invalid_length() {
+        let hex_str = "00000000"; // Too short
+        let result = hex_to_hash(hex_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hex_to_hash_invalid_chars() {
+        let hex_str = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        let result = hex_to_hash(hex_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hash_to_hex_reverses_correctly() {
+        let mut hash = [0u8; 32];
+        hash[0] = 0xab;
+        hash[31] = 0xcd;
+
+        let hex = hash_to_hex(&hash);
+        // hex should be reversed, so first chars are cd, last are ab
+        assert!(hex.starts_with("cd"));
+        assert!(hex.ends_with("ab"));
+    }
+
+    #[test]
+    fn test_hash_nonce_range_no_match() {
+        let hasher = Hasher::new();
+        let mut header_prefix = [0u8; 76];
+        // Set some data
+        header_prefix[0] = 0x01;
+
+        // Very hard target - basically impossible to hit
+        let hard_target = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 100, &hard_target);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_hash_nonce_range_easy_target() {
+        let hasher = Hasher::new();
+        let header_prefix = [0u8; 76];
+
+        // Very easy target - everything passes
+        let easy_target = [0xff; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 10, &easy_target);
+        assert!(result.is_some());
+        let (nonce, hash) = result.unwrap();
+        assert_eq!(nonce, 0); // First nonce should match
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_hasher_default() {
+        let hasher = Hasher::default();
+        let header = [0u8; 80];
+        let hash = hasher.hash_header(&header);
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_hash_with_midstate_no_midstate() {
+        let hasher = Hasher::new();
+        let header = [0u8; 80];
+
+        // Without preparing midstate, should fall back to full hash
+        let hash_full = hasher.hash_header(&header);
+        let hash_midstate = hasher.hash_with_midstate(&header);
+
+        assert_eq!(hash_full, hash_midstate);
+    }
+
+    #[test]
+    fn test_prepare_midstate_same_prefix() {
+        let mut hasher = Hasher::new();
+        let prefix = [0xab; 64];
+
+        // Prepare twice with same prefix - should not recompute
+        hasher.prepare_midstate(&prefix);
+        let hash1 = hasher.hash_with_midstate(&[0xab; 80].into());
+
+        hasher.prepare_midstate(&prefix);
+        let hash2 = hasher.hash_with_midstate(&[0xab; 80].into());
+
+        assert_eq!(hash1, hash2);
+    }
 }

@@ -306,3 +306,203 @@ pub enum Notification {
     Job(Job),
     Difficulty(f64),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stratum_v1_client_new() {
+        let client = StratumV1Client::new();
+        assert!(!client.is_connected());
+        assert_eq!(client.get_difficulty(), 1.0);
+        assert!(client.get_extranonce1().is_empty());
+        assert_eq!(client.get_extranonce2_size(), 4);
+    }
+
+    #[test]
+    fn test_stratum_v1_client_default() {
+        let client = StratumV1Client::default();
+        assert!(!client.is_connected());
+    }
+
+    #[test]
+    fn test_parse_notification_difficulty() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "method": "mining.set_difficulty",
+            "params": [8.0]
+        });
+
+        let result = client.parse_notification(&msg).unwrap();
+        assert!(matches!(result, Some(Notification::Difficulty(d)) if (d - 8.0).abs() < 0.001));
+        assert!((client.get_difficulty() - 8.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_notification_difficulty_invalid() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "method": "mining.set_difficulty",
+            "params": []  // Missing difficulty value
+        });
+
+        let result = client.parse_notification(&msg).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_notification_unknown_method() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "method": "mining.unknown_method",
+            "params": []
+        });
+
+        let result = client.parse_notification(&msg).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_notification_no_method() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "result": true
+        });
+
+        let result = client.parse_notification(&msg).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_job_valid() {
+        let client = StratumV1Client::new();
+
+        let params = vec![
+            serde_json::json!("job123"),                    // job_id
+            serde_json::json!("0".repeat(64)),              // prev_hash (32 bytes hex)
+            serde_json::json!("01020304"),                  // coinbase1
+            serde_json::json!("05060708"),                  // coinbase2
+            serde_json::json!(["a".repeat(64)]),            // merkle_branches
+            serde_json::json!("20000000"),                  // version
+            serde_json::json!("1d00ffff"),                  // nbits
+            serde_json::json!("60000000"),                  // ntime
+            serde_json::json!(true),                        // clean_jobs
+        ];
+
+        let params_array: Vec<serde_json::Value> = params;
+        let job = client.parse_job(&params_array).unwrap();
+
+        assert_eq!(job.id, "job123");
+        assert_eq!(job.version, 0x20000000);
+        assert_eq!(job.nbits, 0x1d00ffff);
+        assert_eq!(job.ntime, 0x60000000);
+        assert!(job.clean_jobs);
+        assert_eq!(job.coinbase1, vec![0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(job.coinbase2, vec![0x05, 0x06, 0x07, 0x08]);
+    }
+
+    #[test]
+    fn test_parse_job_missing_param() {
+        let client = StratumV1Client::new();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            // Missing the rest of the params
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_job_invalid_hex() {
+        let client = StratumV1Client::new();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("not_valid_hex"),             // Invalid prev_hash
+            serde_json::json!("01020304"),
+            serde_json::json!("05060708"),
+            serde_json::json!([]),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(true),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_job_clean_jobs_default() {
+        let client = StratumV1Client::new();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!([]),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            // No clean_jobs - should default to false
+        ];
+
+        let job = client.parse_job(&params).unwrap();
+        assert!(!job.clean_jobs);
+    }
+
+    #[test]
+    fn test_parse_notification_job() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "method": "mining.notify",
+            "params": [
+                "job456",
+                "0".repeat(64),
+                "",
+                "",
+                [],
+                "20000000",
+                "1d00ffff",
+                "60000000",
+                false
+            ]
+        });
+
+        let result = client.parse_notification(&msg).unwrap();
+        assert!(matches!(result, Some(Notification::Job(j)) if j.id == "job456"));
+    }
+
+    #[test]
+    fn test_parse_notification_job_invalid_params() {
+        let mut client = StratumV1Client::new();
+
+        let msg = serde_json::json!({
+            "method": "mining.notify",
+            "params": "not an array"
+        });
+
+        let result = client.parse_notification(&msg);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_next_id() {
+        let client = StratumV1Client::new();
+        let id1 = client.next_id();
+        let id2 = client.next_id();
+        let id3 = client.next_id();
+
+        assert_eq!(id2, id1 + 1);
+        assert_eq!(id3, id2 + 1);
+    }
+}
