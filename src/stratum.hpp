@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <set>
 #include <mutex>
 #include <atomic>
 #include <functional>
@@ -46,6 +47,14 @@ public:
     std::string get_extranonce1() const { return extranonce1_; }
     size_t get_extranonce2_size() const { return extranonce2_size_; }
 
+    // Share statistics
+    uint64_t get_shares_accepted() const { return shares_accepted_; }
+    uint64_t get_shares_rejected() const { return shares_rejected_; }
+
+    // Block info
+    uint64_t get_block_height() const { return block_height_; }
+    double get_difficulty() const { return difficulty_; }
+
     // Run the receive loop (blocking)
     void run();
 
@@ -81,6 +90,18 @@ private:
     std::mutex send_mutex_;
 
     int msg_id_ = 1;
+
+    // Track pending share submissions (message IDs that are share submits)
+    std::set<int> pending_share_ids_;
+    std::mutex share_ids_mutex_;
+
+    // Share statistics
+    std::atomic<uint64_t> shares_accepted_{0};
+    std::atomic<uint64_t> shares_rejected_{0};
+
+    // Block info
+    std::atomic<uint64_t> block_height_{0};
+    std::atomic<double> difficulty_{1.0};
 };
 
 } // namespace stratum

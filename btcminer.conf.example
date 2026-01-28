@@ -30,3 +30,29 @@ IdleTimeout = 0
 # Enable colored console output (default: true)
 # Use --no-color flag to disable from command line
 Colors = true
+
+# Log file (leave empty to disable file logging)
+# All stats and events will be appended with timestamps
+LogFile = miner.log
+
+# System bell on share found (default: true)
+# Plays terminal bell sound when a share is found
+SystemBell = true
+
+# Reconnection settings
+# Initial delay before reconnecting to pool (seconds)
+ReconnectDelay = 5
+
+# Maximum delay between reconnection attempts (seconds)
+# Uses exponential backoff up to this limit
+MaxReconnectDelay = 300
+
+# ============================================
+# FUTURE FEATURES (placeholders, not yet implemented)
+# ============================================
+
+# GPU mining support (not yet implemented)
+# EnableGPU = false
+
+# Stratum protocol version (not yet implemented)
+# Stratum = v1  # Options: v1, v2

@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <cstring>
+#include <random>
 
 namespace miner {
 
@@ -145,8 +146,12 @@ void Miner::set_job(const stratum::Job& job, const std::string& extranonce2) {
         // Compute midstate for the first 64 bytes of the header
         sha256::compute_midstate(current_job_.header_template, midstate_);
 
-        // Reset nonce counter
-        nonce_base_ = 0;
+        // Random nonce start - avoids re-scanning same nonces after restart
+        // and spreads nonce coverage across the full 2^32 space
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
+        nonce_base_ = dist(gen);
         job_id_++;
     }
 
@@ -247,18 +252,44 @@ void Miner::worker_thread(unsigned thread_id) {
 
                 stats_.shares_found++;
 
-                std::cout << colors::log_prefix("Miner") << " " << colors::bright_green() << "Share found!" << colors::reset()
-                          << " Nonce: " << colors::bright_yellow() << "0x"
-                          << std::hex << std::setw(8) << std::setfill('0') << nonce
-                          << std::dec << colors::reset() << std::endl;
+                // System bell for audio notification
+                std::cout << '\a' << std::flush;
 
-                // Print hash
+                // Count leading zero bytes in hash (indicator of difficulty)
+                int leading_zeros = 0;
+                for (int i = 31; i >= 0 && hash[i] == 0; i--) {
+                    leading_zeros++;
+                }
+
+                // BIG celebration banner!
+                std::cout << "\n"
+                          << colors::bright_green() << "╔════════════════════════════════════════════════════════════╗\n"
+                          << "║" << colors::bright_yellow() << "  ★★★  " << colors::bright_green()
+                          << (leading_zeros >= 4 ? "POTENTIAL BLOCK FOUND!!!" : "SHARE FOUND!")
+                          << (leading_zeros >= 4 ? "  ★★★" : "          ★★★")
+                          << colors::bright_green() << "  ║\n"
+                          << "╚════════════════════════════════════════════════════════════╝"
+                          << colors::reset() << "\n";
+
+                std::cout << colors::log_prefix("Miner") << " " << colors::bright_green() << "Share #"
+                          << stats_.shares_found.load() << colors::reset()
+                          << " | Nonce: " << colors::bright_yellow() << "0x"
+                          << std::hex << std::setw(8) << std::setfill('0') << nonce
+                          << std::dec << colors::reset()
+                          << " | Leading zeros: " << colors::bright_cyan() << leading_zeros << colors::reset()
+                          << std::endl;
+
+                // Print hash (reversed for display - big endian)
                 std::cout << colors::log_prefix("Miner") << " Hash: " << colors::muted();
                 for (int i = 31; i >= 0; i--) {
-                    std::cout << std::hex << std::setw(2) << std::setfill('0')
-                              << static_cast<int>(hash[i]);
+                    if (hash[i] == 0 && i > 24) {
+                        std::cout << colors::bright_green() << "00" << colors::muted();
+                    } else {
+                        std::cout << std::hex << std::setw(2) << std::setfill('0')
+                                  << static_cast<int>(hash[i]);
+                    }
                 }
-                std::cout << std::dec << colors::reset() << std::endl;
+                std::cout << std::dec << colors::reset() << "\n" << std::endl;
 
                 if (share_callback_) {
                     share_callback_(local_job_id, local_extranonce2,

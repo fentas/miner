@@ -317,7 +317,87 @@ void Client::process_message(const std::string& msg) {
             process_notify(params);
         }
     } else if (msg.find("mining.set_difficulty") != std::string::npos) {
-        std::cout << "[Stratum] Difficulty update: " << msg << std::endl;
+        // Parse difficulty from params array
+        size_t params_pos = msg.find("\"params\"");
+        if (params_pos != std::string::npos) {
+            size_t arr_start = msg.find('[', params_pos);
+            if (arr_start != std::string::npos) {
+                try {
+                    difficulty_ = std::stod(msg.substr(arr_start + 1));
+                    std::cout << colors::log_prefix("Stratum") << " Difficulty set to: "
+                              << colors::value() << difficulty_.load() << colors::reset() << std::endl;
+                } catch (...) {}
+            }
+        }
+    } else if (msg.find("\"result\"") != std::string::npos && msg.find("\"method\"") == std::string::npos) {
+        // This is a response to a previous request - check if it's a share submission
+        // Extract the response ID
+        int response_id = -1;
+        size_t id_pos = msg.find("\"id\":");
+        if (id_pos != std::string::npos) {
+            try {
+                response_id = std::stoi(msg.substr(id_pos + 5));
+            } catch (...) {}
+        }
+
+        // Check if this is a response to a share submission
+        bool is_share_response = false;
+        {
+            std::lock_guard<std::mutex> lock(share_ids_mutex_);
+            auto it = pending_share_ids_.find(response_id);
+            if (it != pending_share_ids_.end()) {
+                is_share_response = true;
+                pending_share_ids_.erase(it);
+            }
+        }
+
+        if (!is_share_response) {
+            // Not a share response, ignore (could be subscribe/auth response)
+            return;
+        }
+
+        bool accepted = (msg.find("\"result\":true") != std::string::npos ||
+                        msg.find("\"result\": true") != std::string::npos);
+        bool rejected = (msg.find("\"result\":false") != std::string::npos ||
+                        msg.find("\"result\": false") != std::string::npos ||
+                        msg.find("\"result\":null") != std::string::npos ||
+                        msg.find("\"error\":[") != std::string::npos);
+
+        if (accepted) {
+            shares_accepted_++;
+            std::cout << "\n"
+                      << colors::bright_green() << "╔════════════════════════════════════════════════════════════╗\n"
+                      << "║         ✓ SHARE ACCEPTED BY POOL!                          ║\n"
+                      << "╚════════════════════════════════════════════════════════════╝"
+                      << colors::reset() << "\n";
+            std::cout << colors::log_prefix("Stratum") << " " << colors::bright_green()
+                      << "Share accepted!" << colors::reset()
+                      << " Total accepted: " << colors::value() << shares_accepted_ << colors::reset()
+                      << std::endl << std::endl;
+        } else if (rejected) {
+            shares_rejected_++;
+            // Extract error message if present
+            std::string error_msg = "Unknown reason";
+            size_t err_pos = msg.find("\"error\":");
+            if (err_pos != std::string::npos) {
+                size_t start = msg.find('"', err_pos + 10);
+                if (start != std::string::npos) {
+                    size_t end = msg.find('"', start + 1);
+                    if (end != std::string::npos) {
+                        error_msg = msg.substr(start + 1, end - start - 1);
+                    }
+                }
+            }
+            std::cout << "\n"
+                      << colors::bright_red() << "╔════════════════════════════════════════════════════════════╗\n"
+                      << "║         ✗ SHARE REJECTED BY POOL                           ║\n"
+                      << "╚════════════════════════════════════════════════════════════╝"
+                      << colors::reset() << "\n";
+            std::cout << colors::log_prefix("Stratum") << " " << colors::error()
+                      << "Share rejected: " << error_msg << colors::reset()
+                      << " (rejected: " << shares_rejected_ << ")"
+                      << std::endl << std::endl;
+        }
     }
 }
 
@@ -334,10 +414,34 @@ void Client::process_notify(const std::vector<std::string>& params) {
     job.ntime = params[6];
     job.clean_jobs = (params.size() > 7 && params[7] == "true");
 
-    // TODO: Parse merkle branch from the original message
+    // Parse block height from coinb1 using BIP34 format
+    // coinb1 contains: version(4) + input_count(1) + prev_txid(32) + prev_vout(4) + script_len(1-9) + script_data
+    // BIP34 script starts with: push_byte_count + height_bytes (little-endian)
+    // The height is typically at offset 42*2 = 84 hex chars (after version, input_count, prev_txid, prev_vout, script_len)
+    uint64_t height = 0;
+    if (job.coinb1.length() >= 90) {  // Need at least enough for header + height
+        // Skip to the script data (after tx header: 4+1+32+4+1 = 42 bytes = 84 hex chars)
+        // But pools typically put the height right after the required 03 prefix
+        // Look for pattern: after position 84, first byte is push count
+        auto coinb1_bytes = hex_to_bytes(job.coinb1);
+        if (coinb1_bytes.size() > 42) {
+            size_t script_start = 42;  // After tx header
+            uint8_t push_count = coinb1_bytes[script_start];
+            if (push_count >= 1 && push_count <= 4 && script_start + 1 + push_count <= coinb1_bytes.size()) {
+                // Read height as little-endian
+                for (int i = push_count - 1; i >= 0; i--) {
+                    height = (height << 8) | coinb1_bytes[script_start + 1 + i];
+                }
+                block_height_ = height;
+            }
+        }
+    }
 
-    std::cout << colors::log_prefix("Stratum") << " New job: " << colors::bright_yellow() << job.job_id << colors::reset()
-              << colors::muted() << " height hint from nbits" << colors::reset() << std::endl;
+    std::cout << colors::log_prefix("Stratum") << " New job: " << colors::bright_yellow() << job.job_id << colors::reset();
+    if (height > 0) {
+        std::cout << " | Block: " << colors::value() << height << colors::reset();
+    }
+    std::cout << " | Diff: " << colors::value() << difficulty_.load() << colors::reset() << std::endl;
 
     // Generate a random extranonce2
     std::ostringstream en2;
@@ -498,12 +602,20 @@ void Client::calculate_target(Job& job) {
 
 bool Client::submit(const std::string& job_id, const std::string& extranonce2,
                     const std::string& ntime, const std::string& nonce) {
+    int share_id = msg_id_++;
+
+    // Track this ID as a pending share submission
+    {
+        std::lock_guard<std::mutex> lock(share_ids_mutex_);
+        pending_share_ids_.insert(share_id);
+    }
+
     std::ostringstream oss;
-    oss << "{\"id\": " << msg_id_++ << ", \"method\": \"mining.submit\", "
+    oss << "{\"id\": " << share_id << ", \"method\": \"mining.submit\", "
         << "\"params\": [\"" << user_ << "\", \"" << job_id << "\", \""
         << extranonce2 << "\", \"" << ntime << "\", \"" << nonce << "\"]}";
 
-    std::cout << "[Stratum] Submitting share: " << oss.str() << std::endl;
+    std::cout << "[Stratum] Submitting share (id=" << share_id << "): " << oss.str() << std::endl;
     return send_json(oss.str());
 }
 

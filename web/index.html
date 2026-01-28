@@ -796,9 +796,9 @@
                     <div class="stat-subtitle">Since start</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Shares Found</div>
+                    <div class="stat-label">Shares</div>
                     <div class="stat-value" id="shares">0</div>
-                    <div class="stat-subtitle">Valid submissions</div>
+                    <div class="stat-subtitle"><span id="shares-accepted" style="color: var(--success)">0</span> accepted / <span id="shares-rejected" style="color: var(--danger)">0</span> rejected</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Uptime</div>
@@ -809,6 +809,16 @@
                     <div class="stat-label">Block Height</div>
                     <div class="stat-value" id="block-height">-</div>
                     <div class="stat-subtitle">Current network block</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Pool Difficulty</div>
+                    <div class="stat-value" id="difficulty">-</div>
+                    <div class="stat-subtitle">Share difficulty</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Est. Time to Share</div>
+                    <div class="stat-value" id="est-time">-</div>
+                    <div class="stat-subtitle">At current hashrate</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Active Threads</div>
@@ -866,6 +876,7 @@
 
                 <div class="button-group">
                     <button class="btn btn-primary" id="save-settings">Save Settings</button>
+                    <button class="btn btn-success" id="save-restart">Save & Restart</button>
                     <button class="btn btn-secondary" id="reload-settings">Reload</button>
                 </div>
             </div>
@@ -945,6 +956,25 @@
             const m = Math.floor((s % 3600) / 60);
             const sec = s % 60;
             return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        }
+
+        // Format duration in seconds to human readable
+        function formatDuration(seconds) {
+            if (seconds < 60) {
+                return Math.round(seconds) + 's';
+            } else if (seconds < 3600) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.round(seconds % 60);
+                return mins + 'm ' + secs + 's';
+            } else if (seconds < 86400) {
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                return hours + 'h ' + mins + 'm';
+            } else {
+                const days = Math.floor(seconds / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
+                return days + 'd ' + hours + 'h';
+            }
         }
 
         // Add log entry
@@ -1099,12 +1129,38 @@
                 shares.textContent = data.shares;
             }
 
+            if (data.shares_accepted !== undefined) {
+                document.getElementById('shares-accepted').textContent = data.shares_accepted;
+            }
+
+            if (data.shares_rejected !== undefined) {
+                document.getElementById('shares-rejected').textContent = data.shares_rejected;
+            }
+
             if (data.threads !== undefined) {
                 threads.textContent = data.threads;
             }
 
             if (data.block_height !== undefined) {
-                blockHeight.textContent = data.block_height;
+                blockHeight.textContent = data.block_height > 0 ? data.block_height : '-';
+            }
+
+            if (data.difficulty !== undefined) {
+                const diffEl = document.getElementById('difficulty');
+                if (data.difficulty > 0) {
+                    diffEl.textContent = data.difficulty.toFixed(4);
+                } else {
+                    diffEl.textContent = '-';
+                }
+            }
+
+            if (data.est_time_to_share !== undefined) {
+                const etaEl = document.getElementById('est-time');
+                if (data.est_time_to_share > 0) {
+                    etaEl.textContent = '~' + formatDuration(data.est_time_to_share);
+                } else {
+                    etaEl.textContent = '-';
+                }
             }
 
             if (data.uptime !== undefined) {
@@ -1430,8 +1486,38 @@
             }
         }
 
+        // Save settings and restart miner
+        async function saveAndRestart() {
+            const settings = {
+                pool: document.getElementById('pool-host').value,
+                address: document.getElementById('payout-address').value,
+                password: document.getElementById('pool-password').value,
+                threads: parseInt(document.getElementById('threads-input').value) || 0,
+                stats_interval: parseInt(document.getElementById('stats-interval').value) || 10
+            };
+
+            try {
+                const res = await fetch('/api/control/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    addLog('Settings saved, miner restarting...', 'success');
+                    // Connection will be lost briefly, WebSocket will auto-reconnect
+                } else {
+                    addLog('Failed to restart: ' + (data.message || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                addLog('Failed to save and restart: ' + e.message, 'error');
+            }
+        }
+
         // Event listeners
         document.getElementById('save-settings').addEventListener('click', saveSettings);
+        document.getElementById('save-restart').addEventListener('click', saveAndRestart);
         document.getElementById('reload-settings').addEventListener('click', loadSettings);
         document.getElementById('clear-logs').addEventListener('click', () => {
             logOutput.innerHTML = '';

@@ -25,6 +25,16 @@ struct Config {
 
     // Output options
     bool colors = true;             // Enable ANSI colors in output (default: on)
+    std::string log_file;           // Log file path (empty = disabled)
+    bool system_bell = true;        // System bell on share found
+
+    // Future features (placeholders)
+    bool enable_gpu = false;        // GPU mining (not yet implemented)
+    std::string stratum_version = "v1";  // Stratum protocol: "v1" or "v2" (v2 not yet implemented)
+
+    // Reconnection settings
+    unsigned reconnect_delay = 5;   // Initial reconnect delay in seconds
+    unsigned max_reconnect_delay = 300;  // Max reconnect delay (5 min)
 };
 
 inline std::string trim(const std::string& s) {
@@ -88,6 +98,24 @@ inline bool load(const std::string& filename, Config& cfg) {
             std::string val_lower = value;
             std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
             cfg.colors = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
+        } else if (key_lower == "logfile" || key_lower == "log_file" || key_lower == "log") {
+            cfg.log_file = value;
+        } else if (key_lower == "systembell" || key_lower == "system_bell" || key_lower == "bell") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.system_bell = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
+        } else if (key_lower == "enablegpu" || key_lower == "enable_gpu" || key_lower == "gpu") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.enable_gpu = (val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on");
+        } else if (key_lower == "stratumversion" || key_lower == "stratum_version" || key_lower == "stratum") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.stratum_version = val_lower;  // "v1" or "v2"
+        } else if (key_lower == "reconnectdelay" || key_lower == "reconnect_delay") {
+            cfg.reconnect_delay = static_cast<unsigned>(std::stoul(value));
+        } else if (key_lower == "maxreconnectdelay" || key_lower == "max_reconnect_delay") {
+            cfg.max_reconnect_delay = static_cast<unsigned>(std::stoul(value));
         }
     }
 
