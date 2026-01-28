@@ -9,6 +9,73 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <stdexcept>
+
+// ============================================================================
+// Stratum Parsing Functions (copied from stratum.cpp for testing)
+// ============================================================================
+namespace stratum_test {
+
+std::vector<std::string> extract_notify_params(const std::string& json) {
+    std::vector<std::string> result;
+
+    size_t params_pos = json.find("\"params\"");
+    if (params_pos == std::string::npos) return result;
+
+    size_t arr_start = json.find('[', params_pos);
+    if (arr_start == std::string::npos) return result;
+
+    size_t pos = arr_start + 1;
+    std::string current;
+    bool in_string = false;
+
+    while (pos < json.size()) {
+        char c = json[pos];
+
+        if (c == '"' && (pos == 0 || json[pos-1] != '\\')) {
+            in_string = !in_string;
+            if (!in_string) {
+                result.push_back(current);
+                current.clear();
+            }
+        } else if (!in_string) {
+            if (c == '[') {
+                // Skip nested array (merkle branch)
+                int nest_depth = 1;
+                pos++;
+                while (pos < json.size() && nest_depth > 0) {
+                    if (json[pos] == '[') nest_depth++;
+                    else if (json[pos] == ']') nest_depth--;
+                    pos++;
+                }
+                pos--;  // Back up to let the main loop advance
+            } else if (c == ']') {
+                // End of params array
+                break;
+            }
+            // Commas and other non-string chars are just skipped
+        } else {
+            current += c;
+        }
+        pos++;
+    }
+
+    return result;
+}
+
+std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
+    std::vector<uint8_t> bytes;
+    for (size_t i = 0; i + 1 < hex.length(); i += 2) {
+        try {
+            bytes.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+        } catch (const std::exception&) {
+            break;
+        }
+    }
+    return bytes;
+}
+
+} // namespace stratum_test
 
 namespace {
 
@@ -413,6 +480,83 @@ void benchmark_sha256() {
 #endif
 }
 
+// ============================================================================
+// Stratum Parsing Tests
+// ============================================================================
+
+void test_stratum_notify_parsing() {
+    // Test 1: Empty merkle branch
+    {
+        std::string msg = R"({"id":null,"method":"mining.notify","params":["job123","00000000000000000001234567890abcdef","coinb1hex","coinb2hex",[],"20000000","1a0fffff","12345678",true]})";
+        auto params = stratum_test::extract_notify_params(msg);
+
+        bool ok = params.size() >= 7 &&
+                  params[0] == "job123" &&
+                  params[4] == "20000000" &&  // version (merkle branch skipped)
+                  params[5] == "1a0fffff" &&  // nbits
+                  params[6] == "12345678";    // ntime
+
+        test_result("Stratum notify parsing (empty merkle)", ok);
+    }
+
+    // Test 2: Non-empty merkle branch
+    {
+        std::string msg = R"({"id":null,"method":"mining.notify","params":["job456","prevhash","cb1","cb2",["merkle1","merkle2","merkle3"],"10000000","1b00ffff","aabbccdd",false]})";
+        auto params = stratum_test::extract_notify_params(msg);
+
+        bool ok = params.size() >= 7 &&
+                  params[0] == "job456" &&
+                  params[4] == "10000000" &&
+                  params[5] == "1b00ffff" &&
+                  params[6] == "aabbccdd";
+
+        test_result("Stratum notify parsing (with merkle)", ok);
+    }
+
+    // Test 3: Real-world ckpool message format
+    {
+        std::string msg = R"({"params":["693b50f000022e1a","4f1c6e6e000000000000000000000000000000000000000000000000000000000000000000000000","02000000010000000000000000000000000000000000000000000000000000000000000000ffffffff1b03","ffffffff0100f2052a01000000160014",[],"20000000","170b8c8b","678e6b5c",true],"id":null,"method":"mining.notify"})";
+        auto params = stratum_test::extract_notify_params(msg);
+
+        bool ok = params.size() >= 7 &&
+                  params[0] == "693b50f000022e1a" &&
+                  params[4] == "20000000" &&
+                  params[5] == "170b8c8b" &&
+                  params[6] == "678e6b5c";
+
+        test_result("Stratum notify parsing (ckpool format)", ok);
+    }
+}
+
+void test_hex_to_bytes() {
+    // Test 1: Valid hex
+    {
+        auto bytes = stratum_test::hex_to_bytes("48656c6c6f");  // "Hello"
+        bool ok = bytes.size() == 5 &&
+                  bytes[0] == 0x48 && bytes[1] == 0x65 &&
+                  bytes[2] == 0x6c && bytes[3] == 0x6c && bytes[4] == 0x6f;
+        test_result("hex_to_bytes (valid)", ok);
+    }
+
+    // Test 2: Empty string
+    {
+        auto bytes = stratum_test::hex_to_bytes("");
+        test_result("hex_to_bytes (empty)", bytes.empty());
+    }
+
+    // Test 3: Invalid hex (should not crash)
+    {
+        auto bytes = stratum_test::hex_to_bytes("gg");  // Invalid
+        test_result("hex_to_bytes (invalid - no crash)", bytes.empty());
+    }
+
+    // Test 4: Odd length (should handle gracefully)
+    {
+        auto bytes = stratum_test::hex_to_bytes("abc");  // Odd length
+        test_result("hex_to_bytes (odd length)", bytes.size() == 1 && bytes[0] == 0xab);
+    }
+}
+
 } // anonymous namespace
 
 int main() {
@@ -435,6 +579,10 @@ int main() {
 
     std::cout << "\n[TEST GROUP] Target Comparison\n";
     test_target_comparison();
+
+    std::cout << "\n[TEST GROUP] Stratum Protocol Parsing\n";
+    test_stratum_notify_parsing();
+    test_hex_to_bytes();
 
     test_mining_simulation();
 

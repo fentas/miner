@@ -17,6 +17,14 @@ struct Stats {
     std::atomic<uint64_t> shares_found{0};
     std::atomic<uint64_t> shares_accepted{0};
     std::atomic<uint64_t> shares_rejected{0};
+    std::atomic<uint64_t> benchmark_hashes{0};  // For benchmark mode
+};
+
+enum class MinerState {
+    Stopped,
+    Running,
+    Paused,
+    Benchmarking
 };
 
 class Miner {
@@ -31,12 +39,24 @@ public:
 
     void start();
     void stop();
+    void pause();
+    void resume();
+
+    // Benchmark mode - mine without submitting
+    void start_benchmark(unsigned duration_seconds = 0);
+    void stop_benchmark();
+    double get_benchmark_hashrate() const;
+    double get_benchmark_duration() const;
 
     void set_job(const stratum::Job& job, const std::string& extranonce2);
     void set_share_callback(ShareCallback cb) { share_callback_ = cb; }
 
     const Stats& get_stats() const { return stats_; }
     double get_hashrate() const;
+    MinerState get_state() const { return state_.load(); }
+    bool is_running() const { return state_ == MinerState::Running || state_ == MinerState::Benchmarking; }
+    bool is_paused() const { return state_ == MinerState::Paused; }
+    bool is_benchmarking() const { return state_ == MinerState::Benchmarking; }
 
 private:
     void worker_thread(unsigned thread_id);
@@ -47,6 +67,13 @@ private:
     std::vector<std::thread> threads_;
     std::atomic<bool> running_{false};
     std::atomic<bool> has_job_{false};
+    std::atomic<bool> paused_{false};
+    std::atomic<MinerState> state_{MinerState::Stopped};
+
+    // Benchmark
+    std::atomic<bool> benchmark_mode_{false};
+    std::chrono::steady_clock::time_point benchmark_start_;
+    unsigned benchmark_duration_{0};  // 0 = unlimited
 
     // Current job data (protected by mutex)
     std::mutex job_mutex_;

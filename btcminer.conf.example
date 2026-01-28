@@ -21,3 +21,8 @@ WebPort = 8080
 
 # Web files directory
 WebDir = web
+
+# Idle mining (screensaver mode)
+# Starts mining when user is idle for this many seconds (0 = disabled)
+# Works on native Linux (X11) and WSL2
+IdleTimeout = 0

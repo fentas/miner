@@ -307,10 +307,310 @@
             color: white;
         }
 
+        .btn-danger:hover {
+            background: #ff6b7a;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #00e090;
+        }
+
+        .btn-warning {
+            background: #ffa502;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #ffb833;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
         .button-group {
             display: flex;
             gap: 15px;
             margin-top: 30px;
+        }
+
+        /* Control Panel */
+        .control-panel {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .control-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .miner-state {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .state-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .state-indicator.running {
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .state-indicator.paused {
+            background: var(--accent);
+        }
+
+        .state-indicator.benchmarking {
+            background: #9b59b6;
+            animation: pulse 1s infinite;
+        }
+
+        .state-indicator.stopped {
+            background: var(--danger);
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .control-section {
+            padding: 20px;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .control-section h4 {
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .benchmark-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .benchmark-input {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .benchmark-input input {
+            width: 100px;
+        }
+
+        .benchmark-results {
+            margin-top: 15px;
+            padding: 15px;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            display: none;
+        }
+
+        .benchmark-results.active {
+            display: block;
+        }
+
+        .benchmark-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .benchmark-stat:last-child {
+            border-bottom: none;
+        }
+
+        .benchmark-stat-label {
+            color: var(--text-secondary);
+        }
+
+        .benchmark-stat-value {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Idle Mining */
+        .idle-section {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .idle-toggle {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 56px;
+            height: 28px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            border: 2px solid var(--border);
+            border-radius: 28px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 2px;
+            bottom: 2px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(28px);
+            background: white;
+        }
+
+        .idle-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--bg-primary);
+            border-radius: 12px;
+            min-width: 200px;
+        }
+
+        .zzz-animation {
+            font-size: 1.5rem;
+            display: flex;
+            gap: 2px;
+        }
+
+        .zzz-animation span {
+            opacity: 0;
+            animation: zzz-fade 1.5s ease-in-out infinite;
+        }
+
+        .zzz-animation span:nth-child(1) { animation-delay: 0s; }
+        .zzz-animation span:nth-child(2) { animation-delay: 0.3s; font-size: 1.2rem; }
+        .zzz-animation span:nth-child(3) { animation-delay: 0.6s; font-size: 0.9rem; }
+
+        @keyframes zzz-fade {
+            0%, 100% { opacity: 0; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-5px); }
+        }
+
+        .idle-mining-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .idle-mining-indicator.waiting .status-icon {
+            color: var(--text-secondary);
+        }
+
+        .idle-mining-indicator.active .status-icon {
+            color: var(--success);
+            animation: pulse 1s infinite;
+        }
+
+        .idle-mining-indicator.disabled .status-icon {
+            color: var(--danger);
+        }
+
+        .starting-animation {
+            display: flex;
+            gap: 4px;
+        }
+
+        .starting-animation span {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: starting-bounce 0.6s ease-in-out infinite;
+        }
+
+        .starting-animation span:nth-child(1) { animation-delay: 0s; }
+        .starting-animation span:nth-child(2) { animation-delay: 0.1s; }
+        .starting-animation span:nth-child(3) { animation-delay: 0.2s; }
+
+        @keyframes starting-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+
+        .moon-icon {
+            font-size: 1.5rem;
+        }
+
+        .idle-info {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .idle-info strong {
+            color: var(--text-primary);
         }
 
         /* Log Panel */
@@ -401,6 +701,89 @@
 
         <!-- Dashboard -->
         <section id="dashboard" class="tab-content active">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <div class="control-header">
+                    <div class="control-title">Miner Control</div>
+                    <div class="miner-state">
+                        <div class="state-indicator" id="state-indicator"></div>
+                        <span id="state-text">Stopped</span>
+                    </div>
+                </div>
+                <div class="control-buttons">
+                    <button class="btn btn-success" id="btn-start">Start Mining</button>
+                    <button class="btn btn-danger" id="btn-stop" disabled>Stop Mining</button>
+                    <button class="btn btn-warning" id="btn-pause" disabled>Pause</button>
+                    <button class="btn btn-primary" id="btn-resume" disabled>Resume</button>
+                </div>
+
+                <div class="control-section">
+                    <h4>Benchmark Mode</h4>
+                    <div class="benchmark-controls">
+                        <div class="benchmark-input">
+                            <label>Duration (sec):</label>
+                            <input type="number" id="benchmark-duration" min="0" value="30" placeholder="0 = unlimited">
+                        </div>
+                        <button class="btn btn-primary" id="btn-benchmark-start">Start Benchmark</button>
+                        <button class="btn btn-danger" id="btn-benchmark-stop" disabled>Stop Benchmark</button>
+                    </div>
+                    <div class="benchmark-results" id="benchmark-results">
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Benchmark Hashrate</span>
+                            <span class="benchmark-stat-value" id="benchmark-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Total Hashes</span>
+                            <span class="benchmark-stat-value" id="benchmark-hashes">0</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Duration</span>
+                            <span class="benchmark-stat-value" id="benchmark-time">0s</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h4>Idle Mining (Screensaver Mode)</h4>
+                    <div class="idle-section">
+                        <div class="idle-toggle">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="idle-toggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span>Enable idle mining</span>
+                        </div>
+                        <div class="benchmark-input">
+                            <label>Timeout (min):</label>
+                            <input type="number" id="idle-timeout" min="1" value="15" style="width: 80px;">
+                        </div>
+                        <div class="idle-status" id="idle-status">
+                            <div class="idle-mining-indicator disabled" id="idle-indicator">
+                                <span class="moon-icon">🌙</span>
+                                <span class="status-text">Disabled</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="idle-status" id="idle-visual-status" style="margin-top: 15px; display: none;">
+                        <div class="zzz-animation" id="zzz-animation">
+                            <span>z</span><span>z</span><span>z</span>
+                        </div>
+                        <div class="idle-info">
+                            <span id="idle-status-text">Waiting for idle...</span><br>
+                            <small>Idle time: <strong id="idle-time-display">0s</strong> / <strong id="idle-timeout-display">15m</strong></small>
+                        </div>
+                    </div>
+                    <div class="idle-status" id="idle-active-status" style="margin-top: 15px; display: none;">
+                        <div class="starting-animation">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <div class="idle-info">
+                            <span style="color: var(--success);">Mining while you're away!</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-label">Hashrate</div>
@@ -507,6 +890,8 @@
         let hashrateHistory = [];
         const maxHistoryPoints = 60;
         let startTime = Date.now();
+        let minerState = 'stopped';
+        let benchmarkInterval = null;
 
         // DOM Elements
         const statusDot = document.getElementById('status-dot');
@@ -729,6 +1114,10 @@
             if (data.log) {
                 addLog(data.log, data.log_type || 'info');
             }
+
+            if (data.state) {
+                updateMinerState(data.state);
+            }
         }
 
         // Load settings
@@ -774,6 +1163,273 @@
             }
         }
 
+        // Miner control functions
+        function updateMinerState(state) {
+            minerState = state;
+            const indicator = document.getElementById('state-indicator');
+            const stateText = document.getElementById('state-text');
+
+            indicator.className = 'state-indicator ' + state;
+            stateText.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+
+            // Update button states
+            const btnStart = document.getElementById('btn-start');
+            const btnStop = document.getElementById('btn-stop');
+            const btnPause = document.getElementById('btn-pause');
+            const btnResume = document.getElementById('btn-resume');
+            const btnBenchStart = document.getElementById('btn-benchmark-start');
+            const btnBenchStop = document.getElementById('btn-benchmark-stop');
+
+            switch (state) {
+                case 'stopped':
+                    btnStart.disabled = false;
+                    btnStop.disabled = true;
+                    btnPause.disabled = true;
+                    btnResume.disabled = true;
+                    btnBenchStart.disabled = false;
+                    btnBenchStop.disabled = true;
+                    break;
+                case 'running':
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+                    btnPause.disabled = false;
+                    btnResume.disabled = true;
+                    btnBenchStart.disabled = false;
+                    btnBenchStop.disabled = true;
+                    break;
+                case 'paused':
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+                    btnPause.disabled = true;
+                    btnResume.disabled = false;
+                    btnBenchStart.disabled = true;
+                    btnBenchStop.disabled = true;
+                    break;
+                case 'benchmarking':
+                    btnStart.disabled = true;
+                    btnStop.disabled = true;
+                    btnPause.disabled = false;
+                    btnResume.disabled = true;
+                    btnBenchStart.disabled = true;
+                    btnBenchStop.disabled = false;
+                    break;
+            }
+        }
+
+        async function controlMiner(action) {
+            try {
+                const res = await fetch(`/api/control/${action}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.state) {
+                    updateMinerState(data.state);
+                }
+                addLog(`Miner ${action}: ${data.message || 'OK'}`, data.success ? 'success' : 'error');
+            } catch (e) {
+                addLog(`Failed to ${action} miner: ${e.message}`, 'error');
+            }
+        }
+
+        async function startBenchmark() {
+            const duration = parseInt(document.getElementById('benchmark-duration').value) || 0;
+            try {
+                const res = await fetch(`/api/control/benchmark?duration=${duration}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.state) {
+                    updateMinerState(data.state);
+                }
+                addLog(`Benchmark started${duration > 0 ? ' for ' + duration + 's' : ''}`, 'success');
+
+                // Show benchmark results panel
+                document.getElementById('benchmark-results').classList.add('active');
+
+                // Start polling benchmark results
+                if (benchmarkInterval) clearInterval(benchmarkInterval);
+                benchmarkInterval = setInterval(updateBenchmarkResults, 1000);
+            } catch (e) {
+                addLog('Failed to start benchmark: ' + e.message, 'error');
+            }
+        }
+
+        async function stopBenchmark() {
+            try {
+                const res = await fetch('/api/control/benchmark/stop', { method: 'POST' });
+                const data = await res.json();
+                if (data.state) {
+                    updateMinerState(data.state);
+                }
+                addLog('Benchmark stopped', 'info');
+
+                if (benchmarkInterval) {
+                    clearInterval(benchmarkInterval);
+                    benchmarkInterval = null;
+                }
+
+                // Final update
+                updateBenchmarkResults();
+            } catch (e) {
+                addLog('Failed to stop benchmark: ' + e.message, 'error');
+            }
+        }
+
+        async function updateBenchmarkResults() {
+            try {
+                const res = await fetch('/api/benchmark');
+                const data = await res.json();
+
+                document.getElementById('benchmark-hashrate').textContent = formatHashrate(data.hashrate || 0);
+                document.getElementById('benchmark-hashes').textContent = formatNumber(data.total_hashes || 0);
+                document.getElementById('benchmark-time').textContent = (data.duration || 0).toFixed(1) + 's';
+
+                // Check if benchmark completed naturally
+                if (data.state && data.state !== 'benchmarking' && minerState === 'benchmarking') {
+                    updateMinerState(data.state);
+                    if (benchmarkInterval) {
+                        clearInterval(benchmarkInterval);
+                        benchmarkInterval = null;
+                    }
+                    addLog('Benchmark completed', 'success');
+                }
+            } catch (e) {
+                console.error('Failed to get benchmark results:', e);
+            }
+        }
+
+        async function fetchMinerState() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                if (data.state) {
+                    updateMinerState(data.state);
+                }
+
+                // Update idle mining status from stats
+                if (data.idle_mining_enabled !== undefined) {
+                    updateIdleUI(data.idle_mining_enabled, data.user_idle, data.idle_mining_active);
+                }
+            } catch (e) {
+                console.error('Failed to fetch miner state:', e);
+            }
+        }
+
+        // Idle mining functions
+        let idleEnabled = false;
+        let idlePollingInterval = null;
+
+        function updateIdleUI(enabled, userIdle, miningActive) {
+            idleEnabled = enabled;
+            const indicator = document.getElementById('idle-indicator');
+            const visualStatus = document.getElementById('idle-visual-status');
+            const activeStatus = document.getElementById('idle-active-status');
+            const toggle = document.getElementById('idle-toggle');
+
+            toggle.checked = enabled;
+
+            if (!enabled) {
+                indicator.className = 'idle-mining-indicator disabled';
+                indicator.innerHTML = '<span class="moon-icon">🌙</span><span class="status-text">Disabled</span>';
+                visualStatus.style.display = 'none';
+                activeStatus.style.display = 'none';
+            } else if (miningActive) {
+                indicator.className = 'idle-mining-indicator active';
+                indicator.innerHTML = '<span class="moon-icon">⛏️</span><span class="status-text" style="color: var(--success);">Mining!</span>';
+                visualStatus.style.display = 'none';
+                activeStatus.style.display = 'flex';
+            } else if (userIdle) {
+                indicator.className = 'idle-mining-indicator active';
+                indicator.innerHTML = '<span class="moon-icon">💤</span><span class="status-text">User idle</span>';
+                visualStatus.style.display = 'none';
+                activeStatus.style.display = 'flex';
+            } else {
+                indicator.className = 'idle-mining-indicator waiting';
+                indicator.innerHTML = '<span class="moon-icon">🌙</span><span class="status-text">Waiting...</span>';
+                visualStatus.style.display = 'flex';
+                activeStatus.style.display = 'none';
+            }
+        }
+
+        async function fetchIdleStatus() {
+            try {
+                const res = await fetch('/api/idle');
+                const data = await res.json();
+
+                updateIdleUI(data.enabled, data.is_idle, data.mining_due_to_idle);
+
+                // Update idle time display
+                const idleTime = data.idle_time || 0;
+                const timeout = data.timeout || 900;
+                document.getElementById('idle-time-display').textContent = formatIdleTime(idleTime);
+                document.getElementById('idle-timeout-display').textContent = formatIdleTime(timeout);
+
+                if (data.is_idle && !data.mining_due_to_idle) {
+                    document.getElementById('idle-status-text').textContent = 'User is idle, starting soon...';
+                } else if (!data.is_idle) {
+                    document.getElementById('idle-status-text').textContent = 'Waiting for idle...';
+                }
+            } catch (e) {
+                console.error('Failed to fetch idle status:', e);
+            }
+        }
+
+        function formatIdleTime(seconds) {
+            if (seconds >= 3600) {
+                return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+            } else if (seconds >= 60) {
+                return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+            }
+            return seconds + 's';
+        }
+
+        async function toggleIdleMining(enable) {
+            const timeout = parseInt(document.getElementById('idle-timeout').value) * 60 || 900;
+
+            try {
+                if (enable) {
+                    const res = await fetch(`/api/idle/enable?timeout=${timeout}`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        addLog(`Idle mining enabled (timeout: ${timeout/60}m)`, 'success');
+                        startIdlePolling();
+                    }
+                } else {
+                    const res = await fetch('/api/idle/disable', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        addLog('Idle mining disabled', 'info');
+                        stopIdlePolling();
+                    }
+                }
+                fetchIdleStatus();
+            } catch (e) {
+                addLog('Failed to toggle idle mining: ' + e.message, 'error');
+            }
+        }
+
+        async function updateIdleTimeout() {
+            const timeout = parseInt(document.getElementById('idle-timeout').value) * 60 || 900;
+
+            try {
+                const res = await fetch(`/api/idle/timeout?timeout=${timeout}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    addLog(`Idle timeout updated to ${timeout/60} minutes`, 'info');
+                }
+            } catch (e) {
+                console.error('Failed to update idle timeout:', e);
+            }
+        }
+
+        function startIdlePolling() {
+            if (idlePollingInterval) return;
+            idlePollingInterval = setInterval(fetchIdleStatus, 2000);
+        }
+
+        function stopIdlePolling() {
+            if (idlePollingInterval) {
+                clearInterval(idlePollingInterval);
+                idlePollingInterval = null;
+            }
+        }
+
         // Event listeners
         document.getElementById('save-settings').addEventListener('click', saveSettings);
         document.getElementById('reload-settings').addEventListener('click', loadSettings);
@@ -781,22 +1437,49 @@
             logOutput.innerHTML = '';
         });
 
+        // Control button listeners
+        document.getElementById('btn-start').addEventListener('click', () => controlMiner('start'));
+        document.getElementById('btn-stop').addEventListener('click', () => controlMiner('stop'));
+        document.getElementById('btn-pause').addEventListener('click', () => controlMiner('pause'));
+        document.getElementById('btn-resume').addEventListener('click', () => controlMiner('resume'));
+        document.getElementById('btn-benchmark-start').addEventListener('click', startBenchmark);
+        document.getElementById('btn-benchmark-stop').addEventListener('click', stopBenchmark);
+
+        // Idle mining listeners
+        document.getElementById('idle-toggle').addEventListener('change', (e) => {
+            toggleIdleMining(e.target.checked);
+        });
+
+        document.getElementById('idle-timeout').addEventListener('change', () => {
+            if (idleEnabled) {
+                updateIdleTimeout();
+            }
+        });
+
         // Initialize
         window.addEventListener('load', () => {
             connectWebSocket();
             loadSettings();
+            fetchMinerState();
+            fetchIdleStatus();
             drawChart();
 
             // Redraw chart on resize
             window.addEventListener('resize', drawChart);
 
-            // Update uptime locally
+            // Poll miner state periodically as backup
             setInterval(() => {
                 if (connected) {
-                    const elapsed = Date.now() - startTime;
-                    // Uptime is updated from server, this is just a fallback
+                    fetchMinerState();
                 }
-            }, 1000);
+            }, 5000);
+
+            // Start idle polling if enabled
+            fetchIdleStatus().then(() => {
+                if (idleEnabled) {
+                    startIdlePolling();
+                }
+            });
         });
     </script>
 </body>

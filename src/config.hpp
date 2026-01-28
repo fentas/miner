@@ -18,6 +18,10 @@ struct Config {
     unsigned stats_interval = 10;
     uint16_t web_port = 8080;
     std::string web_dir = "web";
+
+    // Idle mining (screensaver mode)
+    unsigned idle_timeout = 0;      // Seconds of inactivity before starting (0 = disabled)
+    bool idle_mining_enabled = false;
 };
 
 inline std::string trim(const std::string& s) {
@@ -70,6 +74,13 @@ inline bool load(const std::string& filename, Config& cfg) {
             cfg.web_port = static_cast<uint16_t>(std::stoul(value));
         } else if (key_lower == "webdir") {
             cfg.web_dir = value;
+        } else if (key_lower == "idletimeout" || key_lower == "idle_timeout") {
+            cfg.idle_timeout = static_cast<unsigned>(std::stoul(value));
+            cfg.idle_mining_enabled = cfg.idle_timeout > 0;
+        } else if (key_lower == "idlemining" || key_lower == "idle_mining") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            cfg.idle_mining_enabled = (val_lower == "true" || val_lower == "1" || val_lower == "yes");
         }
     }
 

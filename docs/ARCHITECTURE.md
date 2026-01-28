@@ -11,29 +11,27 @@ This document describes the internal architecture of BTC Miner.
 │  - Config file loading                                      │
 │  - Signal handling                                          │
 │  - Stats reporting                                          │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┐
-         │                       │
-         ▼                       ▼
-┌─────────────────┐     ┌─────────────────┐
-│  Stratum Client │     │   Miner Core    │
-│  (stratum.cpp)  │◄────│   (miner.cpp)   │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         │                       ▼
-         │              ┌─────────────────┐
-         │              │  Worker Threads │
-         │              │  (N threads)    │
-         │              └────────┬────────┘
-         │                       │
-         │                       ▼
-         │              ┌─────────────────┐
-         ▼              │    SHA-256      │
-    ┌─────────┐         │  (sha256.hpp)   │
-    │  Pool   │         └─────────────────┘
-    │(ckpool) │
-    └─────────┘
+└───────┬─────────────────┬─────────────────┬─────────────────┘
+        │                 │                 │
+        ▼                 ▼                 ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│ Stratum Client│ │  Miner Core   │ │  Web Server   │
+│ (stratum.cpp) │◄│  (miner.cpp)  │ │(webserver.hpp)│
+└───────┬───────┘ └───────┬───────┘ └───────┬───────┘
+        │                 │                 │
+        │                 ▼                 ▼
+        │         ┌───────────────┐ ┌───────────────┐
+        │         │Worker Threads │ │  Idle Monitor │
+        │         │  (N threads)  │ │(idle_monitor) │
+        │         └───────┬───────┘ └───────────────┘
+        │                 │
+        │                 ▼
+        │         ┌───────────────┐
+        ▼         │    SHA-256    │
+   ┌─────────┐    │ (sha256.hpp)  │
+   │  Pool   │    └───────────────┘
+   │(ckpool) │
+   └─────────┘
 ```
 
 ## Components
@@ -152,7 +150,79 @@ struct Config {
     std::string password;
     unsigned threads;
     unsigned stats_interval;
+    uint16_t web_port;
+    std::string web_dir;
+    unsigned idle_timeout;        // Screensaver mode timeout
+    bool idle_mining_enabled;
 };
+```
+
+### 5. Web Server (`webserver.hpp`)
+
+Header-only HTTP/WebSocket server for the dashboard.
+
+#### Features
+
+- Static file serving (HTML, CSS, JS)
+- REST API endpoints for stats, settings, and control
+- WebSocket for real-time stats broadcast
+- No external dependencies (uses raw sockets)
+
+#### API Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/stats` | GET | Mining statistics |
+| `/api/settings` | GET/POST | Configuration |
+| `/api/control/*` | POST | Miner control (start/stop/pause) |
+| `/api/benchmark` | GET/POST | Benchmark mode |
+| `/api/idle` | GET/POST | Idle mining control |
+| `/ws` | WebSocket | Real-time updates |
+
+### 6. Idle Monitor (`idle_monitor.hpp`)
+
+Cross-platform idle detection for screensaver-style mining.
+
+#### Environment Detection
+
+```cpp
+enum class Environment {
+    NativeLinux,  // X11 via xprintidle
+    WSL2,         // Windows via PowerShell
+    Headless      // No display (disabled)
+};
+```
+
+#### Idle Detection Methods
+
+| Environment | Method | API |
+|-------------|--------|-----|
+| Native Linux | xprintidle / xssstate | X11 screen saver extension |
+| WSL2 | PowerShell | Windows GetLastInputInfo |
+
+#### Callback Flow
+
+```
+Idle Monitor Thread
+        │
+        ▼
+┌──────────────────┐
+│ Check idle time  │◄─── Every 5 seconds
+└────────┬─────────┘
+         │
+         ▼
+    ┌────────────┐
+    │ idle_time  │
+    │ > timeout? │
+    └─────┬──────┘
+          │
+    ┌─────┴─────┐
+    │Yes        │No
+    ▼           ▼
+┌────────┐  ┌────────┐
+│ Start  │  │ Stop   │
+│ Mining │  │ Mining │
+└────────┘  └────────┘
 ```
 
 ## Data Flow
@@ -243,6 +313,9 @@ nbits to 256-bit target conversion done once per job, not per hash.
 3. **Pool Failover**: Automatic reconnection to backup pools
 4. **GPU Support**: OpenCL/CUDA for massive parallelism
 5. **Better Nonce Distribution**: Random starting points per thread
+6. **Wayland Support**: Idle detection via D-Bus idle portal
+7. **macOS Support**: IOKit idle detection
+8. **Power Management**: Reduce threads when on battery
 
 ## References
 

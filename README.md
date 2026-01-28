@@ -8,10 +8,13 @@ A high-performance CPU Bitcoin miner written in C++17 with SHA-NI hardware accel
 - **Multi-threaded Mining**: Scales across all CPU cores
 - **Stratum Protocol**: Compatible with solo.ckpool.org and other stratum pools
 - **Midstate Optimization**: Pre-computes first 64 bytes of block header
-- **Web Dashboard**: Real-time stats, hashrate chart, settings UI
+- **Web Dashboard**: Real-time stats, hashrate chart, miner controls, settings UI
 - **WebSocket Live Updates**: Stats broadcast to browser in real-time
+- **Miner Controls**: Start/stop, pause/resume, benchmark mode via web UI
+- **Idle Mining (Screensaver Mode)**: Auto-start mining when user is idle, stop when active
+- **WSL2 Support**: Idle detection works on both native Linux and WSL2
 - **Config File Support**: Easy configuration via `btcminer.conf`
-- **Comprehensive Test Suite**: Verify correctness with `make test`
+- **Comprehensive Test Suite**: Verify correctness with `make test` and `make test-web`
 
 ## Performance
 
@@ -44,7 +47,9 @@ cp btcminer.conf.example btcminer.conf
 make              # Native build (optimized for your CPU)
 make portable     # Portable build (SSE4.1 only)
 make debug        # Debug build with symbols
-make test         # Build and run test suite
+make test         # Build and run SHA-256 test suite
+make test-web     # Test web server and API endpoints
+make test-all     # Run all tests
 make clean        # Remove built files
 ```
 
@@ -73,6 +78,10 @@ WebPort = 8080
 
 # Web files directory
 WebDir = web
+
+# Idle mining - screensaver mode (seconds, 0 = disabled)
+# Starts mining when user is idle for this many seconds
+IdleTimeout = 0
 ```
 
 ### Command Line Options
@@ -119,6 +128,7 @@ make
 ├── Makefile           # Build system
 ├── CMakeLists.txt     # Alternative CMake build
 ├── README.md          # This file
+├── test_web.sh        # Web server test script
 ├── docs/              # Documentation
 │   └── ARCHITECTURE.md
 ├── web/               # Web interface
@@ -132,6 +142,7 @@ make
     ├── miner.hpp      # Multi-threaded miner core
     ├── miner.cpp
     ├── webserver.hpp  # Built-in HTTP/WebSocket server
+    ├── idle_monitor.hpp  # Idle detection (Linux/WSL2)
     └── test.cpp       # Test suite
 ```
 
@@ -143,20 +154,56 @@ The miner includes a built-in web dashboard accessible at `http://localhost:8080
 
 - **Real-time Stats**: Hashrate, total hashes, shares, uptime
 - **Live Hashrate Chart**: Visual history of mining performance
+- **Miner Controls**: Start/stop, pause/resume mining with one click
+- **Benchmark Mode**: Test your hashrate without connecting to pool
+- **Idle Mining**: Enable screensaver-style mining with visual "zzz" animation
 - **Settings Panel**: View and configure mining settings
 - **Log Viewer**: Real-time mining log output
 - **WebSocket Updates**: Stats update automatically without page refresh
 
 **API Endpoints:**
 
-| Endpoint        | Method    | Description                |
-|-----------------|-----------|----------------------------|
-| `/api/stats`    | GET       | Current mining statistics  |
-| `/api/settings` | GET       | Current configuration      |
-| `/api/settings` | POST      | Update configuration       |
-| `/ws`           | WebSocket | Real-time stats stream     |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/stats` | GET | Current mining statistics |
+| `/api/settings` | GET | Current configuration |
+| `/api/settings` | POST | Update configuration |
+| `/api/control/start` | POST | Start mining |
+| `/api/control/stop` | POST | Stop mining |
+| `/api/control/pause` | POST | Pause mining |
+| `/api/control/resume` | POST | Resume mining |
+| `/api/control/benchmark` | POST | Start benchmark (query: duration) |
+| `/api/control/benchmark/stop` | POST | Stop benchmark |
+| `/api/benchmark` | GET | Get benchmark results |
+| `/api/idle` | GET | Get idle mining status |
+| `/api/idle/enable` | POST | Enable idle mining (query: timeout) |
+| `/api/idle/disable` | POST | Disable idle mining |
+| `/ws` | WebSocket | Real-time stats stream |
 
 **Disabling:** Set `WebPort = 0` in config or use `-w 0` on command line.
+
+## Idle Mining (Screensaver Mode)
+
+The miner can automatically start when your computer is idle and stop when you return.
+
+**Supported Environments:**
+
+- **Native Linux (X11)**: Uses `xprintidle` or `xssstate` for idle detection
+- **WSL2**: Queries Windows idle time via PowerShell
+
+**Configuration:**
+
+```ini
+# In btcminer.conf
+IdleTimeout = 900  # Start mining after 15 minutes of inactivity
+```
+
+**Or enable via web UI:**
+1. Go to the Dashboard
+2. Toggle "Enable idle mining" in the Idle Mining section
+3. Set your preferred timeout (in minutes)
+
+When enabled, the web UI shows a "zzz" animation while waiting for idle, and switches to a mining indicator when active.
 
 ## How It Works
 

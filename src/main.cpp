@@ -2,6 +2,7 @@
 #include "miner.hpp"
 #include "config.hpp"
 #include "webserver.hpp"
+#include "idle_monitor.hpp"
 
 #include <iostream>
 #include <string>
@@ -20,7 +21,9 @@ config::Config g_config;
 web::WebServer* g_webserver = nullptr;
 miner::Miner* g_miner = nullptr;
 stratum::Client* g_stratum = nullptr;
+idle::IdleMonitor* g_idle_monitor = nullptr;
 std::chrono::steady_clock::time_point g_start_time;
+std::atomic<bool> g_idle_mining_active{false};
 
 void signal_handler(int) {
     std::cout << "\n[Main] Shutting down..." << std::endl;
@@ -80,11 +83,21 @@ std::string make_stats_json(double hashrate, uint64_t total_hashes, uint64_t sha
     return oss.str();
 }
 
+std::string state_to_string(miner::MinerState state) {
+    switch (state) {
+        case miner::MinerState::Stopped: return "stopped";
+        case miner::MinerState::Running: return "running";
+        case miner::MinerState::Paused: return "paused";
+        case miner::MinerState::Benchmarking: return "benchmarking";
+        default: return "unknown";
+    }
+}
+
 void setup_web_routes(web::WebServer& server) {
     // API: Get current stats
     server.get("/api/stats", [](const web::Request&, web::Response& res) {
         if (!g_miner) {
-            res.json("{\"error\":\"Miner not running\"}");
+            res.json("{\"error\":\"Miner not initialized\"}");
             return;
         }
 
@@ -92,14 +105,22 @@ void setup_web_routes(web::WebServer& server) {
         double uptime = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - g_start_time).count();
 
+        double hashrate = g_miner->is_benchmarking() ?
+            g_miner->get_benchmark_hashrate() : g_miner->get_hashrate();
+
         std::ostringstream oss;
         oss << "{"
-            << "\"hashrate\":" << g_miner->get_hashrate() << ","
+            << "\"hashrate\":" << std::fixed << std::setprecision(0) << hashrate << ","
             << "\"total_hashes\":" << stats.hashes.load() << ","
+            << "\"benchmark_hashes\":" << stats.benchmark_hashes.load() << ","
             << "\"shares\":" << stats.shares_found.load() << ","
             << "\"threads\":" << g_config.threads << ","
-            << "\"uptime\":" << uptime << ","
-            << "\"connected\":" << (g_stratum && g_stratum->is_connected() ? "true" : "false")
+            << "\"uptime\":" << std::fixed << std::setprecision(1) << uptime << ","
+            << "\"state\":\"" << state_to_string(g_miner->get_state()) << "\","
+            << "\"connected\":" << (g_stratum && g_stratum->is_connected() ? "true" : "false") << ","
+            << "\"idle_mining_enabled\":" << (g_config.idle_mining_enabled ? "true" : "false") << ","
+            << "\"idle_mining_active\":" << (g_idle_mining_active ? "true" : "false") << ","
+            << "\"user_idle\":" << (g_idle_monitor && g_idle_monitor->is_idle() ? "true" : "false")
             << "}";
         res.json(oss.str());
     });
@@ -120,10 +141,187 @@ void setup_web_routes(web::WebServer& server) {
 
     // API: Update settings (would require restart)
     server.post("/api/settings", [](const web::Request& req, web::Response& res) {
-        // Simple JSON parsing for settings
-        // In production, use a proper JSON library
         res.json("{\"status\":\"ok\",\"message\":\"Settings received. Restart miner to apply.\"}");
         std::cout << "[Web] Settings update received: " << req.body << std::endl;
+    });
+
+    // API: Control - Start mining
+    server.post("/api/control/start", [](const web::Request&, web::Response& res) {
+        if (g_miner) {
+            g_miner->start();
+            res.json("{\"success\":true,\"state\":\"running\",\"message\":\"Mining started\"}");
+        } else {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+        }
+    });
+
+    // API: Control - Stop mining
+    server.post("/api/control/stop", [](const web::Request&, web::Response& res) {
+        if (g_miner) {
+            g_miner->stop();
+            res.json("{\"success\":true,\"state\":\"stopped\",\"message\":\"Mining stopped\"}");
+        } else {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+        }
+    });
+
+    // API: Control - Pause mining
+    server.post("/api/control/pause", [](const web::Request&, web::Response& res) {
+        if (g_miner) {
+            g_miner->pause();
+            res.json("{\"success\":true,\"state\":\"paused\",\"message\":\"Mining paused\"}");
+        } else {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+        }
+    });
+
+    // API: Control - Resume mining
+    server.post("/api/control/resume", [](const web::Request&, web::Response& res) {
+        if (g_miner) {
+            g_miner->resume();
+            res.json("{\"success\":true,\"state\":\"running\",\"message\":\"Mining resumed\"}");
+        } else {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+        }
+    });
+
+    // API: Control - Start benchmark
+    server.post("/api/control/benchmark", [](const web::Request& req, web::Response& res) {
+        if (!g_miner) {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+            return;
+        }
+
+        // Parse duration from query string or request body
+        unsigned duration = 30;  // Default 30 seconds
+
+        // Check query string first (e.g., ?duration=10)
+        size_t qpos = req.path.find("duration=");
+        if (qpos != std::string::npos) {
+            try {
+                duration = static_cast<unsigned>(std::stoul(req.path.substr(qpos + 9)));
+            } catch (...) {}
+        } else {
+            // Try request body
+            size_t pos = req.body.find("duration");
+            if (pos != std::string::npos) {
+                pos = req.body.find(':', pos);
+                if (pos != std::string::npos) {
+                    try {
+                        duration = static_cast<unsigned>(std::stoul(req.body.substr(pos + 1)));
+                    } catch (...) {}
+                }
+            }
+        }
+
+        g_miner->start_benchmark(duration);
+        res.json("{\"success\":true,\"state\":\"benchmarking\",\"message\":\"Benchmark started\",\"duration\":" +
+                 std::to_string(duration) + "}");
+    });
+
+    // API: Control - Stop benchmark
+    server.post("/api/control/benchmark/stop", [](const web::Request&, web::Response& res) {
+        if (g_miner) {
+            g_miner->stop_benchmark();
+            res.json("{\"success\":true,\"state\":\"running\",\"message\":\"Benchmark stopped\"}");
+        } else {
+            res.json("{\"success\":false,\"message\":\"Miner not initialized\"}");
+        }
+    });
+
+    // API: Get benchmark results
+    server.get("/api/benchmark", [](const web::Request&, web::Response& res) {
+        if (!g_miner) {
+            res.json("{\"error\":\"Miner not initialized\"}");
+            return;
+        }
+
+        const auto& stats = g_miner->get_stats();
+        double hashrate = g_miner->get_benchmark_hashrate();
+        double duration = g_miner->get_benchmark_duration();
+
+        std::ostringstream oss;
+        oss << "{"
+            << "\"hashrate\":" << std::fixed << std::setprecision(0) << hashrate << ","
+            << "\"total_hashes\":" << stats.benchmark_hashes.load() << ","
+            << "\"duration\":" << std::fixed << std::setprecision(2) << duration << ","
+            << "\"state\":\"" << state_to_string(g_miner->get_state()) << "\""
+            << "}";
+        res.json(oss.str());
+    });
+
+    // API: Get idle mining status
+    server.get("/api/idle", [](const web::Request&, web::Response& res) {
+        std::ostringstream oss;
+        oss << "{"
+            << "\"enabled\":" << (g_config.idle_mining_enabled ? "true" : "false") << ","
+            << "\"timeout\":" << g_config.idle_timeout << ","
+            << "\"is_idle\":" << (g_idle_monitor && g_idle_monitor->is_idle() ? "true" : "false") << ","
+            << "\"idle_time\":" << (g_idle_monitor ? g_idle_monitor->get_idle_time() : 0) << ","
+            << "\"mining_due_to_idle\":" << (g_idle_mining_active ? "true" : "false") << ","
+            << "\"environment\":\"" << (g_idle_monitor ? idle::IdleMonitor::env_to_string(g_idle_monitor->get_environment()) : "unknown") << "\""
+            << "}";
+        res.json(oss.str());
+    });
+
+    // API: Enable/disable idle mining
+    server.post("/api/idle/enable", [](const web::Request& req, web::Response& res) {
+        // Parse timeout from query or body
+        unsigned timeout = g_config.idle_timeout > 0 ? g_config.idle_timeout : 900;  // Default 15 min
+
+        size_t qpos = req.path.find("timeout=");
+        if (qpos != std::string::npos) {
+            try {
+                timeout = static_cast<unsigned>(std::stoul(req.path.substr(qpos + 8)));
+            } catch (...) {}
+        }
+
+        g_config.idle_timeout = timeout;
+        g_config.idle_mining_enabled = true;
+
+        if (g_idle_monitor) {
+            g_idle_monitor->set_timeout(timeout);
+            g_idle_monitor->start();
+        }
+
+        res.json("{\"success\":true,\"message\":\"Idle mining enabled\",\"timeout\":" +
+                 std::to_string(timeout) + "}");
+    });
+
+    // API: Disable idle mining
+    server.post("/api/idle/disable", [](const web::Request&, web::Response& res) {
+        g_config.idle_mining_enabled = false;
+
+        if (g_idle_monitor) {
+            g_idle_monitor->stop();
+        }
+
+        // If we were mining due to idle, stop
+        if (g_idle_mining_active && g_miner) {
+            g_miner->stop();
+            g_idle_mining_active = false;
+        }
+
+        res.json("{\"success\":true,\"message\":\"Idle mining disabled\"}");
+    });
+
+    // API: Update idle timeout
+    server.post("/api/idle/timeout", [](const web::Request& req, web::Response& res) {
+        unsigned timeout = 900;
+
+        size_t qpos = req.path.find("timeout=");
+        if (qpos != std::string::npos) {
+            try {
+                timeout = static_cast<unsigned>(std::stoul(req.path.substr(qpos + 8)));
+            } catch (...) {}
+        }
+
+        g_config.idle_timeout = timeout;
+        if (g_idle_monitor) {
+            g_idle_monitor->set_timeout(timeout);
+        }
+
+        res.json("{\"success\":true,\"timeout\":" + std::to_string(timeout) + "}");
     });
 }
 
@@ -276,8 +474,38 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Start miner
-    miner_instance.start();
+    // Setup idle monitor
+    idle::IdleMonitor idle_monitor;
+    g_idle_monitor = &idle_monitor;
+
+    if (cfg.idle_mining_enabled && cfg.idle_timeout > 0) {
+        idle_monitor.set_timeout(cfg.idle_timeout);
+        idle_monitor.set_callback([&miner_instance](bool is_idle) {
+            if (is_idle) {
+                // User went idle - start mining if not already running
+                if (!miner_instance.is_running()) {
+                    std::cout << "[Idle] User idle - starting mining" << std::endl;
+                    miner_instance.start();
+                    g_idle_mining_active = true;
+                }
+            } else {
+                // User became active - stop mining if we started it due to idle
+                if (g_idle_mining_active) {
+                    std::cout << "[Idle] User active - stopping idle mining" << std::endl;
+                    miner_instance.stop();
+                    g_idle_mining_active = false;
+                }
+            }
+        });
+        idle_monitor.start();
+        std::cout << "[Idle] Idle mining enabled (timeout: " << cfg.idle_timeout << "s)" << std::endl;
+
+        // Don't auto-start miner if idle mining is enabled - wait for idle
+        std::cout << "[Main] Waiting for idle state before mining..." << std::endl;
+    } else {
+        // Start miner immediately
+        miner_instance.start();
+    }
 
     // Start stratum client in separate thread
     std::thread stratum_thread([&client]() {
@@ -320,6 +548,7 @@ int main(int argc, char* argv[]) {
 
     // Cleanup
     std::cout << "[Main] Stopping..." << std::endl;
+    idle_monitor.stop();
     miner_instance.stop();
     client.stop();
     webserver.stop();
@@ -327,6 +556,7 @@ int main(int argc, char* argv[]) {
     g_miner = nullptr;
     g_stratum = nullptr;
     g_webserver = nullptr;
+    g_idle_monitor = nullptr;
 
     if (stratum_thread.joinable()) {
         stratum_thread.join();

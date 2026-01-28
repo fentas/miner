@@ -97,9 +97,7 @@ std::vector<std::string> extract_notify_params(const std::string& json) {
     size_t arr_start = json.find('[', params_pos);
     if (arr_start == std::string::npos) return result;
 
-    // Parse the params array more carefully
     size_t pos = arr_start + 1;
-    int depth = 0;
     std::string current;
     bool in_string = false;
 
@@ -108,28 +106,26 @@ std::vector<std::string> extract_notify_params(const std::string& json) {
 
         if (c == '"' && (pos == 0 || json[pos-1] != '\\')) {
             in_string = !in_string;
-            if (!in_string && depth == 0) {
+            if (!in_string) {
                 result.push_back(current);
                 current.clear();
             }
         } else if (!in_string) {
             if (c == '[') {
-                depth++;
-                // Start of merkle branch array
-                size_t inner_end = json.find(']', pos);
-                if (inner_end != std::string::npos) {
-                    // This is the merkle branch - parse it separately
-                    pos = inner_end;
+                // Skip nested array (merkle branch)
+                int nest_depth = 1;
+                pos++;
+                while (pos < json.size() && nest_depth > 0) {
+                    if (json[pos] == '[') nest_depth++;
+                    else if (json[pos] == ']') nest_depth--;
+                    pos++;
                 }
+                pos--;  // Back up to let the main loop advance
             } else if (c == ']') {
-                if (depth == 0) break;
-                depth--;
-            } else if (c == ',' && depth == 0) {
-                if (!current.empty()) {
-                    result.push_back(current);
-                    current.clear();
-                }
+                // End of params array
+                break;
             }
+            // Commas and other non-string chars are just skipped
         } else {
             current += c;
         }
@@ -316,7 +312,7 @@ void Client::process_message(const std::string& msg) {
 
         std::vector<std::string> params = extract_notify_params(msg);
 
-        if (params.size() >= 8) {
+        if (params.size() >= 7) {
             process_notify(params);
         }
     } else if (msg.find("mining.set_difficulty") != std::string::npos) {
@@ -330,11 +326,12 @@ void Client::process_notify(const std::vector<std::string>& params) {
     job.prevhash = params[1];
     job.coinb1 = params[2];
     job.coinb2 = params[3];
-    // params[4] would be merkle branch - parse separately
-    job.version = params[5];
-    job.nbits = params[6];
-    job.ntime = params[7];
-    job.clean_jobs = (params.size() > 8 && params[8] == "true");
+    // Note: merkle branch array is skipped during parsing, so indices are shifted
+    // params[4] = version (merkle branch was at original index 4 but skipped)
+    job.version = params[4];
+    job.nbits = params[5];
+    job.ntime = params[6];
+    job.clean_jobs = (params.size() > 7 && params[7] == "true");
 
     // TODO: Parse merkle branch from the original message
 
@@ -357,8 +354,13 @@ void Client::process_notify(const std::vector<std::string>& params) {
 
 std::vector<uint8_t> Client::hex_to_bytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
-    for (size_t i = 0; i < hex.length(); i += 2) {
-        bytes.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+    for (size_t i = 0; i + 1 < hex.length(); i += 2) {
+        try {
+            bytes.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+        } catch (const std::exception&) {
+            // Invalid hex character, skip
+            break;
+        }
     }
     return bytes;
 }

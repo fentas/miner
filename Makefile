@@ -32,7 +32,7 @@ HEADERS := $(SRCDIR)/sha256.hpp $(SRCDIR)/stratum.hpp $(SRCDIR)/miner.hpp
 # Output
 TARGET := btcminer
 
-.PHONY: all clean install test
+.PHONY: all clean install test test-web test-all
 
 all: $(TARGET)
 
@@ -43,6 +43,15 @@ test_miner: $(SRCDIR)/test.cpp $(SRCDIR)/sha256.hpp
 
 test: test_miner
 	./test_miner
+
+# Web server test (requires curl)
+test-web: $(TARGET)
+	@echo "Running web server tests..."
+	@./test_web.sh
+
+# Run all tests
+test-all: test test-web
+	@echo "All tests completed!"
 
 $(TARGET): $(SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES)
