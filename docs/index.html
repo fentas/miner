@@ -193,7 +193,7 @@
         <header>
             <div class="logo">&#8383;</div>
             <h1>BTC Miner</h1>
-            <p class="tagline">High-performance Bitcoin miner in C++17</p>
+            <p class="tagline">High-performance Bitcoin solo miner in Rust</p>
             <div class="badges">
                 <a href="https://github.com/fentas/miner/stargazers">
                     <img alt="Stars" src="https://img.shields.io/github/stars/fentas/miner?style=flat-square&color=f7931a">
@@ -240,10 +240,10 @@
         <section>
             <h2>Quick Start</h2>
             <pre>git clone https://github.com/fentas/miner
-cd miner && mkdir build && cd build
-cmake .. -DNATIVE_BUILD=ON && make -j$(nproc)
-cp ../btcminer.conf.example btcminer.conf
-./btcminer</pre>
+cd miner
+cargo build --release
+cp btcminer.toml.example btcminer.toml
+./target/release/btcminer</pre>
         </section>
 
         <section class="actions">
