@@ -1,0 +1,26 @@
+# Simple Dockerfile using pre-built cargo-xwin image
+# For cross-compiling btcminer to Windows
+
+FROM messense/cargo-xwin:latest AS builder
+
+# Install OpenCL headers
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download Khronos OpenCL headers
+RUN git clone --depth 1 https://github.com/KhronosGroup/OpenCL-Headers.git /opt/opencl-headers
+
+# Set OpenCL include path
+ENV OPENCL_INCLUDE_DIR=/opt/opencl-headers
+
+WORKDIR /build
+COPY . .
+
+# Build for Windows (without OpenCL initially - OpenCL cross-compile is complex)
+RUN cargo xwin build --release --target x86_64-pc-windows-msvc
+
+# Output stage
+FROM scratch AS output
+COPY --from=builder /build/target/x86_64-pc-windows-msvc/release/btcminer.exe /btcminer.exe
+COPY --from=builder /build/web /web

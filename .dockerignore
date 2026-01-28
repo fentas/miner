@@ -1,0 +1,29 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+dist/
+
+# Test/Debug files
+*.log
+*.tmp
+
+# Local config
+btcminer.toml
+*.local.toml

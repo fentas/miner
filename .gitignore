@@ -21,6 +21,9 @@ miner.log
 .DS_Store
 Thumbs.db
 
+# Build output
+/dist/
+
 # Coverage reports
 /coverage/
 tarpaulin-report.html
