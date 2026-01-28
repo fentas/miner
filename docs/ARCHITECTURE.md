@@ -1,419 +1,569 @@
 # Architecture
 
-This document describes the internal architecture of BTC Miner.
+This document describes the internal architecture of BTC Miner (Rust edition).
 
 ## Overview
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                            main.cpp                                  │
-│  - CLI argument parsing    - Config loading    - Signal handling     │
-└────────┬──────────────┬──────────────┬──────────────┬───────────────┘
-         │              │              │              │
-         ▼              ▼              ▼              ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│   Stratum   │ │   Miner     │ │ Web Server  │ │    Idle     │
-│   Client    │◄│   Core      │ │             │ │   Monitor   │
-│ (V1 or V2)  │ │             │ │             │ │             │
-└──────┬──────┘ └──────┬──────┘ └──────┬──────┘ └─────────────┘
-       │               │               │
-       ▼               ▼               ▼
-  ┌─────────┐   ┌─────────────────────────────────┐
-  │  Pool   │   │         Hashing Engine           │
-  │         │   ├─────────────┬─────────────┬─────┤
-  └─────────┘   │  CPU (SIMD) │  GPU (CUDA) │ GPU │
-                │  SHA-NI     │             │ OCL │
-                │  AVX2/512   │             │     │
-                └─────────────┴─────────────┴─────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               main.rs                                        │
+│  - CLI argument parsing  - Config loading  - SIMD detection  - Colored output│
+└────────┬──────────┬──────────┬──────────┬──────────┬──────────┬─────────────┘
+         │          │          │          │          │          │
+         ▼          ▼          ▼          ▼          ▼          ▼
+┌─────────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│   Stratum   │ │ Mining │ │  Web   │ │Bitcoin │ │  GPU   │ │  Idle  │
+│   Client    │◄│Coordin-│ │ Server │ │  RPC   │ │Manager │ │Monitor │
+│  (V1/V2)    │ │  ator  │ │ (axum) │ │        │ │        │ │        │
+└──────┬──────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
+       │            │          │          │          │          │
+       ▼            ▼          ▼          ▼          ▼          ▼
+  ┌─────────┐ ┌─────────────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+  │  Pool   │ │   Worker Threads    │ │WebSocket│ │Bitcoin  │ │X11/WSL2 │
+  │         │ │ (CPU + GPU hashing) │ │ Clients │ │  Core   │ │ Detect  │
+  └─────────┘ └─────────────────────┘ └─────────┘ └─────────┘ └─────────┘
+```
+
+## Project Structure
+
+```text
+src/
+├── main.rs              # Entry point, colored output, SIMD detection
+├── config.rs            # TOML configuration parsing
+├── mining/              # Mining core
+│   ├── mod.rs           # Coordinator, stats
+│   ├── worker.rs        # Mining worker threads
+│   ├── job.rs           # Mining job structure
+│   ├── hasher.rs        # SHA-256d implementation
+│   └── sha256_simd.rs   # SIMD optimizations (SHA-NI, AVX2, AVX512)
+├── gpu/                 # GPU mining support
+│   ├── mod.rs           # GPU types and errors
+│   ├── manager.rs       # Device management and orchestration
+│   └── opencl.rs        # OpenCL implementation (kernel + host)
+├── stratum/             # Pool protocols
+│   ├── mod.rs           # Common types
+│   ├── v1.rs            # Stratum V1 (JSON-RPC)
+│   └── v2.rs            # Stratum V2 (binary)
+├── bitcoin/             # Bitcoin Core integration
+│   ├── mod.rs           # Types
+│   ├── rpc.rs           # JSON-RPC client
+│   └── manager.rs       # Bitcoind lifecycle management
+├── idle/                # Idle mining support
+│   └── mod.rs           # X11/WSL2 idle detection
+├── web/                 # Web interface
+│   └── mod.rs           # REST API, WebSocket, static files
+└── stats/               # Statistics
+    └── mod.rs           # Hashrate calculation, formatting
+
+web/                     # Web dashboard frontend
+├── index.html           # Dashboard HTML structure
+├── css/
+│   └── styles.css       # Dashboard styles
+└── js/
+    ├── app.js           # Main application logic
+    ├── chart.js         # Hashrate chart (Chart.js)
+    ├── websocket.js     # Real-time WebSocket updates
+    ├── idle.js          # Idle monitoring UI
+    └── notifications.js # Web Notifications API
 ```
 
 ## Components
 
-### 1. SHA-256 Engine
+### 1. Configuration (`config.rs`)
 
-Header-only implementation with compile-time feature detection.
+TOML-based configuration with SRI-compatible structure.
 
-#### Files
+```toml
+[pool]
+preset = "ckpool"  # ckpool, braiins, ocean, none, custom
+payout_address = "bc1q..."
 
-| File | Description |
-| ---- | ----------- |
-| `sha256.hpp` | Generic + SHA-NI implementation |
-| `sha256_avx.hpp` | AVX2/AVX512 multi-hashing |
+[mining]
+enable_cpu = true
+threads = 0        # 0 = auto-detect
+enable_gpu = false
+gpu_devices = []   # Empty = all GPUs
+gpu_intensity = 80
 
-#### Implementations
+[bitcoind]
+enabled = false
+managed = false
+prune = 10000
 
-| Function | Description | Performance |
-| -------- | ----------- | ----------- |
-| `transform_shani()` | SHA-NI hardware acceleration | ~800 MH/s |
-| `transform_generic()` | Portable C++ implementation | ~20 MH/s |
-| `sha256d_midstate_8way()` | AVX2 8-way parallel | ~200-300 MH/s |
-| `sha256d_midstate_16way()` | AVX512 16-way parallel | ~400-500 MH/s |
+[sv2]
+enabled = false
+proxy_host = "127.0.0.1"
+proxy_port = 34255
 
-#### Key Functions
+[idle]
+enabled = false
+timeout = 900          # 15 minutes
+pause_on_active = true
 
-```cpp
-// Full 80-byte header double-hash
-void sha256d_80(const uint8_t header[80], uint8_t hash[32]);
+[web]
+port = 8080
 
-// Pre-compute midstate for first 64 bytes
-void compute_midstate(const uint8_t header[80], Midstate& ms);
-
-// Hash with midstate (fast path for mining)
-void sha256d_midstate(const Midstate& ms, uint32_t nonce, uint8_t hash[32]);
-
-// AVX2: Process 8 nonces, returns bitmask of valid hashes
-uint8_t sha256d_midstate_8way(const Midstate& ms, uint32_t nonce_base,
-                               const uint8_t target[32], uint8_t hashes[8][32]);
-
-// AVX512: Process 16 nonces
-uint16_t sha256d_midstate_16way(const Midstate& ms, uint32_t nonce_base,
-                                 const uint8_t target[32], uint8_t hashes[16][32]);
+[logging]
+colors = true
+stats_interval = 10
+system_bell = true
 ```
 
-#### SHA-NI Instructions
+#### Pool Presets
 
-- `_mm_sha256rnds2_epu32`: 2 rounds of SHA-256 compression
-- `_mm_sha256msg1_epu32`: First part of message schedule
-- `_mm_sha256msg2_epu32`: Second part of message schedule
+| Preset | Pool | Protocol |
+|--------|------|----------|
+| `ckpool` | solo.ckpool.org:3333 | Stratum V1 |
+| `braiins` | solo.stratum.braiins.com:3333 | Stratum V1 |
+| `ocean` | mine.ocean.xyz:3334 | Stratum V1 |
+| `none` | True solo (requires Bitcoin Core) | Direct |
+| `custom` | User-defined | V1 or V2 |
 
-#### AVX2/AVX512 Multi-hashing
+### 2. Mining Coordinator (`mining/mod.rs`)
 
-Process multiple nonces in parallel using SIMD registers:
+Manages CPU and GPU workers, job distribution, and share collection.
+
+```rust
+pub struct Coordinator {
+    workers: Vec<WorkerHandle>,
+    gpu_manager: Option<GpuManager>,
+    stats: Arc<Stats>,
+    running: Arc<AtomicBool>,
+    job_tx: watch::Sender<Option<Job>>,
+    share_rx: mpsc::Receiver<Share>,
+}
+```
+
+#### Statistics
+
+```rust
+pub struct Stats {
+    pub hashes: AtomicU64,
+    pub shares_accepted: AtomicU64,
+    pub shares_rejected: AtomicU64,
+    pub blocks_found: AtomicU64,
+}
+```
+
+### 3. SHA-256 SIMD Optimizations (`mining/sha256_simd.rs`)
+
+Hardware-accelerated hashing with automatic detection and fallback.
 
 ```text
-AVX2 (256-bit registers):
-┌────────────────────────────────────────────────────────────┐
-│ Lane 0 │ Lane 1 │ Lane 2 │ Lane 3 │ Lane 4 │ Lane 5 │ ... │
-│ nonce  │ nonce  │ nonce  │ nonce  │ nonce  │ nonce  │     │
-│   +0   │   +1   │   +2   │   +3   │   +4   │   +5   │     │
-└────────────────────────────────────────────────────────────┘
-                    ↓ Single instruction ↓
-            8 SHA-256 rounds computed in parallel
+Detection Priority:
+1. SHA-NI     (x86_64 with SHA extensions) - ~3x faster
+2. AVX-512   (x86_64 with AVX-512)        - ~2.5x faster
+3. AVX2      (x86_64 with AVX2)           - ~2x faster
+4. Software  (portable fallback)
 ```
 
-### 2. GPU Mining (`src/gpu/`)
+```rust
+pub enum SimdCapability {
+    ShaNi,    // Intel SHA Extensions (Goldmont+, Ice Lake+)
+    Avx512,   // AVX-512F + AVX-512VL
+    Avx2,     // AVX2 (Haswell+)
+    None,     // Software fallback
+}
 
-CUDA and OpenCL implementations for GPU acceleration.
+pub fn detect_simd() -> SimdCapability {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sha") { return SimdCapability::ShaNi; }
+        if is_x86_feature_detected!("avx512f") { return SimdCapability::Avx512; }
+        if is_x86_feature_detected!("avx2") { return SimdCapability::Avx2; }
+    }
+    SimdCapability::None
+}
+```
 
-#### Files
+### 4. GPU Mining (`gpu/`)
 
-| File | Description |
-| ---- | ----------- |
-| `gpu.hpp` | Abstract GPU miner interface |
-| `gpu.cpp` | GPU manager and coordinator |
-| `cuda_miner.cuh` | CUDA miner class |
-| `sha256d.cu` | CUDA SHA-256d kernel |
-| `opencl_miner.hpp` | OpenCL miner class |
-| `sha256d.cl` | OpenCL SHA-256d kernel |
+GPU acceleration via OpenCL (AMD, Intel, NVIDIA) with planned CUDA support.
 
-#### Architecture
+#### Device Management (`manager.rs`)
+
+```rust
+pub struct GpuDevice {
+    pub id: u32,
+    pub name: String,
+    pub vendor: String,
+    pub memory_total: u64,
+    pub compute_units: u32,
+    pub max_work_group_size: usize,
+    pub backend: GpuBackend,
+    pub available: bool,
+}
+
+pub enum GpuBackend {
+    OpenCL,
+    Cuda,  // Future
+}
+
+pub trait GpuMiner: Send {
+    fn set_job(&mut self, midstate: &[u32; 8], tail: &[u8; 16], target: &[u8; 32]);
+    fn mine(&mut self, nonce_start: u32, nonce_count: u32) -> Vec<MiningResult>;
+    fn device(&self) -> &GpuDevice;
+    fn hashrate(&self) -> f64;
+    fn stop(&mut self);
+}
+```
+
+#### OpenCL Implementation (`opencl.rs`)
+
+Full GPU mining implementation with the `ocl` crate:
+
+```rust
+pub struct OpenCLMiner {
+    device: GpuDevice,
+    intensity: u8,              // Work size control (1-100)
+    queue: ocl::Queue,          // OpenCL command queue
+    kernel: ocl::Kernel,        // Compiled SHA-256d kernel
+    midstate_buf: ocl::Buffer<u32>,   // 8 x u32 midstate
+    tail_buf: ocl::Buffer<u8>,        // 16 bytes tail
+    target_buf: ocl::Buffer<u8>,      // 32 bytes target
+    result_nonces_buf: ocl::Buffer<u32>,
+    result_hashes_buf: ocl::Buffer<u8>,
+    result_count_buf: ocl::Buffer<u32>,
+    // ...
+}
+```
+
+#### Mining Flow (GPU)
 
 ```text
-┌───────────────────────────────────────────────────────┐
-│                   GPUCoordinator                       │
-│  - Manages multiple GPUs                               │
-│  - Distributes nonce ranges                            │
-│  - Collects results                                    │
-└─────────────────────────┬─────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-│  CUDAMiner    │ │  CUDAMiner    │ │ OpenCLMiner   │
-│  GPU 0        │ │  GPU 1        │ │  GPU 2        │
-└───────┬───────┘ └───────┬───────┘ └───────┬───────┘
-        │                 │                 │
-        ▼                 ▼                 ▼
-┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-│ sha256d.cu    │ │ sha256d.cu    │ │ sha256d.cl    │
-│ (kernel)      │ │ (kernel)      │ │ (kernel)      │
-└───────────────┘ └───────────────┘ └───────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Host (Rust)                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ 1. Receive job (version, prev_hash, merkle_root, ntime, nbits)      │
+│ 2. Compute midstate: SHA-256 of first 64 bytes                      │
+│ 3. Upload to GPU: midstate, tail (16 bytes), target                 │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         GPU (OpenCL Kernel)                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ Each work-item (one per nonce):                                      │
+│   a. Load midstate, tail from global memory                         │
+│   b. Build final block: tail + nonce + padding                      │
+│   c. Complete first SHA-256 from midstate                           │
+│   d. Perform second SHA-256 (double hash)                           │
+│   e. Compare hash to target (big-endian)                            │
+│   f. If meets target: atomic_inc(result_count), store result        │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Host (Rust)                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ 4. Wait for kernel completion                                        │
+│ 5. Read result_count from GPU                                        │
+│ 6. If results found: read nonces and hashes                         │
+│ 7. Submit valid shares to pool/network                              │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-#### GPU Kernel Design
+#### Intensity Control
 
-```cpp
-// Each GPU thread processes one nonce
-__global__ void sha256d_kernel(
-    const uint32_t* midstate,    // Pre-computed SHA-256 state
-    const uint8_t* tail,         // Last 16 bytes of header
-    const uint8_t* target,       // Difficulty target
-    uint32_t nonce_start,        // Starting nonce for this batch
-    uint32_t* result_nonces,     // Found nonces
-    uint8_t* result_hashes,      // Corresponding hashes
-    uint32_t* result_count,      // Number of results
-    int max_results
-);
+Work size is calculated based on intensity setting (1-100):
+
+```rust
+fn calculate_work_size(&self, nonce_count: u32) -> usize {
+    let intensity_factor = (self.intensity as f64 / 100.0).max(0.01);
+    let base_size = compute_units * work_group_size * 64;
+    let target_size = (base_size * intensity_factor) as usize;
+    // Round to work_group_size multiple
+    (target_size / work_group_size) * work_group_size
+}
 ```
 
-### 3. Stratum V1 Client (`stratum.hpp/cpp`)
+| Intensity | Typical Work Size | GPU Utilization | Use Case |
+|-----------|-------------------|-----------------|----------|
+| 1-20      | ~16K-64K          | Low             | Background mining |
+| 50        | ~256K             | Medium          | Balanced |
+| 80-100    | ~1M+              | High            | Maximum hashrate |
 
-JSON-based Stratum mining protocol.
+### 5. Idle Mining (`idle/mod.rs`)
+
+Screensaver-style mining that activates when the user is away.
+
+```rust
+pub struct IdleMonitor {
+    timeout: Duration,
+    pause_on_active: bool,
+    running: Arc<AtomicBool>,
+}
+
+impl IdleMonitor {
+    pub async fn get_idle_time() -> Option<Duration> {
+        #[cfg(target_os = "linux")]
+        {
+            // X11: xprintidle or xssstate
+            // WSL2: PowerShell query
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // IOKit HIDIdleTime
+        }
+    }
+}
+```
+
+#### Platform Support
+
+| Platform | Method | Command |
+|----------|--------|---------|
+| Linux (X11) | xprintidle | `xprintidle` (milliseconds) |
+| Linux (X11) | xssstate | `xssstate -i` (milliseconds) |
+| WSL2 | PowerShell | Queries Windows LastInputInfo |
+| macOS | IOKit | HIDIdleTime (planned) |
+
+### 6. Mining Worker (`mining/worker.rs`)
+
+Each worker runs in its own thread with:
+
+- Dedicated nonce range to avoid conflicts
+- SIMD-optimized hashing based on detected capabilities
+- Job updates via watch channel
+- Share submission via mpsc channel
+
+```rust
+// Mining loop (per worker)
+loop {
+    let job = wait_for_job();
+    let header = job.build_header(&extranonce1, &extranonce2, 0);
+    let hasher = select_hasher(simd_capability);
+
+    for nonce in nonce_range {
+        let hash = hasher.hash_header(&header, nonce);
+        stats.hashes.fetch_add(1, Ordering::Relaxed);
+
+        if meets_target(&hash, &job.target) {
+            submit_share(job_id, nonce, hash);
+        }
+    }
+}
+```
+
+### 7. Stratum V1 Client (`stratum/v1.rs`)
+
+JSON-RPC based pool protocol.
 
 #### Protocol Messages
 
 | Message | Direction | Purpose |
-| ------- | --------- | ------- |
+|---------|-----------|---------|
 | `mining.subscribe` | Client → Pool | Initialize connection |
 | `mining.authorize` | Client → Pool | Authenticate worker |
 | `mining.notify` | Pool → Client | New job notification |
 | `mining.submit` | Client → Pool | Submit found share |
-| `mining.set_difficulty` | Pool → Client | Update share difficulty |
+| `mining.set_difficulty` | Pool → Client | Update difficulty |
 
 #### Job Structure
 
-```cpp
-struct Job {
-    std::string job_id;
-    std::string prevhash;        // Previous block hash
-    std::string coinb1, coinb2;  // Coinbase transaction parts
-    std::vector<std::string> merkle_branch;
-    std::string version, nbits, ntime;
-    bool clean_jobs;
-
-    uint8_t header_template[80]; // Pre-built header
-    uint8_t target[32];          // Difficulty target
-};
+```rust
+pub struct Job {
+    pub id: String,
+    pub prev_hash: [u8; 32],
+    pub coinbase1: Vec<u8>,
+    pub coinbase2: Vec<u8>,
+    pub merkle_branches: Vec<[u8; 32]>,
+    pub version: u32,
+    pub nbits: u32,
+    pub ntime: u32,
+    pub target: [u8; 32],
+}
 ```
 
-### 4. Stratum V2 Client (`stratum_v2.hpp/cpp`)
+### 8. Stratum V2 Client (`stratum/v2.rs`)
 
-Binary Stratum V2 protocol with Noise encryption.
+Binary protocol for efficient communication.
 
-#### Features
-
-- Binary message encoding (more efficient than JSON)
-- Noise protocol encryption (optional)
-- Channel-based job negotiation
-- Better bandwidth utilization
-
-#### Message Format
+#### Frame Format
 
 ```text
-┌──────────────────────────────────────────────────────┐
-│ Extension Type (2 bytes) │ Msg Type (1) │ Length (3) │
-├──────────────────────────────────────────────────────┤
-│                    Payload (variable)                 │
-└──────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│ Extension Type (2) │ Msg Type (1) │ Length (3)     │
+├────────────────────────────────────────────────────┤
+│                    Payload (variable)              │
+└────────────────────────────────────────────────────┘
 ```
 
 #### Message Types
 
-| Type | Value | Description |
-| ---- | ----- | ----------- |
-| SetupConnection | 0x40 | Initialize connection |
-| OpenStandardMiningChannel | 0x00 | Open mining channel |
-| NewMiningJob | 0x11 | New job notification |
-| SetNewPrevHash | 0x10 | New block detected |
-| SubmitSharesStandard | 0x20 | Submit share |
-| SetTarget | 0x30 | Update difficulty |
+| Type | Description |
+|------|-------------|
+| SetupConnection | Initialize connection |
+| OpenMiningChannel | Open mining channel |
+| NewMiningJob | New job notification |
+| SubmitShares | Submit found share |
 
-#### ByteBuffer Serialization
+### 9. Bitcoin Core Integration (`bitcoin/`)
 
-```cpp
-class ByteBuffer {
-    // Little-endian serialization
-    void write_u8(uint8_t v);
-    void write_u16(uint16_t v);
-    void write_u32(uint32_t v);
-    void write_u64(uint64_t v);
-    void write_string(const std::string& s);  // u8 length + data
-    void write_bool(bool v);
+For true solo mining without a pool.
 
-    // Corresponding read methods
-    uint8_t read_u8();
-    // ...
-};
+#### RPC Client (`rpc.rs`)
+
+```rust
+impl BitcoinRpc {
+    pub async fn get_blockchain_info(&self) -> Result<SyncStatus>;
+    pub async fn get_block_template(&self, address: &str) -> Result<BlockTemplate>;
+    pub async fn submit_block(&self, block_hex: &str) -> Result<()>;
+}
 ```
 
-### 5. Miner Core (`miner.hpp/cpp`)
+#### Manager (`manager.rs`)
 
-Multi-threaded mining engine with work distribution.
+Handles automatic Bitcoin Core lifecycle:
 
-#### Threading Model
+- Download and install Bitcoin Core
+- Generate secure RPC credentials
+- Start/stop daemon
+- Monitor sync status
+- Configure pruning for disk space efficiency
 
-```text
-┌──────────────────────────────────────────┐
-│              Miner Core                   │
-│  - Job distribution                       │
-│  - Nonce range allocation                 │
-│  - Stats aggregation                      │
-└─────────────────┬────────────────────────┘
-                  │
-     ┌────────────┼────────────┐
-     │            │            │
-     ▼            ▼            ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐
-│Worker 0 │ │Worker 1 │ │Worker N │
-│Nonce:   │ │Nonce:   │ │Nonce:   │
-│0x000000-│ │0x100000-│ │0xN00000-│
-│0x0FFFFF │ │0x1FFFFF │ │0xNFFFFF │
-└─────────┘ └─────────┘ └─────────┘
-```
+### 10. Web Interface (`web/mod.rs`)
 
-#### Work Distribution
+Built with Axum for REST API and WebSocket support.
 
-- Workers request nonce chunks atomically (`NONCE_CHUNK = 0x100000`)
-- No lock contention during hashing
-- Job changes trigger immediate worker restart
-- Random nonce start per job (avoids duplicate work)
-
-#### Statistics
-
-```cpp
-struct Stats {
-    std::atomic<uint64_t> hashes{0};
-    std::atomic<uint64_t> shares_found{0};
-    std::atomic<uint64_t> shares_accepted{0};
-    std::atomic<uint64_t> shares_rejected{0};
-    std::atomic<uint64_t> benchmark_hashes{0};
-};
-```
-
-### 6. Configuration (`config.hpp`)
-
-Key-value config parser with pool presets and validation.
-
-#### Pool Presets
-
-```cpp
-enum class SoloPool {
-    Custom,     // User-defined pool
-    CKPool,     // solo.ckpool.org (Stratum V1)
-    Braiins     // solo.stratum.braiins.com (Stratum V1)
-};
-```
-
-| Preset | Host | Port | Protocol |
-| ------ | ---- | ---- | -------- |
-| CKPool | solo.ckpool.org | 3333 | Stratum V1 |
-| Braiins | solo.stratum.braiins.com | 3333 | Stratum V1 |
-
-#### Config Struct
-
-```cpp
-struct Config {
-    // Pool
-    SoloPool solo_pool;           // Pool preset
-    std::string pool_host;
-    uint16_t pool_port;
-    std::string payout_address;
-    std::string password;
-    std::string stratum_version;  // "v1" or "v2"
-
-    // Mining
-    unsigned threads;
-    bool enable_gpu;
-
-    // Web
-    uint16_t web_port;
-    std::string web_dir;
-
-    // Idle mining
-    unsigned idle_timeout;
-    bool idle_mining_enabled;
-
-    // Output
-    bool colors;
-    std::string log_file;
-    bool system_bell;
-    unsigned stats_interval;
-
-    // Network
-    unsigned reconnect_delay;
-    unsigned max_reconnect_delay;
-};
-```
-
-#### Validation
-
-The config system validates settings and reports errors/warnings:
-
-| Check | Type | Description |
-| ----- | ---- | ----------- |
-| PayoutAddress | Error | Required, validates Bitcoin address format |
-| Stratum version | Error | Must be "v1" or "v2" |
-| Pool port | Error | Cannot be 0 |
-| CKPool + V2 | Warning | CKPool doesn't support Stratum V2 |
-| Braiins + V1 | Warning | Braiins supports V2 for better efficiency |
-| High thread count | Warning | Unusually high (>256) |
-
-### 7. Web Server (`webserver.hpp`)
-
-Header-only HTTP/WebSocket server for the dashboard.
-
-#### Features
-
-- Static file serving (HTML, CSS, JS)
-- REST API endpoints for stats, settings, and control
-- WebSocket for real-time stats broadcast
-- No external dependencies (uses raw sockets)
-
-#### API Routes
+#### HTTP Endpoints
 
 | Route | Method | Description |
-| ----- | ------ | ----------- |
+|-------|--------|-------------|
 | `/api/stats` | GET | Mining statistics |
-| `/api/settings` | GET/POST | Configuration |
-| `/api/control/*` | POST | Miner control (start/stop/pause) |
-| `/api/benchmark` | GET/POST | Benchmark mode |
-| `/api/idle` | GET/POST | Idle mining control |
+| `/api/info` | GET | Miner information |
+| `/api/control` | POST | Start/stop/pause mining |
 | `/ws` | WebSocket | Real-time updates |
+| `/` | GET | Static dashboard files |
 
-### 8. Idle Monitor (`idle_monitor.hpp`)
+#### WebSocket Protocol
 
-Cross-platform idle detection for screensaver-style mining.
-
-#### Environment Detection
-
-```cpp
-enum class Environment {
-    NativeLinux,  // X11 via xprintidle
-    WSL2,         // Windows via PowerShell
-    Headless      // No display (disabled)
-};
+```rust
+pub struct StatsUpdate {
+    pub hashrate: f64,
+    pub hashes: u64,
+    pub shares_accepted: u64,
+    pub shares_rejected: u64,
+    pub blocks_found: u64,
+    pub block_height: u64,
+    pub uptime: u64,
+    pub is_mining: bool,
+    pub idle_active: bool,
+}
 ```
 
-#### Idle Detection Methods
+Real-time updates broadcast to all connected clients:
 
-| Environment | Method | API |
-| ----------- | ------ | --- |
-| Native Linux | xprintidle / xssstate | X11 screen saver extension |
-| WSL2 | PowerShell | Windows GetLastInputInfo |
+```rust
+// Server-side broadcast
+let (stats_tx, _) = broadcast::channel::<StatsUpdate>(100);
+
+// Periodic stats update
+loop {
+    let stats = collect_stats();
+    let _ = stats_tx.send(stats);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+```
+
+### 11. Web Notifications (`web/js/notifications.js`)
+
+Browser notifications for important mining events.
+
+#### Notification Types
+
+| Event | Default | Description |
+|-------|---------|-------------|
+| New Block | Enabled | Network found new block, job updated |
+| Found Block | Enabled | YOU found a block! (with sound) |
+| Share Accepted | Disabled | Pool accepted share |
+| Share Rejected | Enabled | Pool rejected share |
+| Error | Enabled | Mining error occurred |
+| Connection Lost | Enabled | Lost connection to miner |
+| Idle Mining Start | Disabled | Mining started due to idle |
+
+```javascript
+function notifyFoundBlock(height, hash) {
+    // Play celebratory sound
+    const audio = new Audio('...');
+    audio.play();
+
+    showNotification('BLOCK FOUND!', {
+        body: `You found block ${height}!`,
+        requireInteraction: true,  // Don't auto-dismiss
+    });
+}
+```
+
+## Mining Modes
+
+### 1. Pool Mining (Default)
+
+```text
+Miner ←─Stratum─→ Pool ←──→ Bitcoin Network
+```
+
+- Connect to pool via Stratum V1 or V2
+- Submit shares to pool
+- Pool handles block submission
+
+### 2. True Solo Mining (`preset = "none"`)
+
+```text
+Miner ←─RPC─→ Bitcoin Core ←──→ Bitcoin Network
+```
+
+- Get block templates from local Bitcoin Core
+- Mine blocks directly
+- Submit found blocks to network
+- Requires fully synced node (or pruned node)
+
+### 3. Stratum V2 via SRI
+
+```text
+Miner ←─SV2─→ SRI Proxy ←─IPC─→ Bitcoin Core
+```
+
+- Connect to SRI (Stratum Reference Implementation) proxy
+- SRI handles Bitcoin Core IPC communication
+- More efficient than V1 protocol
 
 ## Data Flow
 
-### Mining Loop
+### Block Header Mining
 
 ```text
-1. Pool sends mining.notify
+1. Receive job from pool/bitcoind
    │
    ▼
-2. Stratum client parses job
-   │
-   ▼
-3. Build block header template
+2. Parse job parameters
    │
    ├─ version (4 bytes)
-   ├─ prevhash (32 bytes)
-   ├─ merkle_root (32 bytes, computed)
+   ├─ prev_hash (32 bytes)
+   ├─ merkle_root (computed)
    ├─ ntime (4 bytes)
    ├─ nbits (4 bytes)
-   └─ nonce (4 bytes, placeholder)
+   └─ nonce (4 bytes)
    │
    ▼
-4. Compute midstate for bytes 0-63
+3. Build 80-byte header
+   │
+   ├─► CPU Workers (SIMD-optimized)
+   │     └─ SHA-NI / AVX2 / AVX512
+   │
+   └─► GPU Workers (OpenCL kernel)
+         └─ Midstate optimization
    │
    ▼
-5. Workers iterate nonces:
+4. Workers iterate nonces:
    │
    │  for nonce in range:
-   │      hash = sha256d_midstate(midstate, nonce)
-   │      if hash < target:
-   │          submit(nonce)
+   │      hash = sha256d(header)
+   │      if hash <= target:
+   │          submit_share(nonce)
    │
    ▼
-6. On new job, goto step 2
+5. On new job, restart from step 2
 ```
 
 ### Block Header Structure
@@ -433,75 +583,63 @@ Total   80 bytes
 
 ## Performance Optimizations
 
-### 1. Midstate Pre-computation
+### CPU Mining
 
-Since bytes 0-63 of the header don't change, we compute SHA-256 state once:
+1. **SIMD Instructions** - Hardware SHA-256 (SHA-NI) provides ~3x speedup
+2. **Thread-per-worker model** - Each worker owns its nonce range
+3. **Atomic statistics** - Lock-free hash counting
+4. **Watch channels** - Efficient job broadcasting
+5. **Batch hashing** - Process nonce ranges before checking job updates
 
-```cpp
-// First 64 bytes → midstate (computed once per job)
-// Last 16 bytes + nonce → final hash (computed per nonce)
-```
+### GPU Mining
 
-### 2. SHA-NI Intrinsics
+1. **Midstate optimization** - Pre-compute first 64 bytes of SHA-256
+2. **Coalesced memory access** - Aligned buffer reads
+3. **Local memory** - Message schedule in fast local memory
+4. **Atomic result collection** - Lock-free result buffer
 
-Direct CPU instruction usage eliminates:
+### Real-time Updates
 
-- Memory lookups for K constants
-- Branch mispredictions
-- Most of the 64-round loop overhead
-
-### 3. AVX2/AVX512 Multi-hashing
-
-Process 8 (AVX2) or 16 (AVX512) nonces simultaneously:
-
-```cpp
-// AVX2: 8 independent SHA-256 computations per instruction
-__m256i state[8];  // 8 lanes, each lane is one SHA-256 computation
-```
-
-### 4. Nonce Chunking
-
-Workers grab large nonce ranges atomically to minimize synchronization:
-
-```cpp
-uint32_t nonce_start = nonce_base_.fetch_add(NONCE_CHUNK);
-// Mine 1M nonces without touching atomics
-```
-
-### 5. Target Pre-computation
-
-nbits to 256-bit target conversion done once per job, not per hash.
-
-### 6. GPU Parallelism
-
-Thousands of GPU threads each compute one nonce:
-
-```text
-Grid: 256 blocks × 256 threads = 65,536 parallel hashes
-```
+1. **WebSocket broadcast** - Single channel to all clients
+2. **Selective notifications** - User-configurable event filters
+3. **Efficient serialization** - Minimal JSON payload
 
 ## Testing
 
-### Test Structure
+```bash
+# Run all tests
+cargo test
 
-```text
-tests/
-├── test_framework.hpp    # Minimal test framework
-├── test_main.cpp         # Test runner
-├── test_sha256.cpp       # SHA-256 basic tests
-├── test_sha256_avx.cpp   # AVX2/AVX512 tests
-├── test_stratum.cpp      # Stratum V1 tests
-├── test_stratum_v2.cpp   # Stratum V2 tests
-├── test_gpu.cpp          # GPU interface tests
-└── test_config.cpp       # Config validation tests
+# Run with verbose output
+cargo test -- --nocapture
+
+# With coverage
+./scripts/run_coverage.sh
 ```
 
-### Coverage
+### Test Coverage
+
+| Module | Tests |
+|--------|-------|
+| `config` | Pool presets, validation |
+| `mining::job` | Hash comparison |
+| `mining::hasher` | SHA-256d correctness |
+| `mining::sha256_simd` | SIMD detection, output verification |
+| `gpu` | Device enumeration (when feature enabled) |
+| `stats` | Hashrate calculation |
+
+## Build Options
 
 ```bash
-# Generate coverage report
-./scripts/run_coverage.sh
-# Open build_coverage/coverage_html/index.html
+# Standard build
+cargo build --release
+
+# With GPU support
+cargo build --release --features opencl
+cargo build --release --features cuda
+
+# With all features
+cargo build --release --features "opencl cuda"
 ```
 
 ## References
@@ -509,7 +647,8 @@ tests/
 - [Bitcoin Block Header](https://developer.bitcoin.org/reference/block_chain.html#block-headers)
 - [Stratum V1 Protocol](https://braiins.com/stratum-v1/docs)
 - [Stratum V2 Specification](https://stratumprotocol.org/)
+- [SRI (Stratum Reference Implementation)](https://github.com/stratum-mining/stratum)
+- [Bitcoin Core RPC](https://developer.bitcoin.org/reference/rpc/)
 - [Intel SHA Extensions](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sha-extensions.html)
-- [SHA-256 Specification (FIPS 180-4)](https://csrc.nist.gov/publications/detail/fips/180/4/final)
-- [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
-- [OpenCL Specification](https://www.khronos.org/opencl/)
+- [OpenCL Programming Guide](https://www.khronos.org/registry/OpenCL/specs/3.0-unified/html/OpenCL_API.html)
+- [Web Notifications API](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API)

@@ -1,0 +1,182 @@
+/// A mining job received from pool or generated locally
+#[derive(Debug, Clone)]
+pub struct Job {
+    /// Unique job identifier
+    pub id: String,
+    /// Previous block hash (32 bytes)
+    pub prev_hash: [u8; 32],
+    /// Coinbase part 1 (before extranonce)
+    pub coinbase1: Vec<u8>,
+    /// Coinbase part 2 (after extranonce)
+    pub coinbase2: Vec<u8>,
+    /// Merkle branches for block construction
+    pub merkle_branches: Vec<[u8; 32]>,
+    /// Block version
+    pub version: u32,
+    /// Difficulty target (nbits)
+    pub nbits: u32,
+    /// Block timestamp
+    pub ntime: u32,
+    /// Pool difficulty target
+    pub target: [u8; 32],
+    /// Network difficulty target (for solo mining)
+    pub network_target: Option<[u8; 32]>,
+    /// Clean jobs flag (abandon previous work)
+    pub clean_jobs: bool,
+}
+
+impl Job {
+    /// Create a new job
+    pub fn new(id: String) -> Self {
+        Self {
+            id,
+            prev_hash: [0u8; 32],
+            coinbase1: Vec::new(),
+            coinbase2: Vec::new(),
+            merkle_branches: Vec::new(),
+            version: 0x20000000,
+            nbits: 0,
+            ntime: 0,
+            target: [0xff; 32],
+            network_target: None,
+            clean_jobs: false,
+        }
+    }
+
+    /// Build the block header for a given nonce and extranonce
+    pub fn build_header(&self, extranonce1: &[u8], extranonce2: &[u8], nonce: u32) -> [u8; 80] {
+        let mut header = [0u8; 80];
+
+        // Version (4 bytes, little-endian)
+        header[0..4].copy_from_slice(&self.version.to_le_bytes());
+
+        // Previous block hash (32 bytes)
+        header[4..36].copy_from_slice(&self.prev_hash);
+
+        // Merkle root (32 bytes)
+        let merkle_root = self.compute_merkle_root(extranonce1, extranonce2);
+        header[36..68].copy_from_slice(&merkle_root);
+
+        // Timestamp (4 bytes, little-endian)
+        header[68..72].copy_from_slice(&self.ntime.to_le_bytes());
+
+        // Bits/target (4 bytes, little-endian)
+        header[72..76].copy_from_slice(&self.nbits.to_le_bytes());
+
+        // Nonce (4 bytes, little-endian)
+        header[76..80].copy_from_slice(&nonce.to_le_bytes());
+
+        header
+    }
+
+    /// Compute the merkle root for given extranonces
+    fn compute_merkle_root(&self, extranonce1: &[u8], extranonce2: &[u8]) -> [u8; 32] {
+        use sha2::{Sha256, Digest};
+
+        // Build coinbase transaction
+        let mut coinbase = Vec::with_capacity(
+            self.coinbase1.len() + extranonce1.len() + extranonce2.len() + self.coinbase2.len()
+        );
+        coinbase.extend_from_slice(&self.coinbase1);
+        coinbase.extend_from_slice(extranonce1);
+        coinbase.extend_from_slice(extranonce2);
+        coinbase.extend_from_slice(&self.coinbase2);
+
+        // Double SHA256 of coinbase
+        let mut hasher = Sha256::new();
+        hasher.update(&coinbase);
+        let first_hash = hasher.finalize();
+
+        let mut hasher = Sha256::new();
+        hasher.update(&first_hash);
+        let mut merkle_root: [u8; 32] = hasher.finalize().into();
+
+        // Apply merkle branches
+        for branch in &self.merkle_branches {
+            let mut combined = [0u8; 64];
+            combined[0..32].copy_from_slice(&merkle_root);
+            combined[32..64].copy_from_slice(branch);
+
+            let mut hasher = Sha256::new();
+            hasher.update(&combined);
+            let first = hasher.finalize();
+
+            let mut hasher = Sha256::new();
+            hasher.update(&first);
+            merkle_root = hasher.finalize().into();
+        }
+
+        merkle_root
+    }
+
+    /// Check if a hash meets the pool target
+    pub fn meets_target(&self, hash: &[u8; 32]) -> bool {
+        compare_hash_to_target(hash, &self.target)
+    }
+
+    /// Check if a hash meets the network target (for block)
+    pub fn meets_network_target(&self, hash: &[u8; 32]) -> bool {
+        if let Some(ref target) = self.network_target {
+            compare_hash_to_target(hash, target)
+        } else {
+            false
+        }
+    }
+}
+
+/// Compare hash to target (hash must be <= target)
+/// Returns true if hash meets (is less than or equal to) target
+fn compare_hash_to_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
+    // Compare from most significant byte (index 0 = MSB in big-endian)
+    for i in 0..32 {
+        if hash[i] < target[i] {
+            return true;
+        }
+        if hash[i] > target[i] {
+            return false;
+        }
+    }
+    true // Equal
+}
+
+/// Convert difficulty to target bytes
+pub fn difficulty_to_target(difficulty: f64) -> [u8; 32] {
+    // Bitcoin difficulty 1 target
+    const DIFF1_TARGET: [u8; 32] = [
+        0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    if difficulty <= 0.0 {
+        return [0xff; 32];
+    }
+
+    // target = diff1_target / difficulty
+    let mut target = [0u8; 32];
+    let mut carry: u64 = 0;
+
+    for i in 0..32 {
+        let val = (DIFF1_TARGET[i] as f64 / difficulty) + carry as f64;
+        target[i] = (val as u64 % 256) as u8;
+        carry = val as u64 / 256;
+    }
+
+    target
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compare_hash_to_target() {
+        let target = [0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let good_hash = [0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let bad_hash = [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        assert!(compare_hash_to_target(&good_hash, &target));
+        assert!(!compare_hash_to_target(&bad_hash, &target));
+    }
+}

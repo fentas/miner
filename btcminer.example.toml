@@ -1,0 +1,120 @@
+# BTC Miner Configuration
+# Consistent with SRI (Stratum Reference Implementation) TOML format
+
+# ============================================
+# POOL CONNECTION
+# ============================================
+
+[pool]
+# Solo pool preset - ckpool, braiins, ocean, none (true solo), custom
+preset = "ckpool"
+
+# Custom pool address (only used when preset = "custom")
+# address = "solo.ckpool.org:3333"
+
+# Your Bitcoin address for payouts (REQUIRED)
+payout_address = "bc1p3ce2z950wuruvpd50km5q8a9t2vtus94p3259qfq2yrxglt7ajxs8wjcjn"
+
+# Pool password (optional)
+password = "x"
+
+# Stratum protocol version - "v1" or "v2"
+# Auto-set by preset, or manual override
+# stratum_version = "v1"
+
+# ============================================
+# MINING
+# ============================================
+
+[mining]
+# Enable CPU mining
+enable_cpu = true
+
+# Number of CPU threads (0 = auto-detect all cores)
+threads = 0
+
+# Enable GPU mining (requires CUDA/OpenCL build)
+enable_gpu = false
+
+# GPU devices (comma-separated, empty = all)
+# gpu_devices = [0, 1, 2]
+
+# GPU intensity (1-100)
+# gpu_intensity = 80
+
+# ============================================
+# BITCOIN CORE
+# ============================================
+
+[bitcoind]
+# Enable Bitcoin Core integration
+enabled = false
+
+# Managed mode: auto download, install, configure Bitcoin Core
+managed = false
+
+# RPC connection (only when managed = false)
+host = "127.0.0.1"
+rpc_port = 8332
+# rpc_user = "your_username"
+# rpc_password = "your_password"
+
+# Data directory (optional, uses default if not set)
+# datadir = "/path/to/bitcoin/data"
+
+# Pruned node size in MB (0 = full node, min 550)
+prune = 10000
+
+# ============================================
+# STRATUM V2 (SRI Integration)
+# ============================================
+
+[sv2]
+# Enable Stratum V2 with Bitcoin Core IPC Mining Interface
+enabled = false
+
+# SRI proxy connection
+proxy_host = "127.0.0.1"
+proxy_port = 34255
+
+# ============================================
+# WEB INTERFACE
+# ============================================
+
+[web]
+# Web interface port (0 to disable)
+port = 8080
+
+# Static files directory
+dir = "web"
+
+# ============================================
+# LOGGING
+# ============================================
+
+[logging]
+# Stats interval in seconds
+stats_interval = 10
+
+# Enable colored output
+colors = true
+
+# Log file (empty to disable)
+file = "miner.log"
+
+# Log level: error, warn, info, debug, trace
+level = "info"
+
+# System bell on share found
+system_bell = true
+
+# ============================================
+# NETWORK
+# ============================================
+
+[network]
+# Reconnection delay (seconds)
+reconnect_delay = 5
+
+# Max reconnection delay (exponential backoff limit)
+max_reconnect_delay = 300

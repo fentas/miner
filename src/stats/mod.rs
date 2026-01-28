@@ -1,0 +1,119 @@
+use std::time::{Duration, Instant};
+
+/// Hashrate calculator with sliding window
+pub struct HashrateCalculator {
+    samples: Vec<(Instant, u64)>,
+    window_size: Duration,
+}
+
+impl HashrateCalculator {
+    pub fn new(window_seconds: u64) -> Self {
+        Self {
+            samples: Vec::new(),
+            window_size: Duration::from_secs(window_seconds),
+        }
+    }
+
+    /// Add a hash count sample
+    pub fn add_sample(&mut self, hashes: u64) {
+        let now = Instant::now();
+
+        // Remove old samples outside the window
+        let cutoff = now - self.window_size;
+        self.samples.retain(|(t, _)| *t > cutoff);
+
+        // Add new sample
+        self.samples.push((now, hashes));
+    }
+
+    /// Calculate current hashrate in H/s
+    pub fn hashrate(&self) -> f64 {
+        if self.samples.len() < 2 {
+            return 0.0;
+        }
+
+        let (first_time, first_hashes) = self.samples.first().unwrap();
+        let (last_time, last_hashes) = self.samples.last().unwrap();
+
+        let duration = last_time.duration_since(*first_time).as_secs_f64();
+        if duration <= 0.0 {
+            return 0.0;
+        }
+
+        let total_hashes = last_hashes.saturating_sub(*first_hashes);
+        total_hashes as f64 / duration
+    }
+}
+
+/// Format hashrate for display
+pub fn format_hashrate(hashrate: f64) -> String {
+    if hashrate >= 1e15 {
+        format!("{:.2} PH/s", hashrate / 1e15)
+    } else if hashrate >= 1e12 {
+        format!("{:.2} TH/s", hashrate / 1e12)
+    } else if hashrate >= 1e9 {
+        format!("{:.2} GH/s", hashrate / 1e9)
+    } else if hashrate >= 1e6 {
+        format!("{:.2} MH/s", hashrate / 1e6)
+    } else if hashrate >= 1e3 {
+        format!("{:.2} KH/s", hashrate / 1e3)
+    } else {
+        format!("{:.2} H/s", hashrate)
+    }
+}
+
+/// Format duration for display
+pub fn format_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let minutes = (secs % 3600) / 60;
+    let seconds = secs % 60;
+
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
+}
+
+/// Calculate expected time to find a share/block
+pub fn expected_time_to_find(hashrate: f64, difficulty: f64) -> Duration {
+    if hashrate <= 0.0 || difficulty <= 0.0 {
+        return Duration::MAX;
+    }
+
+    // Expected hashes to find a share at given difficulty
+    // difficulty 1 = 2^32 hashes on average
+    let expected_hashes = difficulty * (1u64 << 32) as f64;
+    let seconds = expected_hashes / hashrate;
+
+    Duration::from_secs_f64(seconds.min(u64::MAX as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_hashrate() {
+        assert_eq!(format_hashrate(1000.0), "1.00 KH/s");
+        assert_eq!(format_hashrate(1_000_000.0), "1.00 MH/s");
+        assert_eq!(format_hashrate(1_000_000_000.0), "1.00 GH/s");
+    }
+
+    #[test]
+    fn test_hashrate_calculator() {
+        let mut calc = HashrateCalculator::new(60);
+        calc.add_sample(0);
+        std::thread::sleep(Duration::from_millis(100));
+        calc.add_sample(1000);
+
+        let hr = calc.hashrate();
+        assert!(hr > 0.0);
+    }
+}

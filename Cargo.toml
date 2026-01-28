@@ -1,0 +1,73 @@
+[package]
+name = "btcminer"
+version = "0.1.0"
+edition = "2021"
+authors = ["fentas"]
+description = "Bitcoin solo miner with Stratum V1/V2 support"
+license = "MIT"
+repository = "https://github.com/fentas/miner"
+keywords = ["bitcoin", "mining", "stratum", "sv2"]
+categories = ["cryptography::cryptocurrencies"]
+
+[features]
+default = []
+opencl = ["ocl"]
+cuda = []  # Future: add cuda-sys or similar
+
+[dependencies]
+# Configuration
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+tokio-tungstenite = "0.26"
+
+# Networking
+reqwest = { version = "0.12", features = ["json"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Crypto & Bitcoin
+sha2 = "0.10"
+hex = "0.4"
+bitcoin = "0.32"
+
+# Web server
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+futures-util = "0.3"
+
+# System info
+sysinfo = "0.33"
+num_cpus = "1.16"
+dirs = "5.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Colored output
+colored = "3.0"
+
+# GPU (optional)
+ocl = { version = "0.19", optional = true }
+
+[dev-dependencies]
+tempfile = "3.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "btcminer"
+path = "src/main.rs"

@@ -5,7 +5,7 @@
 <h1 align="center">BTC Miner</h1>
 
 <p align="center">
-	<em>High-performance Bitcoin miner with SHA-NI, AVX2/AVX512, and GPU support</em>
+	<em>High-performance Bitcoin solo miner written in Rust</em>
 </p>
 
 <p align="center">
@@ -19,126 +19,103 @@
 
 &nbsp;
 
-<p align="left">
+## Features
 
-A C++17 Bitcoin miner optimized for modern hardware. Leverages CPU SIMD instructions (SHA-NI, AVX2, AVX512) and GPU acceleration (CUDA, OpenCL) for maximum hashrate. Features Stratum V1/V2 protocol support, web dashboard, and idle mining mode.
-
-</p>
-
-&nbsp;
-
-### ⚡ Performance
-
-| Implementation | Throughput |
-|----------------|------------|
-| SHA-NI | ~800-900 MH/s |
-| AVX512 (16-way) | ~400-500 MH/s |
-| AVX2 (8-way) | ~200-300 MH/s |
-| Generic | ~10-20 MH/s |
-| GPU | 100-1000+ MH/s |
+- **Multi-threaded CPU Mining** - Worker threads with optimized nonce distribution
+- **SIMD Optimizations** - SHA-NI, AVX2, and AVX512 hardware acceleration
+- **GPU Mining** - OpenCL and CUDA support for additional hashrate
+- **Stratum V1/V2** - Pool protocol support with automatic reconnection
+- **True Solo Mining** - Direct Bitcoin Core integration with managed mode
+- **Idle Mining** - Screensaver-style mining (X11/WSL2) - mine when you're away
+- **Web Dashboard** - Real-time stats with WebSocket updates
+- **Web Notifications** - Browser notifications for blocks, shares, errors
+- **Colored Output** - Pretty console output with status indicators
+- **TOML Configuration** - SRI-compatible configuration format
 
 &nbsp;
 
-### 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Build
-mkdir build && cd build
-cmake .. -DNATIVE_BUILD=ON
-make -j$(nproc)
+cargo build --release
 
 # Configure
-cp btcminer.conf.example btcminer.conf
-# Edit with your Bitcoin address
+cp btcminer.toml.example btcminer.toml
+# Edit btcminer.toml with your Bitcoin address
 
 # Run
-./btcminer
+./target/release/btcminer
 ```
 
 &nbsp;
 
-### 🔧 Build Options
+## Configuration
 
-```bash
-cmake .. [OPTIONS]
+TOML-based configuration for consistency with SRI ecosystem:
 
-# CPU Optimization
--DNATIVE_BUILD=ON       # Optimize for local CPU (default)
+```toml
+# btcminer.toml
 
-# GPU Support
--DENABLE_CUDA=ON        # NVIDIA CUDA
--DENABLE_OPENCL=ON      # AMD/Intel OpenCL
+[pool]
+preset = "ckpool"              # ckpool, braiins, ocean, none, custom
+payout_address = "bc1q..."     # Your Bitcoin address (required)
 
-# Testing
--DBUILD_TESTS=ON        # Build test suite
--DENABLE_COVERAGE=ON    # Code coverage
-```
+[mining]
+enable_cpu = true
+threads = 0                    # 0 = auto-detect
+enable_gpu = false             # Enable OpenCL/CUDA
+gpu_devices = []               # Specific GPU IDs or empty for all
+gpu_intensity = 80             # GPU intensity (1-100)
 
-&nbsp;
+[bitcoind]
+enabled = false
+managed = false                # Auto-manage Bitcoin Core
+prune = 10000                  # Pruned node size in MB
 
-### 📝 Configuration
+[sv2]
+enabled = false
+proxy_host = "127.0.0.1"
+proxy_port = 34255
 
-```ini
-# btcminer.conf
+[web]
+port = 8080
 
-# Solo Pool Preset (recommended)
-SoloPool = ckpool         # ckpool or braiins (both use Stratum V1)
+[idle]
+enabled = false
+timeout = 900                  # Idle timeout in seconds (15 min)
+pause_on_active = true         # Pause mining when user returns
 
-# Or manual configuration
-# Pool = solo.ckpool.org:3333
-# Stratum = v1
-
-PayoutAddress = bc1q...   # Your Bitcoin address (required)
-
-# Mining mode - at least one must be enabled
-EnableCPU = true          # CPU mining (default: on)
-EnableGPU = false         # GPU mining (default: off)
-Threads = 0               # CPU threads (0 = auto-detect)
-
-WebPort = 8080
+[logging]
+colors = true
+stats_interval = 10
+system_bell = true             # Bell on share accepted
 ```
 
 **Pool Presets:**
 
-| Preset    | Pool                      | Protocol         | Fee  | Description          |
-|-----------|---------------------------|------------------|------|----------------------|
-| `ckpool`  | solo.ckpool.org           | Stratum V1       | 2%   | Reliable solo pool   |
-| `braiins` | solo.stratum.braiins.com  | Stratum V1       | 0.5% | Low fee option       |
-| `ocean`   | mine.ocean.xyz:3334       | Stratum V1       | 0%*  | DATUM support        |
-| `none`    | Your Bitcoin Core         | getblocktemplate | 0%   | **True solo mining** |
-
-> **Note on Fees:**
->
-> - **Solo.ckpool**: 2% service fee on successful block rewards
-> - **Braiins Solo**: 0.5% fee on found blocks (paid to CKPool code authors)
-> - **Ocean Pool**: 0% pool fee (miners pay only Bitcoin transaction fees via DATUM)
-> - **True Solo (`none`)**: 0% fees - you keep 100% of the block reward!
->
-> **Stratum V2 Pools** (require special setup):
->
-> - **DMND Pool** (dmnd.work): 0% fee for solo mining - community project for network decentralization. Requires SV2 proxy setup.
-
-**Mining Modes:**
-
-| Mode      | EnableCPU | EnableGPU |
-|-----------|-----------|-----------|
-| CPU only  | true      | false     |
-| GPU only  | false     | true      |
-| CPU + GPU | true      | true      |
+| Preset    | Pool                      | Protocol    | Fee   | Description          |
+|-----------|---------------------------|-------------|-------|----------------------|
+| `ckpool`  | solo.ckpool.org           | Stratum V1  | 2%    | Reliable solo pool   |
+| `braiins` | solo.stratum.braiins.com  | Stratum V1  | 0.5%  | Low fee option       |
+| `ocean`   | mine.ocean.xyz:3334       | Stratum V1  | 0%    | DATUM support        |
+| `none`    | Your Bitcoin Core         | Direct      | 0%    | **True solo mining** |
 
 &nbsp;
 
-### 🎯 True Solo Mining (No Pool)
+## True Solo Mining (No Pool)
 
-For maximum decentralization with **0% fees**, mine directly to the Bitcoin network using your own node.
+Mine directly to the Bitcoin network with **0% fees**:
 
-```ini
-# btcminer.conf - True Solo Mining
-SoloPool = none
-PayoutAddress = bc1q...your_address
-BitcoindEnabled = true
-BitcoindManaged = true       # Auto-manages Bitcoin Core
-BitcoindPrune = 10000        # ~10GB pruned node
+```toml
+[pool]
+preset = "none"
+payout_address = "bc1q...your_address"
+
+[bitcoind]
+enabled = true
+managed = true         # Auto-manages Bitcoin Core
+prune = 10000          # ~10GB pruned node
 ```
 
 **How it works:**
@@ -154,157 +131,160 @@ BitcoindPrune = 10000        # ~10GB pruned node
                                         Bitcoin Network
 ```
 
-1. Gets block template from your local Bitcoin Core node
-2. Mines with full transaction selection control
-3. Submits found blocks directly to the network
-4. **You keep 100% of the block reward** (3.125 BTC + fees)
-
-**vs Pool Mining:**
-
-| Feature        | Pool Mining      | True Solo         |
-|----------------|------------------|-------------------|
-| Fees           | 0.5-2%           | **0%**            |
-| Block template | Pool decides     | **You decide**    |
-| Censorship     | Pool can censor  | **You control**   |
-| Requirements   | Internet         | Bitcoin Core node |
-
-> ⚠️ **Warning:** Solo mining is extremely unlikely to find a block. This is for educational/lottery purposes.
+> **Warning:** Solo mining is extremely unlikely to find a block. This is for educational/lottery purposes.
 
 &nbsp;
 
-### 🔗 Bitcoin Core Integration
+## GPU Mining
 
-Run your own Bitcoin Core node for custom block templates. Required for true solo mining (`SoloPool = none`).
+Enable GPU acceleration for additional hashrate:
 
-#### Option 1: Managed Mode (Recommended)
-
-Let btcminer handle everything automatically:
-
-```ini
-# btcminer.conf
-BitcoindEnabled = true
-BitcoindManaged = true
-BitcoindPrune = 10000        # ~10GB pruned node
+```toml
+[mining]
+enable_cpu = true
+enable_gpu = true
+gpu_devices = []       # Empty = all GPUs, or [0, 1] for specific devices
+gpu_intensity = 80     # 1-100, higher = more GPU usage
 ```
 
-This will:
-- Download Bitcoin Core v28.0 from bitcoincore.org
-- Install to `~/.local/share/bitcoin-core`
-- Generate `bitcoin.conf` with optimal settings
-- Start/stop bitcoind with the miner
+Build with GPU support:
 
-#### Option 2: Manual Setup
+```bash
+# OpenCL support
+cargo build --release --features opencl
 
-If you prefer to manage Bitcoin Core yourself:
-
-```ini
-# btcminer.conf
-BitcoindEnabled = true
-BitcoindManaged = false
-BitcoindHost = 127.0.0.1
-BitcoindRpcPort = 8332
-BitcoindRpcUser = your_username
-BitcoindRpcPassword = your_password
-BitcoindPrune = 10000
-```
-
-Configure your `bitcoin.conf`:
-
-```ini
-server=1
-rpcuser=your_username
-rpcpassword=your_password
-prune=10000
-```
-
-#### Stratum V2
-
-Bitcoin Core v30+ supports an IPC Mining Interface for external Stratum V2 software. To use SV2:
-
-1. Install the [SRI (Stratum V2 Reference Implementation)](https://stratumprotocol.org/)
-2. Configure SRI proxy to connect to your Bitcoin Core node
-3. Enable in btcminer:
-
-```ini
-BitcoindSv2 = true
-```
-
-**Benefits:**
-
-- 🎯 Full transaction selection control
-- 🔐 No pool template dependency
-- 📦 Choose which transactions to include
-- ⚡ Stratum V2 support (when Bitcoin Core v30+ releases)
-
-**Requirements:**
-
-- ~10GB disk space (pruned) or 600GB+ (full node)
-- ~4GB RAM
-- SSD recommended
-- Initial sync: ~2-4 hours (pruned)
-
-&nbsp;
-
-### 💻 Command Line
-
-```
-./btcminer [options]
-
-  -c, --config <file>      Config file
-  -o, --pool <host:port>   Pool address
-  -u, --user <address>     Bitcoin address
-  -t, --threads <n>        CPU threads
-  -w, --web <port>         Web dashboard port
-  -h, --help               Show help
+# CUDA support (requires CUDA toolkit)
+cargo build --release --features cuda
 ```
 
 &nbsp;
 
-### 🌐 Web Dashboard
+## Idle Mining (Screensaver Mode)
+
+Automatically mine when your computer is idle:
+
+```toml
+[idle]
+enabled = true
+timeout = 900          # Start mining after 15 minutes idle
+pause_on_active = true # Pause when user returns
+```
+
+**Supported environments:**
+- Linux (X11) - Uses `xprintidle` or `xssstate`
+- WSL2 - Queries Windows idle time via PowerShell
+- macOS - IOKit HIDIdleTime (planned)
+
+&nbsp;
+
+## Stratum V2 with SRI
+
+For Stratum V2, connect through an [SRI (Stratum Reference Implementation)](https://stratumprotocol.org/) proxy:
+
+```toml
+[sv2]
+enabled = true
+proxy_host = "127.0.0.1"
+proxy_port = 34255
+```
+
+**Benefits of SV2:**
+
+- Binary protocol (more efficient than JSON)
+- Job negotiation for custom block templates
+- Optional encryption
+
+&nbsp;
+
+## Command Line
+
+```
+btcminer [OPTIONS]
+
+Options:
+  -c, --config <FILE>    Config file [default: btcminer.toml]
+  -t, --threads <N>      Override thread count
+  -d, --debug            Enable debug logging
+      --no-color         Disable colored output
+  -h, --help             Show help
+```
+
+&nbsp;
+
+## Web Dashboard
 
 Dashboard at `http://localhost:8080`:
 
-- Real-time hashrate and statistics
-- Live hashrate chart
-- Mining controls (start/stop/pause)
+- Real-time hashrate chart
+- Share statistics (accepted/rejected)
+- Miner controls (start/stop/pause)
 - Benchmark mode
 - Idle mining toggle
+- Settings management
+- Web notifications (new block, found block, errors)
 
 &nbsp;
 
-### 🧪 Testing
-
-```bash
-./btcminer_test              # Run all tests
-./btcminer_test --sha256     # SHA-256 tests
-./btcminer_test --avx        # AVX tests
-./btcminer_test --stratum    # Protocol tests
-./btcminer_test --config     # Config validation tests
-
-# Coverage report
-./scripts/run_coverage.sh
-```
-
-&nbsp;
-
-### 📁 Project Structure
+## Project Structure
 
 ```
 src/
-├── sha256.hpp          # SHA-256 (generic + SHA-NI)
-├── sha256_avx.hpp      # AVX2/AVX512 multi-hashing
-├── stratum.hpp/cpp     # Stratum V1
-├── stratum_v2.hpp/cpp  # Stratum V2
-├── miner.hpp/cpp       # Mining core
-├── webserver.hpp       # HTTP/WebSocket
-└── gpu/                # CUDA/OpenCL kernels
+├── main.rs           # Entry point, colored output
+├── config.rs         # TOML configuration
+├── mining/           # Mining core
+│   ├── mod.rs        # Coordinator, stats
+│   ├── worker.rs     # Worker threads
+│   ├── job.rs        # Job structure
+│   ├── hasher.rs     # SHA-256d
+│   └── sha256_simd.rs # SIMD optimizations
+├── gpu/              # GPU mining
+│   ├── manager.rs    # Device management
+│   └── opencl.rs     # OpenCL implementation
+├── stratum/          # Pool protocols
+│   ├── v1.rs         # Stratum V1
+│   └── v2.rs         # Stratum V2
+├── bitcoin/          # Bitcoin Core
+│   ├── rpc.rs        # RPC client
+│   └── manager.rs    # Lifecycle management
+├── idle/             # Idle monitor
+│   └── mod.rs        # X11/WSL2 detection
+├── web/              # Web interface
+│   └── mod.rs        # Axum + WebSocket
+└── stats/            # Statistics
+    └── mod.rs        # Hashrate calculation
+
+web/
+├── index.html        # Dashboard HTML
+├── css/
+│   └── styles.css    # Dashboard styles
+└── js/
+    ├── app.js        # Main application
+    ├── chart.js      # Hashrate chart
+    ├── websocket.js  # Real-time updates
+    ├── idle.js       # Idle monitoring
+    └── notifications.js # Web notifications
 ```
 
 &nbsp;
 
-### ⚠️ Disclaimer
+## Testing
 
-**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** Current network difficulty requires ~10²³ hashes per block. This miner is for:
+```bash
+# Run tests
+cargo test
+
+# With verbose output
+cargo test -- --nocapture
+
+# Specific test
+cargo test test_sha256d
+```
+
+&nbsp;
+
+## Disclaimer
+
+**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** Current network difficulty requires ~10^23 hashes per block. This miner is for:
 
 - Educational purposes
 - Testing and development
@@ -312,24 +292,17 @@ src/
 
 &nbsp;
 
-### 📜 License
+## License
 
-`btcminer` is released under the MIT license, which grants the following permissions:
-
-- Commercial use
-- Distribution
-- Modification
-- Private use
-
-For more details, see the [LICENSE](https://github.com/fentas/miner/blob/main/LICENSE).
+`btcminer` is released under the MIT license.
 
 &nbsp;
 
-### ❤️ Acknowledgments
+## Acknowledgments
 
-- SHA-NI implementation based on Intel reference code
+- [SRI (Stratum Reference Implementation)](https://github.com/stratum-mining/stratum) for protocol specifications
 - Stratum V1 based on slush's specification
-- Stratum V2 based on the SV2 specification
+- Stratum V2 based on the [SV2 specification](https://stratumprotocol.org/)
 
 &nbsp;
 

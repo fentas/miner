@@ -7,42 +7,65 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  # Build and test different feature combinations
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            features: ""
+            artifact-suffix: ""
+          - name: opencl
+            features: "--features opencl"
+            artifact-suffix: "-opencl"
+            install-deps: "ocl-icd-opencl-dev"
+
     runs-on: ubuntu-latest
+    name: Build (${{ matrix.name }})
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install system dependencies
+        if: matrix.install-deps != ''
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y ${{ matrix.install-deps }}
 
-      - name: Configure
-        run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DNATIVE_BUILD=OFF -DBUILD_TESTS=ON
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
 
       - name: Build
-        run: |
-          cd build
-          make -j$(nproc)
+        run: cargo build --release ${{ matrix.features }}
 
       - name: Run tests
-        run: |
-          cd build
-          ./btcminer_test
+        run: cargo test --release ${{ matrix.features }}
+
+      - name: Run clippy
+        run: cargo clippy ${{ matrix.features }} -- -D warnings || true
+
+      - name: Check formatting
+        run: cargo fmt -- --check || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: btcminer-linux-x64
-          path: build/btcminer
+          name: btcminer-linux-x64${{ matrix.artifact-suffix }}
+          path: target/release/btcminer
 
+  # Release job - builds all variants for tagged releases
   release:
-    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -52,28 +75,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y ocl-icd-opencl-dev
 
-      - name: Build release binary
-        run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DNATIVE_BUILD=OFF -DBUILD_TESTS=OFF
-          make -j$(nproc)
-          strip btcminer
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Package
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binaries
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          mkdir -p release
-          cp build/btcminer release/
-          cp btcminer.conf.example release/
-          cp -r web release/
-          cp README.md LICENSE release/ 2>/dev/null || true
-          cd release
+
+          # Build standard version
+          cargo build --release
+          mkdir -p release/standard
+          cp target/release/btcminer release/standard/
+
+          # Build OpenCL version
+          cargo build --release --features opencl
+          mkdir -p release/opencl
+          cp target/release/btcminer release/opencl/
+
+      - name: Package releases
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Package standard version
+          mkdir -p package-standard
+          cp release/standard/btcminer package-standard/
+          cp btcminer.toml package-standard/btcminer.toml.example
+          cp -r web package-standard/
+          cp README.md LICENSE package-standard/ 2>/dev/null || true
+          cd package-standard
           tar -czvf ../btcminer-${VERSION}-linux-x64.tar.gz .
+          cd ..
+
+          # Package OpenCL version
+          mkdir -p package-opencl
+          cp release/opencl/btcminer package-opencl/
+          cp btcminer.toml package-opencl/btcminer.toml.example
+          cp -r web package-opencl/
+          cp README.md LICENSE package-opencl/ 2>/dev/null || true
+          cd package-opencl
+          tar -czvf ../btcminer-${VERSION}-linux-x64-opencl.tar.gz .
+          cd ..
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

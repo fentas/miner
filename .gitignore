@@ -1,12 +1,6 @@
-# Build artifacts
-btcminer
-test_miner
-*.o
-*.a
-
-# Build directories
-build/
-cmake-build-*/
+# Rust build artifacts
+/target/
+Cargo.lock
 
 # IDE
 .idea/
@@ -15,9 +9,34 @@ cmake-build-*/
 *.swo
 *~
 
-# Config with sensitive data (use .example)
-btcminer.conf
+# Config with sensitive data
+btcminer.toml
+!btcminer.toml.example
+
+# Logs
+*.log
+miner.log
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Coverage reports
+/coverage/
+tarpaulin-report.html
+lcov.info
+
+# Bitcoin Core data (managed mode)
+.bitcoin/
+
+# GPU kernels (compiled)
+*.ptx
+*.cubin
+
+# Backup files
+*.bak
+*.orig
+
+# Environment
+.env
+.env.local
