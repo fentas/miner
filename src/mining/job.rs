@@ -179,4 +179,136 @@ mod tests {
         assert!(compare_hash_to_target(&good_hash, &target));
         assert!(!compare_hash_to_target(&bad_hash, &target));
     }
+
+    #[test]
+    fn test_compare_hash_to_target_equal() {
+        let target = [0x00, 0x00, 0x00, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        // Equal hash should pass
+        assert!(compare_hash_to_target(&target, &target));
+    }
+
+    #[test]
+    fn test_job_new() {
+        let job = Job::new("test-job-1".to_string());
+        assert_eq!(job.id, "test-job-1");
+        assert_eq!(job.prev_hash, [0u8; 32]);
+        assert!(job.coinbase1.is_empty());
+        assert!(job.coinbase2.is_empty());
+        assert!(job.merkle_branches.is_empty());
+        assert_eq!(job.version, 0x20000000);
+        assert_eq!(job.nbits, 0);
+        assert_eq!(job.ntime, 0);
+        assert_eq!(job.target, [0xff; 32]);
+        assert!(job.network_target.is_none());
+        assert!(!job.clean_jobs);
+    }
+
+    #[test]
+    fn test_job_build_header() {
+        let mut job = Job::new("test".to_string());
+        job.version = 0x20000000;
+        job.ntime = 0x12345678;
+        job.nbits = 0xAABBCCDD;
+        job.prev_hash = [0x11; 32];
+
+        let header = job.build_header(&[0x01, 0x02], &[0x03, 0x04], 0xDEADBEEF);
+
+        // Check version (little-endian)
+        assert_eq!(&header[0..4], &0x20000000u32.to_le_bytes());
+
+        // Check prev_hash
+        assert_eq!(&header[4..36], &[0x11; 32]);
+
+        // Check ntime (little-endian)
+        assert_eq!(&header[68..72], &0x12345678u32.to_le_bytes());
+
+        // Check nbits (little-endian)
+        assert_eq!(&header[72..76], &0xAABBCCDDu32.to_le_bytes());
+
+        // Check nonce (little-endian)
+        assert_eq!(&header[76..80], &0xDEADBEEFu32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_job_meets_target() {
+        let mut job = Job::new("test".to_string());
+        // Easy target (all 0xFF)
+        job.target = [0xff; 32];
+
+        let any_hash = [0x12; 32];
+        assert!(job.meets_target(&any_hash));
+
+        // Hard target (leading zeros)
+        job.target = [0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let bad_hash = [0x01; 32];
+        assert!(!job.meets_target(&bad_hash));
+    }
+
+    #[test]
+    fn test_job_meets_network_target() {
+        let mut job = Job::new("test".to_string());
+
+        // No network target set
+        let hash = [0x00; 32];
+        assert!(!job.meets_network_target(&hash));
+
+        // Set network target
+        job.network_target = Some([0xff; 32]);
+        assert!(job.meets_network_target(&hash));
+    }
+
+    #[test]
+    fn test_difficulty_to_target_zero() {
+        let target = difficulty_to_target(0.0);
+        assert_eq!(target, [0xff; 32]);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_negative() {
+        let target = difficulty_to_target(-1.0);
+        assert_eq!(target, [0xff; 32]);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_one() {
+        let target = difficulty_to_target(1.0);
+        // Difficulty 1 should return the diff1 target
+        assert_eq!(target[0], 0x00);
+        assert_eq!(target[1], 0x00);
+        assert_eq!(target[2], 0x00);
+        assert_eq!(target[3], 0x00);
+        assert_eq!(target[4], 0xff);
+        assert_eq!(target[5], 0xff);
+    }
+
+    #[test]
+    fn test_compute_merkle_root_no_branches() {
+        let mut job = Job::new("test".to_string());
+        job.coinbase1 = vec![0x01, 0x02, 0x03];
+        job.coinbase2 = vec![0x04, 0x05, 0x06];
+
+        let merkle_root = job.compute_merkle_root(&[0xAA], &[0xBB]);
+
+        // Should be 32 bytes
+        assert_eq!(merkle_root.len(), 32);
+
+        // With same inputs, should get same output
+        let merkle_root2 = job.compute_merkle_root(&[0xAA], &[0xBB]);
+        assert_eq!(merkle_root, merkle_root2);
+
+        // Different inputs should give different output
+        let merkle_root3 = job.compute_merkle_root(&[0xCC], &[0xDD]);
+        assert_ne!(merkle_root, merkle_root3);
+    }
+
+    #[test]
+    fn test_compute_merkle_root_with_branches() {
+        let mut job = Job::new("test".to_string());
+        job.coinbase1 = vec![0x01];
+        job.coinbase2 = vec![0x02];
+        job.merkle_branches = vec![[0x11; 32], [0x22; 32]];
+
+        let merkle_root = job.compute_merkle_root(&[0xAA], &[0xBB]);
+        assert_eq!(merkle_root.len(), 32);
+    }
 }

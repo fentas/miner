@@ -107,6 +107,40 @@ mod tests {
     }
 
     #[test]
+    fn test_format_hashrate_all_units() {
+        assert_eq!(format_hashrate(500.0), "500.00 H/s");
+        assert_eq!(format_hashrate(1.5e3), "1.50 KH/s");
+        assert_eq!(format_hashrate(2.5e6), "2.50 MH/s");
+        assert_eq!(format_hashrate(3.5e9), "3.50 GH/s");
+        assert_eq!(format_hashrate(4.5e12), "4.50 TH/s");
+        assert_eq!(format_hashrate(5.5e15), "5.50 PH/s");
+    }
+
+    #[test]
+    fn test_format_duration_seconds() {
+        let d = Duration::from_secs(45);
+        assert_eq!(format_duration(d), "45s");
+    }
+
+    #[test]
+    fn test_format_duration_minutes() {
+        let d = Duration::from_secs(125); // 2m 5s
+        assert_eq!(format_duration(d), "2m 5s");
+    }
+
+    #[test]
+    fn test_format_duration_hours() {
+        let d = Duration::from_secs(3725); // 1h 2m 5s
+        assert_eq!(format_duration(d), "1h 2m 5s");
+    }
+
+    #[test]
+    fn test_format_duration_days() {
+        let d = Duration::from_secs(90125); // 1d 1h 2m
+        assert_eq!(format_duration(d), "1d 1h 2m");
+    }
+
+    #[test]
     fn test_hashrate_calculator() {
         let mut calc = HashrateCalculator::new(60);
         calc.add_sample(0);
@@ -115,5 +149,52 @@ mod tests {
 
         let hr = calc.hashrate();
         assert!(hr > 0.0);
+    }
+
+    #[test]
+    fn test_hashrate_calculator_no_samples() {
+        let calc = HashrateCalculator::new(60);
+        assert_eq!(calc.hashrate(), 0.0);
+    }
+
+    #[test]
+    fn test_hashrate_calculator_one_sample() {
+        let mut calc = HashrateCalculator::new(60);
+        calc.add_sample(1000);
+        assert_eq!(calc.hashrate(), 0.0);
+    }
+
+    #[test]
+    fn test_expected_time_to_find() {
+        // At 1 GH/s with difficulty 1, should be about 4.295 seconds
+        let hr = 1e9; // 1 GH/s
+        let diff = 1.0;
+        let time = expected_time_to_find(hr, diff);
+
+        // 2^32 hashes / 1e9 H/s ≈ 4295 seconds
+        // The function should return a reasonable time
+        assert!(time.as_secs() > 0);
+        assert!(time < Duration::MAX);
+    }
+
+    #[test]
+    fn test_expected_time_to_find_zero_hashrate() {
+        let time = expected_time_to_find(0.0, 1.0);
+        assert_eq!(time, Duration::MAX);
+    }
+
+    #[test]
+    fn test_expected_time_to_find_zero_difficulty() {
+        let time = expected_time_to_find(1e12, 0.0);
+        assert_eq!(time, Duration::MAX);
+    }
+
+    #[test]
+    fn test_expected_time_to_find_negative() {
+        let time = expected_time_to_find(-1.0, 1.0);
+        assert_eq!(time, Duration::MAX);
+
+        let time = expected_time_to_find(1e12, -1.0);
+        assert_eq!(time, Duration::MAX);
     }
 }
