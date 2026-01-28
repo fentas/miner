@@ -6,8 +6,32 @@
 #include <iostream>
 #include <algorithm>
 #include <map>
+#include <vector>
 
 namespace config {
+
+// Solo pool presets
+enum class SoloPool {
+    Custom,     // User-defined pool
+    CKPool,     // solo.ckpool.org (Stratum V1)
+    Braiins     // solo.braiins.com (Stratum V2)
+};
+
+// Pool preset info
+struct PoolPreset {
+    std::string host;
+    uint16_t port;
+    std::string stratum_version;
+    std::string description;
+};
+
+inline const std::map<SoloPool, PoolPreset>& get_pool_presets() {
+    static const std::map<SoloPool, PoolPreset> presets = {
+        {SoloPool::CKPool,  {"solo.ckpool.org", 3333, "v1", "CKPool Solo (Stratum V1)"}},
+        {SoloPool::Braiins, {"solo.braiins.com", 3333, "v2", "Braiins Solo (Stratum V2)"}}
+    };
+    return presets;
+}
 
 struct Config {
     std::string pool_host = "solo.ckpool.org";
@@ -19,6 +43,9 @@ struct Config {
     uint16_t web_port = 8080;
     std::string web_dir = "web";
 
+    // Solo pool preset
+    SoloPool solo_pool = SoloPool::CKPool;
+
     // Idle mining (screensaver mode)
     unsigned idle_timeout = 0;      // Seconds of inactivity before starting (0 = disabled)
     bool idle_mining_enabled = false;
@@ -28,13 +55,22 @@ struct Config {
     std::string log_file;           // Log file path (empty = disabled)
     bool system_bell = true;        // System bell on share found
 
-    // Future features (placeholders)
-    bool enable_gpu = false;        // GPU mining (not yet implemented)
-    std::string stratum_version = "v1";  // Stratum protocol: "v1" or "v2" (v2 not yet implemented)
+    // GPU mining
+    bool enable_gpu = false;
+
+    // Stratum protocol: "v1" or "v2"
+    std::string stratum_version = "v1";
 
     // Reconnection settings
     unsigned reconnect_delay = 5;   // Initial reconnect delay in seconds
     unsigned max_reconnect_delay = 300;  // Max reconnect delay (5 min)
+};
+
+// Validation result
+struct ValidationResult {
+    bool valid = true;
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
 };
 
 inline std::string trim(const std::string& s) {
@@ -112,6 +148,26 @@ inline bool load(const std::string& filename, Config& cfg) {
             std::string val_lower = value;
             std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
             cfg.stratum_version = val_lower;  // "v1" or "v2"
+        } else if (key_lower == "solopool" || key_lower == "solo_pool" || key_lower == "poolpreset" || key_lower == "pool_preset") {
+            std::string val_lower = value;
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(), ::tolower);
+            if (val_lower == "ckpool" || val_lower == "ck" || val_lower == "v1") {
+                cfg.solo_pool = SoloPool::CKPool;
+                // Apply preset
+                const auto& preset = get_pool_presets().at(SoloPool::CKPool);
+                cfg.pool_host = preset.host;
+                cfg.pool_port = preset.port;
+                cfg.stratum_version = preset.stratum_version;
+            } else if (val_lower == "braiins" || val_lower == "slush" || val_lower == "v2") {
+                cfg.solo_pool = SoloPool::Braiins;
+                // Apply preset
+                const auto& preset = get_pool_presets().at(SoloPool::Braiins);
+                cfg.pool_host = preset.host;
+                cfg.pool_port = preset.port;
+                cfg.stratum_version = preset.stratum_version;
+            } else if (val_lower == "custom") {
+                cfg.solo_pool = SoloPool::Custom;
+            }
         } else if (key_lower == "reconnectdelay" || key_lower == "reconnect_delay") {
             cfg.reconnect_delay = static_cast<unsigned>(std::stoul(value));
         } else if (key_lower == "maxreconnectdelay" || key_lower == "max_reconnect_delay") {
@@ -122,8 +178,87 @@ inline bool load(const std::string& filename, Config& cfg) {
     return true;
 }
 
+// Validate configuration and return errors/warnings
+inline ValidationResult validate(const Config& cfg) {
+    ValidationResult result;
+
+    // Required: PayoutAddress
+    if (cfg.payout_address.empty()) {
+        result.valid = false;
+        result.errors.push_back("PayoutAddress is required");
+    } else {
+        // Basic Bitcoin address validation
+        if (cfg.payout_address.length() < 26 || cfg.payout_address.length() > 90) {
+            result.valid = false;
+            result.errors.push_back("PayoutAddress appears invalid (wrong length)");
+        } else if (cfg.payout_address[0] != '1' && cfg.payout_address[0] != '3' &&
+                   cfg.payout_address.substr(0, 3) != "bc1") {
+            result.warnings.push_back("PayoutAddress doesn't look like a valid Bitcoin address");
+        }
+    }
+
+    // Stratum version validation
+    if (cfg.stratum_version != "v1" && cfg.stratum_version != "v2") {
+        result.valid = false;
+        result.errors.push_back("Stratum version must be 'v1' or 'v2', got: " + cfg.stratum_version);
+    }
+
+    // Pool/Stratum compatibility warnings
+    bool is_ckpool = (cfg.pool_host.find("ckpool") != std::string::npos);
+    bool is_braiins = (cfg.pool_host.find("braiins") != std::string::npos ||
+                       cfg.pool_host.find("slush") != std::string::npos);
+
+    if (cfg.stratum_version == "v2" && is_ckpool) {
+        result.warnings.push_back("CKPool does not support Stratum V2. Consider using 'SoloPool = braiins' or change Stratum to 'v1'");
+    }
+
+    if (cfg.stratum_version == "v1" && is_braiins) {
+        result.warnings.push_back("Braiins Solo supports Stratum V2 for better efficiency. Consider setting Stratum = v2");
+    }
+
+    // Thread validation
+    if (cfg.threads > 256) {
+        result.warnings.push_back("Thread count (" + std::to_string(cfg.threads) + ") is unusually high");
+    }
+
+    // Port validation
+    if (cfg.pool_port == 0) {
+        result.valid = false;
+        result.errors.push_back("Pool port cannot be 0");
+    }
+
+    // Stats interval
+    if (cfg.stats_interval == 0) {
+        result.warnings.push_back("StatsInterval is 0, stats will not be displayed");
+    } else if (cfg.stats_interval < 5) {
+        result.warnings.push_back("StatsInterval is very low (" + std::to_string(cfg.stats_interval) + "s), may cause excessive output");
+    }
+
+    // Reconnect delay
+    if (cfg.reconnect_delay == 0) {
+        result.warnings.push_back("ReconnectDelay is 0, will reconnect immediately on disconnect");
+    }
+
+    if (cfg.max_reconnect_delay < cfg.reconnect_delay) {
+        result.warnings.push_back("MaxReconnectDelay is less than ReconnectDelay");
+    }
+
+    return result;
+}
+
+// Print validation results
+inline void print_validation(const ValidationResult& result) {
+    for (const auto& error : result.errors) {
+        std::cerr << "[Config] ERROR: " << error << std::endl;
+    }
+    for (const auto& warning : result.warnings) {
+        std::cerr << "[Config] WARNING: " << warning << std::endl;
+    }
+}
+
 inline void print(const Config& cfg) {
     std::cout << "[Config] Pool: " << cfg.pool_host << ":" << cfg.pool_port << "\n"
+              << "[Config] Stratum: " << cfg.stratum_version << "\n"
               << "[Config] Address: " << cfg.payout_address << "\n"
               << "[Config] Threads: " << (cfg.threads == 0 ? "auto" : std::to_string(cfg.threads)) << "\n"
               << "[Config] Stats interval: " << cfg.stats_interval << "s\n"

@@ -564,12 +564,12 @@ int main(int argc, char* argv[]) {
     g_config = cfg;
 
     // Validate configuration
-    if (cfg.payout_address.empty()) {
+    auto validation = config::validate(cfg);
+    config::print_validation(validation);
+
+    if (!validation.valid) {
         if (!config_loaded) {
-            std::cerr << "Error: No config file found and no Bitcoin address specified.\n"
-                      << "Create btcminer.conf or use -u <address>\n" << std::endl;
-        } else {
-            std::cerr << "Error: PayoutAddress not set in config file" << std::endl;
+            std::cerr << "\nNo config file found. Create btcminer.conf or use command line options.\n" << std::endl;
         }
         print_usage(argv[0]);
         return 1;

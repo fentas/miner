@@ -5,19 +5,30 @@
 # POOL CONNECTION
 # ============================================
 
-# Pool address (host:port)
-Pool = solo.ckpool.org:3333
+# Solo Pool Preset (recommended way to configure)
+# Options:
+#   ckpool  - solo.ckpool.org (Stratum V1) - widely used, reliable
+#   braiins - solo.braiins.com (Stratum V2) - more efficient protocol
+#   custom  - use Pool setting below for custom pool
+#
+# Using a preset automatically configures Pool and Stratum version
+SoloPool = ckpool
+
+# Custom pool address (only used when SoloPool = custom)
+# Pool = solo.ckpool.org:3333
 
 # Your Bitcoin address for payouts (REQUIRED)
-PayoutAddress = bc1p3ce2z950wuruvpd50km5q8a9t2vtus94p3259qfq2yrxglt7ajxs8wjcjn
+# Must be a valid Bitcoin address (legacy, P2SH, or bech32)
+PayoutAddress = YOUR_BTC_ADDRESS_HERE
 
 # Pool password (optional, default: x)
 Password = x
 
-# Stratum protocol version
-# v1 = JSON-based Stratum (default, widely supported)
-# v2 = Binary Stratum V2 (more efficient, requires pool support)
-Stratum = v1
+# Stratum protocol version (auto-set by SoloPool, or manual override)
+# v1 = JSON-based Stratum (CKPool, most pools)
+# v2 = Binary Stratum V2 (Braiins Solo)
+# WARNING: Using wrong version for pool will fail to connect!
+# Stratum = v1
 
 # ============================================
 # CPU MINING
