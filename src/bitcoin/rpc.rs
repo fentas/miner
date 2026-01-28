@@ -64,19 +64,44 @@ impl BitcoinRpc {
             req = req.basic_auth(user, Some(pass));
         }
 
-        let response: RpcResponse = req
+        let response = req
             .send()
             .await
-            .map_err(|e| BitcoinError::ConnectionError(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| BitcoinError::RpcError(e.to_string()))?;
+            .map_err(|e| BitcoinError::ConnectionError(e.to_string()))?;
 
-        if let Some(err) = response.error {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| BitcoinError::RpcError(format!("Failed to read response: {}", e)))?;
+
+        // Check for HTTP errors
+        if !status.is_success() {
+            // Bitcoin Core returns specific errors during warmup
+            if body.contains("Loading") || body.contains("Verifying") || body.contains("Starting") {
+                return Err(BitcoinError::RpcError(format!("Bitcoin Core starting: {}", body.trim())));
+            }
+            return Err(BitcoinError::RpcError(format!("HTTP {}: {}", status, body.chars().take(200).collect::<String>())));
+        }
+
+        // Handle empty response (can happen during startup)
+        if body.is_empty() {
+            return Err(BitcoinError::RpcError("Empty response from Bitcoin Core".into()));
+        }
+
+        // Parse JSON response
+        let rpc_response: RpcResponse = serde_json::from_str(&body)
+            .map_err(|e| BitcoinError::RpcError(format!("Invalid JSON: {} (body: {})", e, body.chars().take(100).collect::<String>())))?;
+
+        if let Some(err) = rpc_response.error {
+            // Handle warmup errors specially
+            if err.code == -28 {
+                return Err(BitcoinError::RpcError(format!("Bitcoin Core warming up: {}", err.message)));
+            }
             return Err(BitcoinError::RpcError(format!("{}: {}", err.code, err.message)));
         }
 
-        response.result.ok_or_else(|| BitcoinError::RpcError("Empty response".into()))
+        rpc_response.result.ok_or_else(|| BitcoinError::RpcError("Empty result".into()))
     }
 
     /// Get blockchain info

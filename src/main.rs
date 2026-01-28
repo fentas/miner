@@ -131,18 +131,29 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         bitcoind.write_config()?;
         bitcoind.start()?;
 
-        // Wait for Bitcoin Core to start (30 seconds for RPC, then poll for sync)
+        // Wait for Bitcoin Core to start and sync
         println!(
             "{} {}",
             "⏳".bright_yellow(),
-            "Waiting for Bitcoin Core to start...".bright_white()
+            "Starting Bitcoin Core...".bright_white()
         );
 
-        // First wait for RPC to become available (shorter timeout)
         let start = std::time::Instant::now();
+        let mut last_message = String::new();
+        let mut rpc_connected = false;
+
         loop {
             match bitcoind.get_sync_status().await {
                 Ok(status) => {
+                    if !rpc_connected {
+                        println!(
+                            "{} {}",
+                            "✓".bright_green(),
+                            "Bitcoin Core RPC connected".bright_white()
+                        );
+                        rpc_connected = true;
+                    }
+
                     if status.synced {
                         println!(
                             "{} {} {}",
@@ -162,7 +173,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                             "░".repeat(empty).dimmed()
                         );
                         println!(
-                            "\r{} {} {:.2}% ({}/{})",
+                            "{} {} {:.2}% ({}/{})",
                             "⏳".bright_yellow(),
                             bar,
                             status.progress,
@@ -172,17 +183,28 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => {
-                    if start.elapsed() > Duration::from_secs(60) {
-                        return Err(anyhow::anyhow!("Bitcoin Core failed to start: {}", e));
+                    let elapsed = start.elapsed().as_secs();
+                    if elapsed > 120 {
+                        return Err(anyhow::anyhow!("Bitcoin Core failed to start after 120s: {}", e));
                     }
-                    // Still starting up, show waiting message
-                    if start.elapsed().as_secs() % 10 == 0 {
+
+                    // Show status message (deduplicated)
+                    let msg = e.to_string();
+                    let display_msg = if msg.contains("warming up") || msg.contains("Loading") || msg.contains("Verifying") {
+                        msg.clone()
+                    } else if msg.contains("Connection refused") || msg.contains("connection error") {
+                        format!("Waiting for Bitcoin Core to start... ({}s)", elapsed)
+                    } else {
+                        format!("{}... ({}s)", msg.chars().take(50).collect::<String>(), elapsed)
+                    };
+
+                    if display_msg != last_message {
                         println!(
-                            "{} {} ({:.0}s)",
+                            "{} {}",
                             "⏳".bright_yellow(),
-                            "Waiting for Bitcoin Core RPC...".dimmed(),
-                            start.elapsed().as_secs_f64()
+                            display_msg.dimmed()
                         );
+                        last_message = display_msg;
                     }
                 }
             }
