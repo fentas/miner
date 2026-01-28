@@ -165,11 +165,26 @@ __kernel void sha256d_mining(
 pub fn enumerate_devices() -> Result<Vec<GpuDevice>, GpuError> {
     use ocl::{Platform, Device, DeviceType};
     use ocl::core::DeviceInfo;
+    use std::panic;
 
     let mut devices = Vec::new();
     let mut id = 0u32;
 
-    for platform in Platform::list() {
+    // Platform::list() can panic if OpenCL runtime is not available
+    // Catch the panic and return empty list instead
+    let platforms = match panic::catch_unwind(|| Platform::list()) {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!(
+                "OpenCL not available - no GPU mining. \
+                Install OpenCL drivers (AMD: ROCm/AMDGPU-PRO, NVIDIA: CUDA). \
+                On WSL2: ensure GPU compute passthrough is enabled."
+            );
+            return Ok(vec![]);
+        }
+    };
+
+    for platform in platforms {
         if let Ok(devs) = Device::list(&platform, Some(DeviceType::GPU)) {
             for dev in devs {
                 let name = dev.name().unwrap_or_else(|_| "Unknown".to_string());
@@ -257,13 +272,22 @@ impl OpenCLMiner {
     pub fn new(device_id: u32, intensity: u8) -> Result<Self, GpuError> {
         use ocl::{Platform, Device, DeviceType, Context, Queue, Program, Kernel, Buffer};
         use ocl::core::DeviceInfo;
+        use std::panic;
 
         // Find the device
         let mut target_device = None;
         let mut target_platform = None;
         let mut current_id = 0u32;
 
-        for platform in Platform::list() {
+        // Platform::list() can panic if OpenCL runtime is not available
+        let platforms = match panic::catch_unwind(|| Platform::list()) {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(GpuError::OpenCL("OpenCL runtime not available".to_string()));
+            }
+        };
+
+        for platform in platforms {
             if let Ok(devs) = Device::list(&platform, Some(DeviceType::GPU)) {
                 for dev in devs {
                     if current_id == device_id {

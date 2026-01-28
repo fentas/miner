@@ -126,8 +126,11 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
             for (i, name) in devices.iter().enumerate() {
                 tui_state.log_info(format!("  GPU {}: {}", i, name));
             }
+            tui_state.set_gpu_devices(devices);
+        } else {
+            tui_state.log_warn("GPU enabled but no OpenCL devices found - using CPU only");
+            tui_state.set_gpu_enabled(false);
         }
-        tui_state.set_gpu_devices(devices);
     }
 
     tui_state.log_info(format!("Loading configuration from btcminer.toml"));
