@@ -1,0 +1,3 @@
+title: BTC Miner
+description: High-performance Bitcoin miner with SHA-NI, AVX2/AVX512, and GPU support
+theme: jekyll-theme-minimal

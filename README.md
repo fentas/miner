@@ -1,49 +1,53 @@
-# BTC Miner
+<h3 align="center">
+	<img width="80" alt="BTC Miner" src="https://bitcoin.org/img/icons/opengraph.png">
+</h3>
 
-A high-performance Bitcoin miner written in C++17 with hardware acceleration support for CPU (SHA-NI, AVX2, AVX512) and GPU (CUDA, OpenCL).
+<h1 align="center">BTC Miner</h1>
 
-## Features
+<p align="center">
+	<em>High-performance Bitcoin miner with SHA-NI, AVX2/AVX512, and GPU support</em>
+</p>
 
-### Mining
-- **SHA-NI Hardware Acceleration**: Intel/AMD SHA Extensions for maximum CPU performance
-- **AVX2/AVX512 Multi-hashing**: Process 8-16 nonces in parallel on modern CPUs
-- **GPU Mining**: CUDA (NVIDIA) and OpenCL (AMD/Intel) support
-- **Multi-threaded**: Scales across all CPU cores
-- **Midstate Optimization**: Pre-computes first 64 bytes of block header
+<p align="center">
+	<a href="https://github.com/fentas/miner/stargazers">
+		<img alt="Stargazers" src="https://img.shields.io/github/stars/fentas/miner?style=for-the-badge&logo=starship&color=C9CBFF&logoColor=D9E0EE&labelColor=302D41"></a>
+	<a href="https://github.com/fentas/miner/releases/latest">
+		<img alt="Releases" src="https://img.shields.io/github/release/fentas/miner.svg?style=for-the-badge&logo=github&color=F2CDCD&logoColor=D9E0EE&labelColor=302D41"/></a>
+	<a href="https://github.com/fentas/miner/issues">
+		<img alt="Issues" src="https://img.shields.io/github/issues/fentas/miner?style=for-the-badge&logo=gitbook&color=B5E8E0&logoColor=D9E0EE&labelColor=302D41"></a>
+</p>
 
-### Protocol
-- **Stratum V1**: JSON-based protocol (widely supported)
-- **Stratum V2**: Binary protocol with Noise encryption (more efficient)
-- **Auto-reconnect**: Exponential backoff on connection loss
+&nbsp;
 
-### Interface
-- **Web Dashboard**: Real-time stats, hashrate chart, controls
-- **WebSocket Updates**: Live stats without page refresh
-- **Idle Mining**: Screensaver mode - mine when idle, stop on activity
-- **File Logging**: Timestamped stats and events
+<p align="left">
 
-## Performance
+A C++17 Bitcoin miner optimized for modern hardware. Leverages CPU SIMD instructions (SHA-NI, AVX2, AVX512) and GPU acceleration (CUDA, OpenCL) for maximum hashrate. Features Stratum V1/V2 protocol support, web dashboard, and idle mining mode.
 
-| Implementation | Throughput (per thread) |
-|----------------|------------------------|
+</p>
+
+&nbsp;
+
+### ⚡ Performance
+
+| Implementation | Throughput |
+|----------------|------------|
 | SHA-NI | ~800-900 MH/s |
 | AVX512 (16-way) | ~400-500 MH/s |
 | AVX2 (8-way) | ~200-300 MH/s |
 | Generic | ~10-20 MH/s |
-| GPU (varies) | 100-1000+ MH/s |
+| GPU | 100-1000+ MH/s |
 
-## Quick Start
+&nbsp;
+
+### 🚀 Quick Start
 
 ```bash
-# Build with CMake
+# Build
 mkdir build && cd build
 cmake .. -DNATIVE_BUILD=ON
 make -j$(nproc)
 
-# Or use Make
-make
-
-# Create config
+# Configure
 cp btcminer.conf.example btcminer.conf
 # Edit with your Bitcoin address
 
@@ -51,217 +55,129 @@ cp btcminer.conf.example btcminer.conf
 ./btcminer
 ```
 
-## Build Options
+&nbsp;
 
-### CMake
+### 🔧 Build Options
 
 ```bash
 cmake .. [OPTIONS]
 
-# Options:
-#   -DNATIVE_BUILD=ON       Optimize for local CPU (default: ON)
-#   -DENABLE_CUDA=ON        Enable CUDA GPU mining
-#   -DENABLE_OPENCL=ON      Enable OpenCL GPU mining
-#   -DBUILD_TESTS=ON        Build test suite (default: ON)
-#   -DENABLE_COVERAGE=ON    Enable code coverage
+# CPU Optimization
+-DNATIVE_BUILD=ON       # Optimize for local CPU (default)
+
+# GPU Support
+-DENABLE_CUDA=ON        # NVIDIA CUDA
+-DENABLE_OPENCL=ON      # AMD/Intel OpenCL
+
+# Testing
+-DBUILD_TESTS=ON        # Build test suite
+-DENABLE_COVERAGE=ON    # Code coverage
 ```
 
-### Make
+&nbsp;
 
-```bash
-make              # Native build
-make portable     # Portable (SSE4.1 only)
-make debug        # Debug build
-make test         # Run tests
-make clean        # Clean build
-```
-
-### GPU Support
-
-```bash
-# CUDA (NVIDIA)
-cmake .. -DENABLE_CUDA=ON
-make
-
-# OpenCL (AMD/Intel/NVIDIA)
-cmake .. -DENABLE_OPENCL=ON
-make
-```
-
-## Configuration
-
-### Config File (btcminer.conf)
+### 📝 Configuration
 
 ```ini
-# Pool connection
+# btcminer.conf
 Pool = solo.ckpool.org:3333
 PayoutAddress = bc1q...
 Password = x
-
-# Protocol: v1 (JSON) or v2 (binary)
-Stratum = v1
-
-# CPU mining threads (0 = auto)
-Threads = 0
-
-# GPU mining
+Stratum = v1              # v1 (JSON) or v2 (binary)
+Threads = 0               # 0 = auto-detect
 EnableGPU = false
-
-# Web interface
 WebPort = 8080
-WebDir = web
-
-# Idle mining (seconds, 0 = disabled)
-IdleTimeout = 0
-
-# Logging
-LogFile = miner.log
-StatsInterval = 10
-
-# Reconnection
-ReconnectDelay = 5
-MaxReconnectDelay = 300
+IdleTimeout = 0           # Seconds, 0 = disabled
 ```
 
-### Command Line
+&nbsp;
+
+### 💻 Command Line
 
 ```
 ./btcminer [options]
 
-Options:
-  -c, --config <file>      Config file (default: btcminer.conf)
+  -c, --config <file>      Config file
   -o, --pool <host:port>   Pool address
   -u, --user <address>     Bitcoin address
-  -p, --pass <password>    Pool password
-  -t, --threads <n>        CPU threads (0 = all cores)
-  -w, --web <port>         Web port (0 = disabled)
-  --no-color               Disable colored output
+  -t, --threads <n>        CPU threads
+  -w, --web <port>         Web dashboard port
   -h, --help               Show help
 ```
 
-## Project Structure
+&nbsp;
 
-```
-.
-├── btcminer.conf.example   # Configuration template
-├── CMakeLists.txt          # CMake build
-├── Makefile                # Make build
-├── README.md
-├── docs/
-│   └── ARCHITECTURE.md     # Technical documentation
-├── scripts/
-│   └── run_coverage.sh     # Coverage report generator
-├── tests/                  # Test suite
-│   ├── test_framework.hpp
-│   ├── test_main.cpp
-│   ├── test_sha256.cpp
-│   ├── test_sha256_avx.cpp
-│   ├── test_stratum.cpp
-│   ├── test_stratum_v2.cpp
-│   └── test_gpu.cpp
-├── web/
-│   └── index.html          # Dashboard UI
-└── src/
-    ├── main.cpp            # Entry point
-    ├── config.hpp          # Configuration
-    ├── sha256.hpp          # SHA-256 (generic + SHA-NI)
-    ├── sha256_avx.hpp      # AVX2/AVX512 multi-hashing
-    ├── stratum.hpp/.cpp    # Stratum V1 client
-    ├── stratum_v2.hpp/.cpp # Stratum V2 client
-    ├── miner.hpp/.cpp      # Mining core
-    ├── webserver.hpp       # HTTP/WebSocket server
-    ├── idle_monitor.hpp    # Idle detection
-    ├── colors.hpp          # Terminal colors
-    └── gpu/
-        ├── gpu.hpp/.cpp        # GPU interface
-        ├── cuda_miner.cuh      # CUDA miner
-        ├── opencl_miner.hpp    # OpenCL miner
-        ├── sha256d.cu          # CUDA kernel
-        └── sha256d.cl          # OpenCL kernel
-```
-
-## Testing
-
-```bash
-# Run all tests
-./btcminer_test
-
-# Run specific test group
-./btcminer_test --sha256
-./btcminer_test --avx
-./btcminer_test --stratum
-./btcminer_test --stratum-v2
-./btcminer_test --gpu
-
-# With coverage
-./scripts/run_coverage.sh
-# Open build_coverage/coverage_html/index.html
-```
-
-## Web Interface
+### 🌐 Web Dashboard
 
 Dashboard at `http://localhost:8080`:
 
 - Real-time hashrate and statistics
 - Live hashrate chart
-- Start/stop, pause/resume controls
+- Mining controls (start/stop/pause)
 - Benchmark mode
 - Idle mining toggle
-- Settings panel
-- Log viewer
 
-### API Endpoints
+&nbsp;
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/stats` | GET | Mining statistics |
-| `/api/settings` | GET/POST | Configuration |
-| `/api/control/start` | POST | Start mining |
-| `/api/control/stop` | POST | Stop mining |
-| `/api/control/pause` | POST | Pause mining |
-| `/api/control/resume` | POST | Resume mining |
-| `/api/benchmark` | GET/POST | Benchmark mode |
-| `/api/idle` | GET/POST | Idle mining control |
-| `/ws` | WebSocket | Real-time updates |
+### 🧪 Testing
 
-## Requirements
+```bash
+./btcminer_test              # Run all tests
+./btcminer_test --sha256     # SHA-256 tests
+./btcminer_test --avx        # AVX tests
+./btcminer_test --stratum    # Protocol tests
 
-- C++17 compiler (GCC 7+ or Clang 5+)
-- x86-64 CPU
-- Linux (Ubuntu 20.04+ tested)
-- Optional: CUDA Toolkit (for NVIDIA GPU)
-- Optional: OpenCL SDK (for AMD/Intel GPU)
+# Coverage report
+./scripts/run_coverage.sh
+```
 
-## How It Works
+&nbsp;
 
-1. **Connect**: Establish Stratum connection to pool
-2. **Subscribe**: Receive extranonce and job notifications
-3. **Build Header**: Construct 80-byte block header
-4. **Compute Midstate**: SHA-256 state after first 64 bytes
-5. **Mine**: Iterate nonces, compute SHA-256d
-6. **Submit**: Send valid shares to pool
+### 📁 Project Structure
 
-### Optimization Techniques
+```
+src/
+├── sha256.hpp          # SHA-256 (generic + SHA-NI)
+├── sha256_avx.hpp      # AVX2/AVX512 multi-hashing
+├── stratum.hpp/cpp     # Stratum V1
+├── stratum_v2.hpp/cpp  # Stratum V2
+├── miner.hpp/cpp       # Mining core
+├── webserver.hpp       # HTTP/WebSocket
+└── gpu/                # CUDA/OpenCL kernels
+```
 
-- **Midstate**: Pre-compute SHA-256 state for fixed header bytes
-- **SHA-NI**: Hardware SHA-256 instructions (2 rounds/instruction)
-- **AVX2/AVX512**: Process 8-16 nonces in parallel
-- **GPU**: Massive parallelism with thousands of threads
+&nbsp;
 
-## Disclaimer
+### ⚠️ Disclaimer
 
-**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** Current network difficulty requires ~10^23 hashes per block. This miner is for:
+**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** Current network difficulty requires ~10²³ hashes per block. This miner is for:
 
 - Educational purposes
 - Testing and development
 - Lottery-style mining
 
-## License
+&nbsp;
 
-MIT License
+### 📜 License
 
-## Acknowledgments
+`btcminer` is released under the MIT license, which grants the following permissions:
+
+- Commercial use
+- Distribution
+- Modification
+- Private use
+
+For more details, see the [LICENSE](https://github.com/fentas/miner/blob/main/LICENSE).
+
+&nbsp;
+
+### ❤️ Acknowledgments
 
 - SHA-NI implementation based on Intel reference code
 - Stratum V1 based on slush's specification
 - Stratum V2 based on the SV2 specification
+
+&nbsp;
+
+<p align="center">Copyright &copy; 2024-present <a href="https://github.com/fentas" target="_blank">fentas</a>
+<p align="center"><a href="https://github.com/fentas/miner/blob/main/LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=MIT&logoColor=d9e0ee&colorA=302d41&colorB=b7bdf8"/></a></p>
