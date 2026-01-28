@@ -126,6 +126,10 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         if !bitcoind.is_installed() {
             info!("Bitcoin Core not found, downloading...");
             bitcoind.download_and_install().await?;
+        } else if bitcoind.needs_upgrade() {
+            let old_ver = bitcoind.installed_version().unwrap_or_default();
+            info!("Upgrading Bitcoin Core from v{} to latest...", old_ver);
+            bitcoind.download_and_install().await?;
         }
 
         bitcoind.write_config()?;
