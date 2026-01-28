@@ -3,20 +3,24 @@
 //! Starts/stops mining based on user activity:
 //! - Linux (X11): Uses xprintidle or xssstate
 //! - WSL2: Uses PowerShell to query Windows idle time
+//! - Windows: Uses GetLastInputInfo from user32.dll
 
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(not(target_os = "windows"))]
+use std::process::Command;
+
 /// Runtime environment
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Environment {
     Unknown,
-    NativeLinux,  // X11 or Wayland
-    WSL2,         // Windows Subsystem for Linux
-    Headless,     // No display
+    NativeLinux,   // X11 or Wayland
+    WSL2,          // Windows Subsystem for Linux
+    NativeWindows, // Native Windows
+    Headless,      // No display
 }
 
 impl Environment {
@@ -25,6 +29,7 @@ impl Environment {
             Environment::Unknown => "unknown",
             Environment::NativeLinux => "linux",
             Environment::WSL2 => "wsl2",
+            Environment::NativeWindows => "windows",
             Environment::Headless => "headless",
         }
     }
@@ -91,6 +96,8 @@ impl IdleMonitor {
             return;
         }
 
+        tracing::info!("Idle monitor starting in {} environment", self.env.name());
+
         self.running.store(true, Ordering::Relaxed);
 
         let running = Arc::clone(&self.running);
@@ -128,30 +135,40 @@ impl Drop for IdleMonitor {
 
 /// Detect runtime environment
 fn detect_environment() -> Environment {
-    // Check for WSL2
-    if let Ok(content) = std::fs::read_to_string("/proc/version") {
-        if content.to_lowercase().contains("microsoft") || content.to_lowercase().contains("wsl") {
-            return Environment::WSL2;
-        }
+    // Native Windows
+    #[cfg(target_os = "windows")]
+    {
+        return Environment::NativeWindows;
     }
 
-    // Check for display (X11)
-    if std::env::var("DISPLAY").is_ok() {
-        // Check if xprintidle or xssstate is available
-        if Command::new("which").arg("xprintidle").output().map(|o| o.status.success()).unwrap_or(false) {
+    // Unix-like systems
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Check for WSL2
+        if let Ok(content) = std::fs::read_to_string("/proc/version") {
+            if content.to_lowercase().contains("microsoft") || content.to_lowercase().contains("wsl") {
+                return Environment::WSL2;
+            }
+        }
+
+        // Check for display (X11)
+        if std::env::var("DISPLAY").is_ok() {
+            // Check if xprintidle or xssstate is available
+            if Command::new("which").arg("xprintidle").output().map(|o| o.status.success()).unwrap_or(false) {
+                return Environment::NativeLinux;
+            }
+            if Command::new("which").arg("xssstate").output().map(|o| o.status.success()).unwrap_or(false) {
+                return Environment::NativeLinux;
+            }
+        }
+
+        // Check for Wayland
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
             return Environment::NativeLinux;
         }
-        if Command::new("which").arg("xssstate").output().map(|o| o.status.success()).unwrap_or(false) {
-            return Environment::NativeLinux;
-        }
-    }
 
-    // Check for Wayland
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        return Environment::NativeLinux;
+        Environment::Headless
     }
-
-    Environment::Headless
 }
 
 /// Get current idle time in seconds
@@ -159,11 +176,13 @@ fn get_idle_time(env: Environment) -> Option<u32> {
     match env {
         Environment::NativeLinux => get_idle_time_linux(),
         Environment::WSL2 => get_idle_time_wsl2(),
+        Environment::NativeWindows => get_idle_time_windows(),
         _ => None,
     }
 }
 
 /// Get idle time on Linux via xprintidle
+#[cfg(not(target_os = "windows"))]
 fn get_idle_time_linux() -> Option<u32> {
     // Try xprintidle first
     if let Ok(output) = Command::new("xprintidle").output() {
@@ -190,7 +209,13 @@ fn get_idle_time_linux() -> Option<u32> {
     None
 }
 
+#[cfg(target_os = "windows")]
+fn get_idle_time_linux() -> Option<u32> {
+    None // Not applicable on Windows
+}
+
 /// Get idle time on WSL2 via PowerShell
+#[cfg(not(target_os = "windows"))]
 fn get_idle_time_wsl2() -> Option<u32> {
     let script = r#"
         Add-Type @'
@@ -228,6 +253,49 @@ fn get_idle_time_wsl2() -> Option<u32> {
     } else {
         None
     }
+}
+
+#[cfg(target_os = "windows")]
+fn get_idle_time_wsl2() -> Option<u32> {
+    None // Not applicable on native Windows
+}
+
+/// Get idle time on native Windows using Win32 API
+#[cfg(target_os = "windows")]
+fn get_idle_time_windows() -> Option<u32> {
+    use std::mem::size_of;
+
+    #[repr(C)]
+    struct LASTINPUTINFO {
+        cb_size: u32,
+        dw_time: u32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetLastInputInfo(plii: *mut LASTINPUTINFO) -> i32;
+        fn GetTickCount() -> u32;
+    }
+
+    unsafe {
+        let mut lii = LASTINPUTINFO {
+            cb_size: size_of::<LASTINPUTINFO>() as u32,
+            dw_time: 0,
+        };
+
+        if GetLastInputInfo(&mut lii) != 0 {
+            let tick_count = GetTickCount();
+            let idle_ms = tick_count.wrapping_sub(lii.dw_time);
+            Some(idle_ms / 1000)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_idle_time_windows() -> Option<u32> {
+    None // Not applicable on non-Windows
 }
 
 /// Monitor loop
@@ -268,6 +336,7 @@ mod tests {
         assert_eq!(Environment::Unknown.name(), "unknown");
         assert_eq!(Environment::NativeLinux.name(), "linux");
         assert_eq!(Environment::WSL2.name(), "wsl2");
+        assert_eq!(Environment::NativeWindows.name(), "windows");
         assert_eq!(Environment::Headless.name(), "headless");
     }
 
@@ -299,7 +368,7 @@ mod tests {
         assert!(matches!(
             env,
             Environment::Unknown | Environment::NativeLinux |
-            Environment::WSL2 | Environment::Headless
+            Environment::WSL2 | Environment::NativeWindows | Environment::Headless
         ));
     }
 
@@ -369,7 +438,7 @@ mod tests {
         let valid = matches!(
             env,
             Environment::Unknown | Environment::NativeLinux |
-            Environment::WSL2 | Environment::Headless
+            Environment::WSL2 | Environment::NativeWindows | Environment::Headless
         );
         assert!(valid);
     }

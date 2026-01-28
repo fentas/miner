@@ -37,17 +37,43 @@
 
 ## Quick Start
 
+### Linux / macOS
+
 ```bash
 # Build
 cargo build --release
 
 # Configure
-cp btcminer.toml.example btcminer.toml
+cp btcminer.example.toml btcminer.toml
 # Edit btcminer.toml with your Bitcoin address
 
 # Run
 ./target/release/btcminer
 ```
+
+### Windows
+
+```powershell
+# Build
+cargo build --release
+
+# Configure
+copy btcminer.example.toml btcminer.toml
+# Edit btcminer.toml with your Bitcoin address
+
+# Run
+.\target\release\btcminer.exe
+```
+
+### Pre-built Binaries
+
+Download from [Releases](https://github.com/fentas/miner/releases):
+
+- `btcminer-*-linux-x64.tar.gz` - Linux (x86_64)
+- `btcminer-*-linux-x64-opencl.tar.gz` - Linux with GPU support
+- `btcminer-*-windows-x64.zip` - Windows (x86_64)
+- `btcminer-*-macos-x64.tar.gz` - macOS Intel
+- `btcminer-*-macos-arm64.tar.gz` - macOS Apple Silicon
 
 &nbsp;
 

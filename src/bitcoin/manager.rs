@@ -30,15 +30,34 @@ pub struct BitcoindManager {
 impl BitcoindManager {
     /// Create a new manager with default directories
     pub fn new() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-
         // Auto-calculate dbcache based on available RAM
         // Use ~50% of free memory, capped between 450MB and 16GB
         let dbcache = Self::calculate_dbcache();
 
+        // Platform-specific default directories
+        #[cfg(target_os = "windows")]
+        let (data_dir, install_dir) = {
+            let appdata = std::env::var("APPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
+            (
+                appdata.join("Bitcoin"),
+                appdata.join("Bitcoin Core"),
+            )
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let (data_dir, install_dir) = {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            (
+                home.join(".bitcoin"),
+                home.join(".local/share/bitcoin-core"),
+            )
+        };
+
         Self {
-            data_dir: home.join(".bitcoin"),
-            install_dir: home.join(".local/share/bitcoin-core"),
+            data_dir,
+            install_dir,
             rpc: None,
             process: None,
             prune_size: 10000,
@@ -153,7 +172,11 @@ impl BitcoindManager {
 
     /// Get path to bitcoind binary
     fn bitcoind_path(&self) -> PathBuf {
-        self.install_dir.join("bin/bitcoind")
+        #[cfg(target_os = "windows")]
+        return self.install_dir.join("bin").join("bitcoind.exe");
+
+        #[cfg(not(target_os = "windows"))]
+        return self.install_dir.join("bin").join("bitcoind");
     }
 
     /// Download and install Bitcoin Core
@@ -161,7 +184,13 @@ impl BitcoindManager {
         info!("Downloading Bitcoin Core v{}...", BITCOIN_CORE_VERSION);
 
         let platform = get_platform();
+
+        // Windows uses .zip, others use .tar.gz
+        #[cfg(target_os = "windows")]
+        let filename = format!("bitcoin-{}-{}.zip", BITCOIN_CORE_VERSION, platform);
+        #[cfg(not(target_os = "windows"))]
         let filename = format!("bitcoin-{}-{}.tar.gz", BITCOIN_CORE_VERSION, platform);
+
         let url = format!("{}/bitcoin-core-{}/{}", DOWNLOAD_BASE_URL, BITCOIN_CORE_VERSION, filename);
 
         // Create install directory
@@ -188,15 +217,45 @@ impl BitcoindManager {
         let temp_path = self.install_dir.join(&filename);
         std::fs::write(&temp_path, &bytes)?;
 
-        // Extract
+        // Extract - different method per platform
         info!("Extracting Bitcoin Core...");
-        let status = Command::new("tar")
-            .args(["-xzf", &filename, "--strip-components=1"])
-            .current_dir(&self.install_dir)
-            .status()?;
 
-        if !status.success() {
-            return Err(BitcoinError::DownloadError("Failed to extract archive".into()));
+        #[cfg(target_os = "windows")]
+        {
+            // Use PowerShell to extract zip on Windows
+            let status = Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &format!(
+                        "Expand-Archive -Path '{}' -DestinationPath '{}' -Force; \
+                         Get-ChildItem -Path '{}' -Directory | ForEach-Object {{ \
+                             Get-ChildItem -Path $_.FullName | Move-Item -Destination '{}' -Force \
+                         }}",
+                        temp_path.display(),
+                        self.install_dir.display(),
+                        self.install_dir.display(),
+                        self.install_dir.display()
+                    )
+                ])
+                .status()?;
+
+            if !status.success() {
+                return Err(BitcoinError::DownloadError("Failed to extract archive".into()));
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let status = Command::new("tar")
+                .args(["-xzf", &filename, "--strip-components=1"])
+                .current_dir(&self.install_dir)
+                .status()?;
+
+            if !status.success() {
+                return Err(BitcoinError::DownloadError("Failed to extract archive".into()));
+            }
         }
 
         // Cleanup
