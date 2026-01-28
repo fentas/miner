@@ -1,56 +1,91 @@
 # BTC Miner
 
-A high-performance CPU Bitcoin miner written in C++17 with SHA-NI hardware acceleration support.
+A high-performance Bitcoin miner written in C++17 with hardware acceleration support for CPU (SHA-NI, AVX2, AVX512) and GPU (CUDA, OpenCL).
 
 ## Features
 
-- **SHA-NI Hardware Acceleration**: Utilizes Intel SHA Extensions for ~10x faster hashing
-- **Multi-threaded Mining**: Scales across all CPU cores
-- **Stratum Protocol**: Compatible with solo.ckpool.org and other stratum pools
+### Mining
+- **SHA-NI Hardware Acceleration**: Intel/AMD SHA Extensions for maximum CPU performance
+- **AVX2/AVX512 Multi-hashing**: Process 8-16 nonces in parallel on modern CPUs
+- **GPU Mining**: CUDA (NVIDIA) and OpenCL (AMD/Intel) support
+- **Multi-threaded**: Scales across all CPU cores
 - **Midstate Optimization**: Pre-computes first 64 bytes of block header
-- **Web Dashboard**: Real-time stats, hashrate chart, miner controls, settings UI
-- **WebSocket Live Updates**: Stats broadcast to browser in real-time
-- **Miner Controls**: Start/stop, pause/resume, benchmark mode via web UI
-- **Idle Mining (Screensaver Mode)**: Auto-start mining when user is idle, stop when active
-- **WSL2 Support**: Idle detection works on both native Linux and WSL2
-- **Config File Support**: Easy configuration via `btcminer.conf`
-- **Comprehensive Test Suite**: Verify correctness with `make test` and `make test-web`
+
+### Protocol
+- **Stratum V1**: JSON-based protocol (widely supported)
+- **Stratum V2**: Binary protocol with Noise encryption (more efficient)
+- **Auto-reconnect**: Exponential backoff on connection loss
+
+### Interface
+- **Web Dashboard**: Real-time stats, hashrate chart, controls
+- **WebSocket Updates**: Live stats without page refresh
+- **Idle Mining**: Screensaver mode - mine when idle, stop on activity
+- **File Logging**: Timestamped stats and events
 
 ## Performance
 
-| CPU Feature | Single-Thread Hashrate |
-|-------------|----------------------|
-| SHA-NI (Intel/AMD) | ~800-900 MH/s |
-| AVX2 (no SHA-NI) | ~50-100 MH/s |
+| Implementation | Throughput (per thread) |
+|----------------|------------------------|
+| SHA-NI | ~800-900 MH/s |
+| AVX512 (16-way) | ~400-500 MH/s |
+| AVX2 (8-way) | ~200-300 MH/s |
 | Generic | ~10-20 MH/s |
+| GPU (varies) | 100-1000+ MH/s |
 
 ## Quick Start
 
 ```bash
-# Build
+# Build with CMake
+mkdir build && cd build
+cmake .. -DNATIVE_BUILD=ON
+make -j$(nproc)
+
+# Or use Make
 make
 
-# Run tests
-make test
-
-# Create config file
+# Create config
 cp btcminer.conf.example btcminer.conf
-# Edit btcminer.conf with your Bitcoin address
+# Edit with your Bitcoin address
 
-# Start mining
+# Run
 ./btcminer
 ```
 
 ## Build Options
 
+### CMake
+
 ```bash
-make              # Native build (optimized for your CPU)
-make portable     # Portable build (SSE4.1 only)
-make debug        # Debug build with symbols
-make test         # Build and run SHA-256 test suite
-make test-web     # Test web server and API endpoints
-make test-all     # Run all tests
-make clean        # Remove built files
+cmake .. [OPTIONS]
+
+# Options:
+#   -DNATIVE_BUILD=ON       Optimize for local CPU (default: ON)
+#   -DENABLE_CUDA=ON        Enable CUDA GPU mining
+#   -DENABLE_OPENCL=ON      Enable OpenCL GPU mining
+#   -DBUILD_TESTS=ON        Build test suite (default: ON)
+#   -DENABLE_COVERAGE=ON    Enable code coverage
+```
+
+### Make
+
+```bash
+make              # Native build
+make portable     # Portable (SSE4.1 only)
+make debug        # Debug build
+make test         # Run tests
+make clean        # Clean build
+```
+
+### GPU Support
+
+```bash
+# CUDA (NVIDIA)
+cmake .. -DENABLE_CUDA=ON
+make
+
+# OpenCL (AMD/Intel/NVIDIA)
+cmake .. -DENABLE_OPENCL=ON
+make
 ```
 
 ## Configuration
@@ -60,193 +95,166 @@ make clean        # Remove built files
 ```ini
 # Pool connection
 Pool = solo.ckpool.org:3333
-
-# Your Bitcoin address for payouts (REQUIRED)
 PayoutAddress = bc1q...
-
-# Pool password (optional)
 Password = x
 
-# Number of mining threads (0 = auto-detect)
+# Protocol: v1 (JSON) or v2 (binary)
+Stratum = v1
+
+# CPU mining threads (0 = auto)
 Threads = 0
 
-# Stats reporting interval in seconds
-StatsInterval = 10
+# GPU mining
+EnableGPU = false
 
-# Web interface port (0 to disable)
+# Web interface
 WebPort = 8080
-
-# Web files directory
 WebDir = web
 
-# Idle mining - screensaver mode (seconds, 0 = disabled)
-# Starts mining when user is idle for this many seconds
+# Idle mining (seconds, 0 = disabled)
 IdleTimeout = 0
+
+# Logging
+LogFile = miner.log
+StatsInterval = 10
+
+# Reconnection
+ReconnectDelay = 5
+MaxReconnectDelay = 300
 ```
 
-### Command Line Options
+### Command Line
 
 ```
-Usage: ./btcminer [options]
+./btcminer [options]
 
 Options:
   -c, --config <file>      Config file (default: btcminer.conf)
-  -o, --pool <host:port>   Pool address (default: solo.ckpool.org:3333)
-  -u, --user <address>     Bitcoin address for mining rewards
-  -p, --pass <password>    Pool password (default: x)
-  -t, --threads <n>        Number of mining threads (default: all cores)
-  -w, --web <port>         Web interface port (default: 8080, 0 to disable)
-  -h, --help               Show this help message
-```
-
-Command line options override config file settings.
-
-## Requirements
-
-- C++17 compiler (GCC 7+ or Clang 5+)
-- x86-64 CPU (Intel Skylake+ or AMD Zen+ recommended for SHA-NI)
-- Linux (tested on Ubuntu 20.04+)
-
-### CPU Feature Detection
-
-The Makefile automatically detects your CPU's capabilities:
-
-```bash
-make
-# Output shows:
-# CPU features detected:
-#   - SHA-NI: enabled/disabled
-#   - AVX2: enabled/disabled
-#   - SSE4.1: enabled/disabled
+  -o, --pool <host:port>   Pool address
+  -u, --user <address>     Bitcoin address
+  -p, --pass <password>    Pool password
+  -t, --threads <n>        CPU threads (0 = all cores)
+  -w, --web <port>         Web port (0 = disabled)
+  --no-color               Disable colored output
+  -h, --help               Show help
 ```
 
 ## Project Structure
 
 ```
 .
-├── btcminer.conf      # Configuration file
-├── Makefile           # Build system
-├── CMakeLists.txt     # Alternative CMake build
-├── README.md          # This file
-├── test_web.sh        # Web server test script
-├── docs/              # Documentation
-│   └── ARCHITECTURE.md
-├── web/               # Web interface
-│   └── index.html     # Dashboard UI
+├── btcminer.conf.example   # Configuration template
+├── CMakeLists.txt          # CMake build
+├── Makefile                # Make build
+├── README.md
+├── docs/
+│   └── ARCHITECTURE.md     # Technical documentation
+├── scripts/
+│   └── run_coverage.sh     # Coverage report generator
+├── tests/                  # Test suite
+│   ├── test_framework.hpp
+│   ├── test_main.cpp
+│   ├── test_sha256.cpp
+│   ├── test_sha256_avx.cpp
+│   ├── test_stratum.cpp
+│   ├── test_stratum_v2.cpp
+│   └── test_gpu.cpp
+├── web/
+│   └── index.html          # Dashboard UI
 └── src/
-    ├── main.cpp       # Entry point and CLI
-    ├── config.hpp     # Configuration parser
-    ├── sha256.hpp     # SHA-256 with SHA-NI/SIMD
-    ├── stratum.hpp    # Stratum protocol client
-    ├── stratum.cpp
-    ├── miner.hpp      # Multi-threaded miner core
-    ├── miner.cpp
-    ├── webserver.hpp  # Built-in HTTP/WebSocket server
-    ├── idle_monitor.hpp  # Idle detection (Linux/WSL2)
-    └── test.cpp       # Test suite
+    ├── main.cpp            # Entry point
+    ├── config.hpp          # Configuration
+    ├── sha256.hpp          # SHA-256 (generic + SHA-NI)
+    ├── sha256_avx.hpp      # AVX2/AVX512 multi-hashing
+    ├── stratum.hpp/.cpp    # Stratum V1 client
+    ├── stratum_v2.hpp/.cpp # Stratum V2 client
+    ├── miner.hpp/.cpp      # Mining core
+    ├── webserver.hpp       # HTTP/WebSocket server
+    ├── idle_monitor.hpp    # Idle detection
+    ├── colors.hpp          # Terminal colors
+    └── gpu/
+        ├── gpu.hpp/.cpp        # GPU interface
+        ├── cuda_miner.cuh      # CUDA miner
+        ├── opencl_miner.hpp    # OpenCL miner
+        ├── sha256d.cu          # CUDA kernel
+        └── sha256d.cl          # OpenCL kernel
 ```
-
-## Web Interface
-
-The miner includes a built-in web dashboard accessible at `http://localhost:8080`.
-
-**Dashboard Features:**
-
-- **Real-time Stats**: Hashrate, total hashes, shares, uptime
-- **Live Hashrate Chart**: Visual history of mining performance
-- **Miner Controls**: Start/stop, pause/resume mining with one click
-- **Benchmark Mode**: Test your hashrate without connecting to pool
-- **Idle Mining**: Enable screensaver-style mining with visual "zzz" animation
-- **Settings Panel**: View and configure mining settings
-- **Log Viewer**: Real-time mining log output
-- **WebSocket Updates**: Stats update automatically without page refresh
-
-**API Endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/stats` | GET | Current mining statistics |
-| `/api/settings` | GET | Current configuration |
-| `/api/settings` | POST | Update configuration |
-| `/api/control/start` | POST | Start mining |
-| `/api/control/stop` | POST | Stop mining |
-| `/api/control/pause` | POST | Pause mining |
-| `/api/control/resume` | POST | Resume mining |
-| `/api/control/benchmark` | POST | Start benchmark (query: duration) |
-| `/api/control/benchmark/stop` | POST | Stop benchmark |
-| `/api/benchmark` | GET | Get benchmark results |
-| `/api/idle` | GET | Get idle mining status |
-| `/api/idle/enable` | POST | Enable idle mining (query: timeout) |
-| `/api/idle/disable` | POST | Disable idle mining |
-| `/ws` | WebSocket | Real-time stats stream |
-
-**Disabling:** Set `WebPort = 0` in config or use `-w 0` on command line.
-
-## Idle Mining (Screensaver Mode)
-
-The miner can automatically start when your computer is idle and stop when you return.
-
-**Supported Environments:**
-
-- **Native Linux (X11)**: Uses `xprintidle` or `xssstate` for idle detection
-- **WSL2**: Queries Windows idle time via PowerShell
-
-**Configuration:**
-
-```ini
-# In btcminer.conf
-IdleTimeout = 900  # Start mining after 15 minutes of inactivity
-```
-
-**Or enable via web UI:**
-1. Go to the Dashboard
-2. Toggle "Enable idle mining" in the Idle Mining section
-3. Set your preferred timeout (in minutes)
-
-When enabled, the web UI shows a "zzz" animation while waiting for idle, and switches to a mining indicator when active.
-
-## How It Works
-
-1. **Connect to Pool**: Establishes stratum connection and subscribes to mining jobs
-2. **Receive Job**: Pool sends block template (prevhash, merkle root, difficulty target)
-3. **Build Header**: Constructs 80-byte block header, computes midstate for first 64 bytes
-4. **Mine**: Worker threads iterate through nonces, computing SHA-256d hashes
-5. **Submit Share**: When hash meets target difficulty, submit to pool
-
-### SHA-256 Optimization
-
-Bitcoin mining requires computing `SHA256(SHA256(block_header))` billions of times.
-
-**Midstate Optimization**: The 80-byte block header is processed in two 64-byte chunks. Since only the nonce (last 4 bytes) changes, we pre-compute the SHA-256 state after the first chunk (midstate) and reuse it.
-
-**SHA-NI**: Intel's SHA Extensions provide hardware instructions for SHA-256:
-- `SHA256RNDS2`: Two rounds of SHA-256
-- `SHA256MSG1/2`: Message schedule computation
-
-This eliminates the need for table lookups and reduces rounds to ~64 instructions.
 
 ## Testing
 
 ```bash
-make test
+# Run all tests
+./btcminer_test
+
+# Run specific test group
+./btcminer_test --sha256
+./btcminer_test --avx
+./btcminer_test --stratum
+./btcminer_test --stratum-v2
+./btcminer_test --gpu
+
+# With coverage
+./scripts/run_coverage.sh
+# Open build_coverage/coverage_html/index.html
 ```
 
-The test suite verifies:
-- SHA-256 correctness (NIST test vectors)
-- SHA-256d (double hash)
-- Bitcoin block header hashing
-- Midstate computation
-- Target comparison logic
-- Mining simulation with low difficulty
+## Web Interface
+
+Dashboard at `http://localhost:8080`:
+
+- Real-time hashrate and statistics
+- Live hashrate chart
+- Start/stop, pause/resume controls
+- Benchmark mode
+- Idle mining toggle
+- Settings panel
+- Log viewer
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/stats` | GET | Mining statistics |
+| `/api/settings` | GET/POST | Configuration |
+| `/api/control/start` | POST | Start mining |
+| `/api/control/stop` | POST | Stop mining |
+| `/api/control/pause` | POST | Pause mining |
+| `/api/control/resume` | POST | Resume mining |
+| `/api/benchmark` | GET/POST | Benchmark mode |
+| `/api/idle` | GET/POST | Idle mining control |
+| `/ws` | WebSocket | Real-time updates |
+
+## Requirements
+
+- C++17 compiler (GCC 7+ or Clang 5+)
+- x86-64 CPU
+- Linux (Ubuntu 20.04+ tested)
+- Optional: CUDA Toolkit (for NVIDIA GPU)
+- Optional: OpenCL SDK (for AMD/Intel GPU)
+
+## How It Works
+
+1. **Connect**: Establish Stratum connection to pool
+2. **Subscribe**: Receive extranonce and job notifications
+3. **Build Header**: Construct 80-byte block header
+4. **Compute Midstate**: SHA-256 state after first 64 bytes
+5. **Mine**: Iterate nonces, compute SHA-256d
+6. **Submit**: Send valid shares to pool
+
+### Optimization Techniques
+
+- **Midstate**: Pre-compute SHA-256 state for fixed header bytes
+- **SHA-NI**: Hardware SHA-256 instructions (2 rounds/instruction)
+- **AVX2/AVX512**: Process 8-16 nonces in parallel
+- **GPU**: Massive parallelism with thousands of threads
 
 ## Disclaimer
 
-**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** The current network difficulty requires approximately 10^23 hashes per block. Even at 1 GH/s, you would need billions of years on average to find a block.
+**Solo mining Bitcoin with a CPU is extremely unlikely to find a block.** Current network difficulty requires ~10^23 hashes per block. This miner is for:
 
-This miner is provided for:
 - Educational purposes
 - Testing and development
-- "Lottery ticket" mining (you never know!)
+- Lottery-style mining
 
 ## License
 
@@ -254,6 +262,6 @@ MIT License
 
 ## Acknowledgments
 
-- Inspired by [rieMiner](https://github.com/RiecoinTeam/rieMiner) architecture
-- SHA-NI implementation based on Intel's reference code
-- Stratum protocol based on [slush's specification](https://slushpool.com/help/stratum-protocol)
+- SHA-NI implementation based on Intel reference code
+- Stratum V1 based on slush's specification
+- Stratum V2 based on the SV2 specification

@@ -1,7 +1,11 @@
 # BTC Miner Configuration
 # Copy this file to btcminer.conf and edit as needed
 
-# Pool connection
+# ============================================
+# POOL CONNECTION
+# ============================================
+
+# Pool address (host:port)
 Pool = solo.ckpool.org:3333
 
 # Your Bitcoin address for payouts (REQUIRED)
@@ -10,11 +14,38 @@ PayoutAddress = bc1p3ce2z950wuruvpd50km5q8a9t2vtus94p3259qfq2yrxglt7ajxs8wjcjn
 # Pool password (optional, default: x)
 Password = x
 
-# Number of mining threads (0 = auto-detect all cores)
+# Stratum protocol version
+# v1 = JSON-based Stratum (default, widely supported)
+# v2 = Binary Stratum V2 (more efficient, requires pool support)
+Stratum = v1
+
+# ============================================
+# CPU MINING
+# ============================================
+
+# Number of CPU mining threads (0 = auto-detect all cores)
 Threads = 0
 
-# Stats reporting interval in seconds
-StatsInterval = 10
+# SIMD optimization level (auto-detected at compile time)
+# Options: auto, generic, sha-ni, avx2, avx512
+# SimdLevel = auto
+
+# ============================================
+# GPU MINING
+# ============================================
+
+# Enable GPU mining (requires CUDA or OpenCL build)
+EnableGPU = false
+
+# GPU devices to use (comma-separated, empty = all available)
+# GpuDevices = 0,1,2
+
+# GPU intensity (1-100, higher = more GPU utilization)
+# GpuIntensity = 80
+
+# ============================================
+# WEB INTERFACE
+# ============================================
 
 # Web interface port (0 to disable)
 WebPort = 8080
@@ -22,37 +53,37 @@ WebPort = 8080
 # Web files directory
 WebDir = web
 
-# Idle mining (screensaver mode)
+# ============================================
+# IDLE MINING (Screensaver Mode)
+# ============================================
+
 # Starts mining when user is idle for this many seconds (0 = disabled)
 # Works on native Linux (X11) and WSL2
 IdleTimeout = 0
 
-# Enable colored console output (default: true)
-# Use --no-color flag to disable from command line
+# ============================================
+# OUTPUT & LOGGING
+# ============================================
+
+# Stats reporting interval in seconds
+StatsInterval = 10
+
+# Enable colored console output
 Colors = true
 
 # Log file (leave empty to disable file logging)
-# All stats and events will be appended with timestamps
 LogFile = miner.log
 
-# System bell on share found (default: true)
-# Plays terminal bell sound when a share is found
+# System bell on share found
 SystemBell = true
 
-# Reconnection settings
+# ============================================
+# NETWORK
+# ============================================
+
 # Initial delay before reconnecting to pool (seconds)
 ReconnectDelay = 5
 
 # Maximum delay between reconnection attempts (seconds)
 # Uses exponential backoff up to this limit
 MaxReconnectDelay = 300
-
-# ============================================
-# FUTURE FEATURES (placeholders, not yet implemented)
-# ============================================
-
-# GPU mining support (not yet implemented)
-# EnableGPU = false
-
-# Stratum protocol version (not yet implemented)
-# Stratum = v1  # Options: v1, v2
