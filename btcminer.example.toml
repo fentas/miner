@@ -71,9 +71,14 @@ prune = 10000
 dbcache = 0
 
 # Enable AssumeUTXO for fast initial sync
-# Downloads ~7GB UTXO snapshot and syncs in minutes instead of days
+# Downloads ~9GB UTXO snapshot and syncs in minutes instead of days
 # Remaining history is verified in background after node is usable
 assumeutxo = false
+
+# Custom magnet URI for AssumeUTXO snapshot (optional)
+# Uses torrent for trustless download - verified by infohash
+# Default: magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat
+# assumeutxo_magnet = "magnet:?xt=urn:btih:..."
 
 # ============================================
 # STRATUM V2 (SRI Integration)

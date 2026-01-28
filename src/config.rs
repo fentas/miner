@@ -153,6 +153,9 @@ pub struct BitcoindConfig {
     /// Enable AssumeUTXO for fast initial sync (downloads UTXO snapshot)
     #[serde(default)]
     pub assumeutxo: bool,
+    /// Custom magnet URI for AssumeUTXO snapshot (optional, uses default if not set)
+    #[serde(default)]
+    pub assumeutxo_magnet: Option<String>,
 }
 
 fn default_host() -> String {
@@ -180,6 +183,7 @@ impl Default for BitcoindConfig {
             prune: default_prune(),
             dbcache: 0, // 0 = auto-calculate
             assumeutxo: false,
+            assumeutxo_magnet: None,
         }
     }
 }
@@ -719,6 +723,7 @@ mod tests {
         assert_eq!(bitcoind.prune, 10000);
         assert_eq!(bitcoind.dbcache, 0);
         assert!(!bitcoind.assumeutxo);
+        assert!(bitcoind.assumeutxo_magnet.is_none());
     }
 
     #[test]

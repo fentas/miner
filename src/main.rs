@@ -236,7 +236,8 @@ async fn run_solo_mode_with_tui(
     let mut bitcoind = BitcoindManager::new()
         .with_prune(cfg.bitcoind.prune)
         .with_dbcache(cfg.bitcoind.dbcache)
-        .with_assumeutxo(cfg.bitcoind.assumeutxo);
+        .with_assumeutxo(cfg.bitcoind.assumeutxo)
+        .with_assumeutxo_magnet(cfg.bitcoind.assumeutxo_magnet.clone());
 
     if cfg.bitcoind.managed {
         if !bitcoind.is_installed() {
@@ -691,7 +692,10 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Setup Bitcoin Core
     let mut bitcoind = BitcoindManager::new()
-        .with_prune(cfg.bitcoind.prune);
+        .with_prune(cfg.bitcoind.prune)
+        .with_dbcache(cfg.bitcoind.dbcache)
+        .with_assumeutxo(cfg.bitcoind.assumeutxo)
+        .with_assumeutxo_magnet(cfg.bitcoind.assumeutxo_magnet.clone());
 
     if cfg.bitcoind.managed {
         // Auto-manage Bitcoin Core

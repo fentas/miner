@@ -10,12 +10,10 @@ const DOWNLOAD_BASE_URL: &str = "https://bitcoincore.org/bin";
 
 // AssumeUTXO snapshot info (Bitcoin Core v28+)
 // The hash is verified by Bitcoin Core when loading via loadtxoutset RPC.
-// Alternative sources if primary fails:
-// - https://blog.lopp.net/bitcoin-node-sync-with-utxo-snapshots/
-// - Torrent: magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat
-// - Generate: bitcoin-cli dumptxoutset utxo-840000.dat
+// Using torrent for trustless download - verified by infohash + Bitcoin Core hash check.
+// Alternative: generate with bitcoin-cli dumptxoutset utxo-840000.dat
 const ASSUMEUTXO_HEIGHT: u64 = 840000;
-const ASSUMEUTXO_URL: &str = "https://utxo.download/utxo-840000.dat";
+const ASSUMEUTXO_MAGNET: &str = "magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat&tr=udp://tracker.bitcoin.sprovoost.nl:6969";
 
 /// Manages Bitcoin Core installation and lifecycle
 pub struct BitcoindManager {
@@ -26,6 +24,7 @@ pub struct BitcoindManager {
     prune_size: u32,
     dbcache: u32,
     assumeutxo: bool,
+    assumeutxo_magnet: Option<String>,
     rpc_user: String,
     rpc_password: String,
     rpc_port: u16,
@@ -67,6 +66,7 @@ impl BitcoindManager {
             prune_size: 10000,
             dbcache,
             assumeutxo: false,
+            assumeutxo_magnet: None,
             rpc_user: generate_random_string(16),
             rpc_password: generate_random_string(32),
             rpc_port: 8332,
@@ -116,6 +116,12 @@ impl BitcoindManager {
     /// Enable AssumeUTXO for fast initial sync
     pub fn with_assumeutxo(mut self, enabled: bool) -> Self {
         self.assumeutxo = enabled;
+        self
+    }
+
+    /// Set custom magnet URI for AssumeUTXO snapshot
+    pub fn with_assumeutxo_magnet(mut self, magnet: Option<String>) -> Self {
+        self.assumeutxo_magnet = magnet;
         self
     }
 
@@ -498,20 +504,33 @@ blockmaxweight=4000000
         self.data_dir.join("utxo-snapshot.dat")
     }
 
-    /// Download AssumeUTXO snapshot with progress callback
+    /// Download AssumeUTXO snapshot via BitTorrent with progress callback
     /// Callback receives (bytes_downloaded, total_bytes)
+    /// Uses torrent for trustless download - data is verified by infohash
     pub async fn download_assumeutxo_with_progress<F>(
         &self,
         progress_callback: F,
     ) -> Result<PathBuf, BitcoinError>
     where
-        F: Fn(u64, u64) + Send + Sync,
+        F: Fn(u64, u64) + Send + Sync + 'static,
     {
-        use futures_util::StreamExt;
-        use tokio::io::AsyncWriteExt;
+        let magnet = self.assumeutxo_magnet.as_deref().unwrap_or(ASSUMEUTXO_MAGNET);
+        self.download_assumeutxo_magnet_with_progress(magnet, progress_callback).await
+    }
 
-        let snapshot_path = self.data_dir.join("utxo-snapshot.dat");
+    /// Download AssumeUTXO snapshot from custom magnet URI
+    pub async fn download_assumeutxo_magnet_with_progress<F>(
+        &self,
+        magnet: &str,
+        progress_callback: F,
+    ) -> Result<PathBuf, BitcoinError>
+    where
+        F: Fn(u64, u64) + Send + Sync + 'static,
+    {
+        use gosh_dl::{DownloadEngine, EngineConfig, DownloadOptions, DownloadEvent};
 
+        // Check for existing snapshot (any utxo-*.dat file)
+        let snapshot_path = self.data_dir.join("utxo-840000.dat");
         if snapshot_path.exists() {
             info!("AssumeUTXO snapshot already downloaded");
             return Ok(snapshot_path);
@@ -520,59 +539,77 @@ blockmaxweight=4000000
         // Ensure data directory exists
         std::fs::create_dir_all(&self.data_dir)?;
 
-        info!("Downloading AssumeUTXO snapshot (height {})...", ASSUMEUTXO_HEIGHT);
-        info!("Source: {}", ASSUMEUTXO_URL);
-        info!("This is a ~7GB file and may take a while");
+        info!("Downloading AssumeUTXO snapshot (height {}) via BitTorrent...", ASSUMEUTXO_HEIGHT);
+        info!("Magnet: {}", magnet);
+        info!("This is a ~9GB file - torrent provides trustless verification via infohash");
 
-        let client = reqwest::Client::new();
-        let response = client.get(ASSUMEUTXO_URL)
-            .send()
+        // Configure download engine
+        let config = EngineConfig {
+            download_dir: self.data_dir.clone(),
+            ..Default::default()
+        };
+
+        let engine = DownloadEngine::new(config)
             .await
-            .map_err(|e| BitcoinError::DownloadError(e.to_string()))?;
+            .map_err(|e| BitcoinError::DownloadError(format!("Failed to create download engine: {}", e)))?;
 
-        if !response.status().is_success() {
-            return Err(BitcoinError::DownloadError(format!(
-                "HTTP {}: Failed to download snapshot. \
-                You can download manually from: https://blog.lopp.net/bitcoin-node-sync-with-utxo-snapshots/ \
-                or via torrent: magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat \
-                Then place it at: {:?}",
-                response.status(),
-                self.assumeutxo_snapshot_path()
-            )));
-        }
-
-        // Get content length for progress
-        let total_size = response.content_length().unwrap_or(7_500_000_000); // ~7GB estimate
-
-        // Open file for streaming write
-        let temp_path = self.data_dir.join("utxo-snapshot.dat.tmp");
-        let mut file = tokio::fs::File::create(&temp_path)
+        // Add magnet link
+        let opts = DownloadOptions::default();
+        let download_id = engine.add_magnet(magnet, opts)
             .await
-            .map_err(|e| BitcoinError::IoError(e))?;
+            .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?;
 
-        let mut downloaded: u64 = 0;
-        let mut stream = response.bytes_stream();
+        // Subscribe to events for progress
+        let mut events = engine.subscribe();
 
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
-                    file.write_all(&chunk).await.map_err(BitcoinError::IoError)?;
-                    downloaded += chunk.len() as u64;
-                    progress_callback(downloaded, total_size);
+        // Track progress
+        let mut last_downloaded: u64 = 0;
+        let mut total_size: u64 = 9_772_098_907; // Known size estimate
+
+        loop {
+            match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
+                Ok(Ok(event)) => {
+                    match event {
+                        DownloadEvent::Progress { id, progress } if id == download_id => {
+                            if let Some(total) = progress.total_size {
+                                total_size = total;
+                            }
+                            if progress.completed_size != last_downloaded {
+                                last_downloaded = progress.completed_size;
+                                progress_callback(last_downloaded, total_size);
+                            }
+                        }
+                        DownloadEvent::Completed { id } if id == download_id => {
+                            info!("AssumeUTXO snapshot download completed");
+                            break;
+                        }
+                        DownloadEvent::Failed { id, error, .. } if id == download_id => {
+                            return Err(BitcoinError::DownloadError(format!(
+                                "Torrent download failed: {}. You can download manually from: \
+                                https://blog.lopp.net/bitcoin-node-sync-with-utxo-snapshots/ \
+                                or generate with: bitcoin-cli dumptxoutset utxo-840000.dat",
+                                error
+                            )));
+                        }
+                        _ => {}
+                    }
                 }
-                Err(e) => {
-                    return Err(BitcoinError::DownloadError(e.to_string()));
+                Ok(Err(_)) => {
+                    // Channel closed, check if download completed
+                    break;
+                }
+                Err(_) => {
+                    // Timeout - continue waiting
                 }
             }
         }
 
-        file.flush().await.map_err(BitcoinError::IoError)?;
-        drop(file);
-
-        // Rename temp file to final name
-        tokio::fs::rename(&temp_path, &snapshot_path)
-            .await
-            .map_err(BitcoinError::IoError)?;
+        // Verify file exists
+        if !snapshot_path.exists() {
+            return Err(BitcoinError::DownloadError(
+                "Download completed but file not found".into()
+            ));
+        }
 
         info!("AssumeUTXO snapshot downloaded to {:?}", snapshot_path);
         Ok(snapshot_path)
