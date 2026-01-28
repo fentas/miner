@@ -1,0 +1,448 @@
+// Test suite for BTC Miner
+// Compile: g++ -std=c++17 -O3 -msha -msse4.1 -DHAVE_SHA_NI -o test_miner src/test.cpp
+
+#include "sha256.hpp"
+
+#include <iostream>
+#include <iomanip>
+#include <cstring>
+#include <vector>
+#include <string>
+#include <chrono>
+
+namespace {
+
+int tests_passed = 0;
+int tests_failed = 0;
+
+void print_hex(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]);
+    }
+    std::cout << std::dec;
+}
+
+std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
+    std::vector<uint8_t> bytes;
+    for (size_t i = 0; i < hex.length(); i += 2) {
+        bytes.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+    }
+    return bytes;
+}
+
+std::string bytes_to_hex(const uint8_t* data, size_t len) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < len; i++) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]);
+    }
+    return oss.str();
+}
+
+bool compare_hash(const uint8_t* hash, const std::string& expected_hex) {
+    auto expected = hex_to_bytes(expected_hex);
+    return std::memcmp(hash, expected.data(), 32) == 0;
+}
+
+void test_result(const std::string& name, bool passed) {
+    if (passed) {
+        std::cout << "[PASS] " << name << std::endl;
+        tests_passed++;
+    } else {
+        std::cout << "[FAIL] " << name << std::endl;
+        tests_failed++;
+    }
+}
+
+// ============================================================================
+// SHA-256 Single Block Tests (NIST Test Vectors)
+// ============================================================================
+
+void test_sha256_empty() {
+    // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    uint32_t state[8];
+    std::memcpy(state, sha256::H_INIT.data(), 32);
+
+    uint8_t block[64] = {0};
+    block[0] = 0x80;  // Padding for empty message
+    // Length = 0 bits, already zeros
+
+    sha256::transform(state, block);
+
+    uint8_t hash[32];
+    for (int i = 0; i < 8; i++) {
+        hash[i*4 + 0] = (state[i] >> 24) & 0xff;
+        hash[i*4 + 1] = (state[i] >> 16) & 0xff;
+        hash[i*4 + 2] = (state[i] >> 8) & 0xff;
+        hash[i*4 + 3] = state[i] & 0xff;
+    }
+
+    test_result("SHA-256 empty string",
+                compare_hash(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+}
+
+void test_sha256_abc() {
+    // SHA-256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+    uint32_t state[8];
+    std::memcpy(state, sha256::H_INIT.data(), 32);
+
+    uint8_t block[64] = {0};
+    block[0] = 'a';
+    block[1] = 'b';
+    block[2] = 'c';
+    block[3] = 0x80;  // Padding
+    // Length = 24 bits = 0x18
+    block[63] = 0x18;
+
+    sha256::transform(state, block);
+
+    uint8_t hash[32];
+    for (int i = 0; i < 8; i++) {
+        hash[i*4 + 0] = (state[i] >> 24) & 0xff;
+        hash[i*4 + 1] = (state[i] >> 16) & 0xff;
+        hash[i*4 + 2] = (state[i] >> 8) & 0xff;
+        hash[i*4 + 3] = state[i] & 0xff;
+    }
+
+    test_result("SHA-256 'abc'",
+                compare_hash(hash, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+}
+
+// ============================================================================
+// SHA-256d Tests (Double SHA-256 as used in Bitcoin)
+// ============================================================================
+
+void test_sha256d() {
+    // SHA-256d("hello") = 9595c9df90075148eb06860365df33584b75bff782a510c6cd4883a419833d50
+    // First: SHA-256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+    // Second: SHA-256(first) = 9595c9df...
+
+    const char* msg = "hello";
+    size_t len = 5;
+
+    // Manual SHA-256d
+    uint32_t state[8];
+    std::memcpy(state, sha256::H_INIT.data(), 32);
+
+    uint8_t block[64] = {0};
+    std::memcpy(block, msg, len);
+    block[len] = 0x80;
+    block[63] = len * 8;
+
+    sha256::transform(state, block);
+
+    uint8_t first_hash[32];
+    for (int i = 0; i < 8; i++) {
+        first_hash[i*4 + 0] = (state[i] >> 24) & 0xff;
+        first_hash[i*4 + 1] = (state[i] >> 16) & 0xff;
+        first_hash[i*4 + 2] = (state[i] >> 8) & 0xff;
+        first_hash[i*4 + 3] = state[i] & 0xff;
+    }
+
+    // Second hash
+    std::memcpy(state, sha256::H_INIT.data(), 32);
+    std::memset(block, 0, 64);
+    std::memcpy(block, first_hash, 32);
+    block[32] = 0x80;
+    block[62] = 0x01;  // 256 bits = 0x100
+    block[63] = 0x00;
+
+    sha256::transform(state, block);
+
+    uint8_t hash[32];
+    for (int i = 0; i < 8; i++) {
+        hash[i*4 + 0] = (state[i] >> 24) & 0xff;
+        hash[i*4 + 1] = (state[i] >> 16) & 0xff;
+        hash[i*4 + 2] = (state[i] >> 8) & 0xff;
+        hash[i*4 + 3] = state[i] & 0xff;
+    }
+
+    test_result("SHA-256d 'hello'",
+                compare_hash(hash, "9595c9df90075148eb06860365df33584b75bff782a510c6cd4883a419833d50"));
+}
+
+// ============================================================================
+// Bitcoin Block Header Test (Genesis Block)
+// ============================================================================
+
+void test_genesis_block() {
+    // Bitcoin Genesis Block (Block 0)
+    // Raw header hex (from Bitcoin):
+    // 0100000000000000000000000000000000000000000000000000000000000000
+    // 000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa
+    // 4b1e5e4a29ab5f49ffff001d1dac2b7c
+
+    // Genesis block header as raw bytes
+    auto header_hex = hex_to_bytes(
+        "0100000000000000000000000000000000000000000000000000000000000000"
+        "000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa"
+        "4b1e5e4a29ab5f49ffff001d1dac2b7c"
+    );
+
+    uint8_t header[80];
+    std::memcpy(header, header_hex.data(), 80);
+
+    uint8_t hash[32];
+    sha256::sha256d_80(header, hash);
+
+    std::cout << "  Genesis block hash: ";
+    for (int i = 31; i >= 0; i--) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
+    std::cout << std::dec << std::endl;
+
+    // Genesis hash starts with many zeros - check the leading bytes
+    // Expected: 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f
+    // In little-endian storage: hash[31..26] should be 00 00 00 00 00 19
+    bool valid = (hash[31] == 0x00 && hash[30] == 0x00 && hash[29] == 0x00 &&
+                  hash[28] == 0x00);
+
+    test_result("Genesis block hash (leading zeros)", valid);
+}
+
+// ============================================================================
+// Midstate Test
+// ============================================================================
+
+void test_midstate() {
+    // Test that midstate computation produces correct results
+    uint8_t header[80];
+    std::memset(header, 0x42, 80);  // Fill with test pattern
+
+    // Clear nonce area for first test
+    header[76] = 0x00;
+    header[77] = 0x00;
+    header[78] = 0x00;
+    header[79] = 0x00;
+
+    sha256::Midstate ms;
+    sha256::compute_midstate(header, ms);
+
+    // Test with nonce = 0
+    uint8_t hash1[32];
+    sha256::sha256d_midstate(ms, 0, hash1);
+
+    // Also compute full hash for comparison
+    uint8_t hash2[32];
+    sha256::sha256d_80(header, hash2);
+
+    test_result("Midstate computation (nonce=0)", std::memcmp(hash1, hash2, 32) == 0);
+
+    // Test with different nonce
+    header[76] = 0x12;
+    header[77] = 0x34;
+    header[78] = 0x56;
+    header[79] = 0x78;
+
+    sha256::sha256d_80(header, hash2);
+    sha256::sha256d_midstate(ms, 0x78563412, hash1);
+
+    test_result("Midstate computation (nonce=0x78563412)", std::memcmp(hash1, hash2, 32) == 0);
+}
+
+// ============================================================================
+// Target Comparison Test
+// ============================================================================
+
+void test_target_comparison() {
+    // Test that hash comparison works correctly
+    uint8_t hash[32] = {0};
+    uint8_t target[32] = {0};
+
+    // Hash < target should be valid
+    hash[31] = 0x00;
+    hash[30] = 0x00;
+    hash[29] = 0x00;
+    hash[28] = 0x01;
+
+    target[31] = 0x00;
+    target[30] = 0x00;
+    target[29] = 0x00;
+    target[28] = 0x02;
+
+    // Compare (hash should be less than target)
+    bool valid = true;
+    for (int i = 31; i >= 0; i--) {
+        if (hash[i] < target[i]) break;
+        if (hash[i] > target[i]) { valid = false; break; }
+    }
+
+    test_result("Target comparison (hash < target)", valid);
+
+    // Hash > target should be invalid
+    hash[28] = 0x03;
+    valid = true;
+    for (int i = 31; i >= 0; i--) {
+        if (hash[i] < target[i]) break;
+        if (hash[i] > target[i]) { valid = false; break; }
+    }
+
+    test_result("Target comparison (hash > target)", !valid);
+}
+
+// ============================================================================
+// Mining Simulation Test (Low Difficulty)
+// ============================================================================
+
+void test_mining_simulation() {
+    std::cout << "\n[TEST] Mining simulation with low difficulty target...\n";
+
+    // Create a simple block header
+    uint8_t header[80];
+    std::memset(header, 0, 80);
+
+    // Set version
+    header[0] = 0x01;
+
+    // Set a simple merkle root
+    for (int i = 36; i < 68; i++) {
+        header[i] = static_cast<uint8_t>(i);
+    }
+
+    // Set time
+    header[68] = 0x12;
+    header[69] = 0x34;
+    header[70] = 0x56;
+    header[71] = 0x78;
+
+    // Set bits (low difficulty for testing - target starts with 0x00000fff...)
+    header[72] = 0xff;
+    header[73] = 0xff;
+    header[74] = 0x0f;
+    header[75] = 0x20;  // Exponent 0x20 = 32, mantissa 0x0fffff
+
+    // Compute midstate
+    sha256::Midstate ms;
+    sha256::compute_midstate(header, ms);
+
+    // Low difficulty target (starts with at least 2 zero bytes)
+    uint8_t target[32] = {0};
+    target[29] = 0x0f;
+    target[28] = 0xff;
+    target[27] = 0xff;
+
+    // Try to find a valid nonce
+    uint8_t hash[32];
+    uint32_t nonce = 0;
+    bool found = false;
+
+    auto start = std::chrono::steady_clock::now();
+
+    for (uint32_t i = 0; i < 10000000 && !found; i++) {
+        sha256::sha256d_midstate(ms, i, hash);
+
+        // Check if hash meets target (simplified: just check leading zeros)
+        if (hash[31] == 0 && hash[30] == 0) {
+            nonce = i;
+            found = true;
+        }
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration<double>(end - start).count();
+
+    if (found) {
+        std::cout << "  Found valid nonce: " << nonce << " in " << std::fixed
+                  << std::setprecision(3) << elapsed << "s\n";
+        std::cout << "  Hash: ";
+        for (int i = 31; i >= 0; i--) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0')
+                      << static_cast<int>(hash[i]);
+        }
+        std::cout << std::dec << std::endl;
+
+        // Verify by recomputing
+        header[76] = nonce & 0xff;
+        header[77] = (nonce >> 8) & 0xff;
+        header[78] = (nonce >> 16) & 0xff;
+        header[79] = (nonce >> 24) & 0xff;
+
+        uint8_t verify_hash[32];
+        sha256::sha256d_80(header, verify_hash);
+
+        test_result("Mining simulation - found valid hash",
+                    std::memcmp(hash, verify_hash, 32) == 0);
+    } else {
+        test_result("Mining simulation - found valid hash", false);
+    }
+}
+
+// ============================================================================
+// Benchmark
+// ============================================================================
+
+void benchmark_sha256() {
+    std::cout << "\n[BENCHMARK] SHA-256d performance...\n";
+
+    uint8_t header[80];
+    std::memset(header, 0x42, 80);
+
+    sha256::Midstate ms;
+    sha256::compute_midstate(header, ms);
+
+    uint8_t hash[32];
+    const uint32_t iterations = 1000000;
+
+    auto start = std::chrono::steady_clock::now();
+
+    for (uint32_t i = 0; i < iterations; i++) {
+        sha256::sha256d_midstate(ms, i, hash);
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration<double>(end - start).count();
+
+    double hashrate = iterations / elapsed;
+
+    std::cout << "  " << iterations << " hashes in " << std::fixed
+              << std::setprecision(3) << elapsed << "s\n";
+    std::cout << "  Hashrate: " << std::fixed << std::setprecision(2);
+
+    if (hashrate >= 1e6) {
+        std::cout << (hashrate / 1e6) << " MH/s";
+    } else if (hashrate >= 1e3) {
+        std::cout << (hashrate / 1e3) << " KH/s";
+    } else {
+        std::cout << hashrate << " H/s";
+    }
+    std::cout << " (single thread)\n";
+
+#ifdef HAVE_SHA_NI
+    std::cout << "  SHA-NI: enabled\n";
+#else
+    std::cout << "  SHA-NI: disabled (using generic implementation)\n";
+#endif
+}
+
+} // anonymous namespace
+
+int main() {
+    std::cout << "╔══════════════════════════════════════════════════════════╗\n"
+              << "║              BTC Miner Test Suite                        ║\n"
+              << "╚══════════════════════════════════════════════════════════╝\n\n";
+
+    std::cout << "[TEST GROUP] SHA-256 Basic Tests\n";
+    test_sha256_empty();
+    test_sha256_abc();
+
+    std::cout << "\n[TEST GROUP] SHA-256d (Double SHA-256)\n";
+    test_sha256d();
+
+    std::cout << "\n[TEST GROUP] Bitcoin Block Tests\n";
+    test_genesis_block();
+
+    std::cout << "\n[TEST GROUP] Midstate Tests\n";
+    test_midstate();
+
+    std::cout << "\n[TEST GROUP] Target Comparison\n";
+    test_target_comparison();
+
+    test_mining_simulation();
+
+    benchmark_sha256();
+
+    std::cout << "\n══════════════════════════════════════════════════════════\n";
+    std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed\n";
+    std::cout << "══════════════════════════════════════════════════════════\n";
+
+    return tests_failed > 0 ? 1 : 0;
+}

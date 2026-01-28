@@ -1,0 +1,23 @@
+# Build artifacts
+btcminer
+test_miner
+*.o
+*.a
+
+# Build directories
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Config with sensitive data (use .example)
+btcminer.conf
+
+# OS
+.DS_Store
+Thumbs.db

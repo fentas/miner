@@ -1,0 +1,17 @@
+# BTC Miner Configuration
+# Copy this file to btcminer.conf and edit as needed
+
+# Pool connection
+Pool = solo.ckpool.org:3333
+
+# Your Bitcoin address for payouts (REQUIRED)
+PayoutAddress = bc1p3ce2z950wuruvpd50km5q8a9t2vtus94p3259qfq2yrxglt7ajxs8wjcjn
+
+# Pool password (optional, default: x)
+Password = x
+
+# Number of mining threads (0 = auto-detect all cores)
+Threads = 0
+
+# Stats reporting interval in seconds
+StatsInterval = 10
