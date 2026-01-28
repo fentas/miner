@@ -76,6 +76,24 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
         Span::raw("")
     };
 
+    // GPU info
+    let gpu_enabled = state.is_gpu_enabled();
+    let gpu_devices = state.get_gpu_devices();
+    let gpu_text = if gpu_enabled && !gpu_devices.is_empty() {
+        format!("{} GPU(s)", gpu_devices.len())
+    } else if gpu_enabled {
+        "Enabled (no devices)".to_string()
+    } else {
+        "Disabled".to_string()
+    };
+    let gpu_color = if gpu_enabled && !gpu_devices.is_empty() {
+        Color::Green
+    } else if gpu_enabled {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
     let status_lines = vec![
         Line::from(vec![
             Span::styled(
@@ -92,6 +110,8 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
         Line::from(vec![
             Span::raw("SIMD: "),
             Span::styled(&simd, Style::default().fg(Color::Cyan)),
+            Span::raw("  GPU: "),
+            Span::styled(gpu_text, Style::default().fg(gpu_color)),
         ]),
         Line::from(vec![
             Span::raw("Workers: "),
@@ -131,22 +151,47 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
         .split(area);
 
     // Hashrate display
-    let hashrate = state.get_hashrate();
-    let hr_str = format_hashrate(hashrate);
+    let cpu_hashrate = state.get_hashrate();
+    let gpu_hashrate = state.get_gpu_hashrate();
+    let total_hashrate = cpu_hashrate + gpu_hashrate;
+    let hr_str = format_hashrate(total_hashrate);
+
     let hashrate_block = Block::default()
         .title(" Hashrate ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    let hashrate_text = Paragraph::new(Line::from(vec![
-        Span::styled(
-            hr_str,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]))
-    .alignment(Alignment::Center)
-    .block(hashrate_block);
+
+    // Show CPU/GPU breakdown if GPU is active
+    let hashrate_lines = if gpu_hashrate > 0.0 {
+        vec![
+            Line::from(vec![
+                Span::styled(
+                    hr_str,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(format!("CPU: {}", format_hashrate(cpu_hashrate)), Style::default().fg(Color::DarkGray)),
+                Span::raw(" | "),
+                Span::styled(format!("GPU: {}", format_hashrate(gpu_hashrate)), Style::default().fg(Color::Magenta)),
+            ]),
+        ]
+    } else {
+        vec![Line::from(vec![
+            Span::styled(
+                hr_str,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])]
+    };
+
+    let hashrate_text = Paragraph::new(hashrate_lines)
+        .alignment(Alignment::Center)
+        .block(hashrate_block);
     f.render_widget(hashrate_text, chunks[0]);
 
     // Hashrate sparkline

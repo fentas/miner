@@ -113,6 +113,23 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
         tui_state.set_pool_address(&addr);
     }
 
+    // Set GPU info
+    tui_state.set_gpu_enabled(cfg.mining.enable_gpu);
+    if cfg.mining.enable_gpu {
+        let gpu_manager = gpu::GpuManager::new();
+        let devices: Vec<String> = gpu_manager.devices()
+            .iter()
+            .map(|d| d.name.clone())
+            .collect();
+        if !devices.is_empty() {
+            tui_state.log_info(format!("GPU: {} device(s) detected", devices.len()));
+            for (i, name) in devices.iter().enumerate() {
+                tui_state.log_info(format!("  GPU {}: {}", i, name));
+            }
+        }
+        tui_state.set_gpu_devices(devices);
+    }
+
     tui_state.log_info(format!("Loading configuration from btcminer.toml"));
     tui_state.log_info(format!("Mining with {} CPU threads", cfg.effective_threads()));
     tui_state.log_info(format!("SIMD level: {}", simd_level.name()));

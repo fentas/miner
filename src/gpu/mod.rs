@@ -7,7 +7,7 @@
 mod manager;
 mod opencl;
 
-pub use manager::GpuDevice;
+pub use manager::{GpuDevice, GpuManager};
 // These types are part of the public API but only used internally when GPU features are enabled
 #[allow(unused_imports)]
 pub use manager::{GpuMiner, MiningResult, GpuBackend};

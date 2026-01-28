@@ -82,6 +82,11 @@ pub struct TuiState {
     simd_level: RwLock<String>,
     worker_count: AtomicUsize,
 
+    // GPU info
+    gpu_enabled: AtomicBool,
+    gpu_devices: RwLock<Vec<String>>,
+    gpu_hashrate: AtomicU64,
+
     // Status
     pub paused: AtomicBool,
     connected: AtomicBool,
@@ -115,6 +120,9 @@ impl TuiState {
             mode: RwLock::new("Initializing".to_string()),
             simd_level: RwLock::new("Unknown".to_string()),
             worker_count: AtomicUsize::new(0),
+            gpu_enabled: AtomicBool::new(false),
+            gpu_devices: RwLock::new(Vec::new()),
+            gpu_hashrate: AtomicU64::new(0),
             paused: AtomicBool::new(false),
             connected: AtomicBool::new(false),
             syncing: AtomicBool::new(false),
@@ -191,6 +199,20 @@ impl TuiState {
         self.worker_count.store(count, Ordering::Relaxed);
     }
 
+    pub fn set_gpu_enabled(&self, enabled: bool) {
+        self.gpu_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn set_gpu_devices(&self, devices: Vec<String>) {
+        if let Ok(mut d) = self.gpu_devices.write() {
+            *d = devices;
+        }
+    }
+
+    pub fn set_gpu_hashrate(&self, rate: f64) {
+        self.gpu_hashrate.store(rate.to_bits(), Ordering::Relaxed);
+    }
+
     pub fn set_connected(&self, connected: bool) {
         self.connected.store(connected, Ordering::Relaxed);
     }
@@ -251,6 +273,18 @@ impl TuiState {
 
     pub fn get_worker_count(&self) -> usize {
         self.worker_count.load(Ordering::Relaxed)
+    }
+
+    pub fn is_gpu_enabled(&self) -> bool {
+        self.gpu_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn get_gpu_devices(&self) -> Vec<String> {
+        self.gpu_devices.read().map(|d| d.clone()).unwrap_or_default()
+    }
+
+    pub fn get_gpu_hashrate(&self) -> f64 {
+        f64::from_bits(self.gpu_hashrate.load(Ordering::Relaxed))
     }
 
     pub fn is_paused(&self) -> bool {
