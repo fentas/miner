@@ -622,7 +622,7 @@ fn get_platform() -> &'static str {
     return "arm64-apple-darwin";
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return "x86_64-w64-mingw32";
+    return "win64";
 
     #[cfg(not(any(
         all(target_os = "linux", target_arch = "x86_64"),

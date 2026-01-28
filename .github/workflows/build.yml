@@ -64,14 +64,35 @@ jobs:
           name: btcminer-linux-x64${{ matrix.artifact-suffix }}
           path: target/release/btcminer
 
-  # Build on Windows
+  # Build on Windows (with and without OpenCL)
   build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            features: ""
+            artifact-suffix: ""
+          - name: opencl
+            features: "--features opencl"
+            artifact-suffix: "-opencl"
+
     runs-on: windows-latest
-    name: Windows
+    name: Windows (${{ matrix.name }})
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install OpenCL SDK (for GPU build)
+        if: matrix.name == 'opencl'
+        run: |
+          # Download and install Intel OpenCL SDK
+          Invoke-WebRequest -Uri "https://github.com/intel/llvm/releases/download/2024-WW14/win-oclcpuexp-2024.17.3.0.09_rel.zip" -OutFile "opencl-sdk.zip"
+          Expand-Archive -Path "opencl-sdk.zip" -DestinationPath "opencl-sdk"
+          # Set environment variables for OpenCL
+          echo "OPENCL_ROOT=${{ github.workspace }}/opencl-sdk" >> $env:GITHUB_ENV
+          echo "${{ github.workspace }}/opencl-sdk" >> $env:GITHUB_PATH
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -79,18 +100,18 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          key: windows
+          key: windows-${{ matrix.name }}
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release ${{ matrix.features }}
 
       - name: Run tests
-        run: cargo test --release
+        run: cargo test --release ${{ matrix.features }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: btcminer-windows-x64
+          name: btcminer-windows-x64${{ matrix.artifact-suffix }}
           path: target/release/btcminer.exe
 
   # Build on macOS
@@ -135,10 +156,11 @@ jobs:
           name: btcminer-${{ matrix.name }}
           path: target/${{ matrix.target }}/release/btcminer
 
-  # Release job - builds all variants for tagged releases
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-linux, build-windows, build-macos]
+  # OpenCL builds for releases (cargo-dist handles standard releases via release.yml)
+  # This job creates GPU-enabled variants that complement the cargo-dist releases
+  release-opencl:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,65 +169,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download OpenCL artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Package releases
+      - name: Package OpenCL releases
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
 
-          # Package Linux version
-          mkdir -p package-linux
-          cp artifacts/btcminer-linux-x64/btcminer package-linux/
-          chmod +x package-linux/btcminer
-          cp btcminer.example.toml package-linux/btcminer.toml.example
-          cp -r web package-linux/
-          cp README.md LICENSE package-linux/ 2>/dev/null || true
-          cd package-linux && tar -czvf ../btcminer-${VERSION}-linux-x64.tar.gz . && cd ..
+          # Function to create archive
+          create_archive() {
+            local name=$1
+            local binary=$2
+            local ext=$3
 
-          # Package Linux OpenCL version
-          mkdir -p package-linux-opencl
-          cp artifacts/btcminer-linux-x64-opencl/btcminer package-linux-opencl/
-          chmod +x package-linux-opencl/btcminer
-          cp btcminer.example.toml package-linux-opencl/btcminer.toml.example
-          cp -r web package-linux-opencl/
-          cp README.md LICENSE package-linux-opencl/ 2>/dev/null || true
-          cd package-linux-opencl && tar -czvf ../btcminer-${VERSION}-linux-x64-opencl.tar.gz . && cd ..
+            mkdir -p "package-${name}"
+            cp "${binary}" "package-${name}/"
+            cp btcminer.example.toml "package-${name}/btcminer.toml.example"
+            cp -r web "package-${name}/"
+            cp README.md LICENSE "package-${name}/" 2>/dev/null || true
 
-          # Package Windows version
-          mkdir -p package-windows
-          cp artifacts/btcminer-windows-x64/btcminer.exe package-windows/
-          cp btcminer.example.toml package-windows/btcminer.toml.example
-          cp -r web package-windows/
-          cp README.md LICENSE package-windows/ 2>/dev/null || true
-          cd package-windows && zip -r ../btcminer-${VERSION}-windows-x64.zip . && cd ..
+            if [ "$ext" = "zip" ]; then
+              cd "package-${name}" && zip -r "../btcminer-${VERSION}-${name}.zip" . && cd ..
+            else
+              chmod +x "package-${name}/"* 2>/dev/null || true
+              cd "package-${name}" && tar -czvf "../btcminer-${VERSION}-${name}.tar.gz" . && cd ..
+            fi
+          }
 
-          # Package macOS x64 version
-          mkdir -p package-macos-x64
-          cp artifacts/btcminer-macos-x64/btcminer package-macos-x64/
-          chmod +x package-macos-x64/btcminer
-          cp btcminer.example.toml package-macos-x64/btcminer.toml.example
-          cp -r web package-macos-x64/
-          cp README.md LICENSE package-macos-x64/ 2>/dev/null || true
-          cd package-macos-x64 && tar -czvf ../btcminer-${VERSION}-macos-x64.tar.gz . && cd ..
+          # OpenCL builds only (standard builds handled by cargo-dist)
+          create_archive "linux-x64-opencl" "artifacts/btcminer-linux-x64-opencl/btcminer" "tar.gz"
+          create_archive "windows-x64-opencl" "artifacts/btcminer-windows-x64-opencl/btcminer.exe" "zip"
 
-          # Package macOS ARM64 version
-          mkdir -p package-macos-arm64
-          cp artifacts/btcminer-macos-arm64/btcminer package-macos-arm64/
-          chmod +x package-macos-arm64/btcminer
-          cp btcminer.example.toml package-macos-arm64/btcminer.toml.example
-          cp -r web package-macos-arm64/
-          cp README.md LICENSE package-macos-arm64/ 2>/dev/null || true
-          cd package-macos-arm64 && tar -czvf ../btcminer-${VERSION}-macos-arm64.tar.gz . && cd ..
-
-      - name: Create Release
+      - name: Upload OpenCL releases to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            btcminer-*.tar.gz
-            btcminer-*.zip
-          generate_release_notes: true
+            btcminer-*-opencl.tar.gz
+            btcminer-*-opencl.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

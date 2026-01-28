@@ -65,15 +65,30 @@ copy btcminer.example.toml btcminer.toml
 .\target\release\btcminer.exe
 ```
 
+### One-Line Install
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fentas/miner/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/fentas/miner/main/install.ps1 | iex
+```
+
 ### Pre-built Binaries
 
 Download from [Releases](https://github.com/fentas/miner/releases):
 
-- `btcminer-*-linux-x64.tar.gz` - Linux (x86_64)
-- `btcminer-*-linux-x64-opencl.tar.gz` - Linux with GPU support
-- `btcminer-*-windows-x64.zip` - Windows (x86_64)
-- `btcminer-*-macos-x64.tar.gz` - macOS Intel
-- `btcminer-*-macos-arm64.tar.gz` - macOS Apple Silicon
+| Platform    | Standard                        | GPU (OpenCL)                          |
+| ----------- | ------------------------------- | ------------------------------------- |
+| Linux x64   | `btcminer-*-linux-x64.tar.gz`   | `btcminer-*-linux-x64-opencl.tar.gz`  |
+| Windows x64 | `btcminer-*-windows-x64.zip`    | `btcminer-*-windows-x64-opencl.zip`   |
+| macOS Intel | `btcminer-*-macos-x64.tar.gz`   | -                                     |
+| macOS ARM   | `btcminer-*-macos-arm64.tar.gz` | -                                     |
 
 &nbsp;
 
@@ -159,7 +174,7 @@ assumeutxo = true      # Fast sync in minutes instead of days
 ┌─────────────┐    getblocktemplate    ┌───────────────┐
 │             │ ◄───────────────────── │               │
 │  btcminer   │                        │  Bitcoin Core │
-│             │ ────────────────────► │               │
+│             │ ─────────────────────► │               │
 └─────────────┘     submitblock        └───────┬───────┘
                                                │
                                                ▼
