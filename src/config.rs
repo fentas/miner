@@ -227,6 +227,15 @@ impl Default for WebConfig {
     }
 }
 
+/// Log output format
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 /// Logging configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LoggingConfig {
@@ -240,6 +249,12 @@ pub struct LoggingConfig {
     pub level: String,
     #[serde(default = "default_true")]
     pub system_bell: bool,
+    /// Enable TUI dashboard (disable with no_hud = true)
+    #[serde(default = "default_true")]
+    pub hud: bool,
+    /// Log output format (text or json)
+    #[serde(default)]
+    pub format: LogFormat,
 }
 
 fn default_stats_interval() -> u32 {
@@ -258,6 +273,8 @@ impl Default for LoggingConfig {
             file: None,
             level: default_log_level(),
             system_bell: true,
+            hud: true,
+            format: LogFormat::Text,
         }
     }
 }
@@ -444,5 +461,68 @@ mod tests {
         "#;
         let config: Config = toml::from_str(toml_content).unwrap();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_log_format_default() {
+        let logging = LoggingConfig::default();
+        assert_eq!(logging.format, LogFormat::Text);
+        assert!(logging.hud);
+    }
+
+    #[test]
+    fn test_log_format_json() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [logging]
+            format = "json"
+            hud = false
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.logging.format, LogFormat::Json);
+        assert!(!config.logging.hud);
+    }
+
+    #[test]
+    fn test_log_format_text_explicit() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [logging]
+            format = "text"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.logging.format, LogFormat::Text);
+    }
+
+    #[test]
+    fn test_idle_config_default() {
+        let idle = IdleConfig::default();
+        assert!(!idle.enabled);
+        assert_eq!(idle.timeout, 900);
+        assert!(idle.pause_on_active);
+    }
+
+    #[test]
+    fn test_idle_config_custom() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [idle]
+            enabled = true
+            timeout = 300
+            pause_on_active = false
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.idle.enabled);
+        assert_eq!(config.idle.timeout, 300);
+        assert!(!config.idle.pause_on_active);
     }
 }
