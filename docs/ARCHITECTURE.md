@@ -272,11 +272,29 @@ struct Stats {
 
 ### 6. Configuration (`config.hpp`)
 
-Simple key-value config parser with validation.
+Key-value config parser with pool presets and validation.
+
+#### Pool Presets
+
+```cpp
+enum class SoloPool {
+    Custom,     // User-defined pool
+    CKPool,     // solo.ckpool.org (Stratum V1)
+    Braiins     // solo.braiins.com (Stratum V2)
+};
+```
+
+| Preset | Host | Port | Protocol |
+| ------ | ---- | ---- | -------- |
+| CKPool | solo.ckpool.org | 3333 | Stratum V1 |
+| Braiins | solo.braiins.com | 3333 | Stratum V2 |
+
+#### Config Struct
 
 ```cpp
 struct Config {
     // Pool
+    SoloPool solo_pool;           // Pool preset
     std::string pool_host;
     uint16_t pool_port;
     std::string payout_address;
@@ -306,6 +324,19 @@ struct Config {
     unsigned max_reconnect_delay;
 };
 ```
+
+#### Validation
+
+The config system validates settings and reports errors/warnings:
+
+| Check | Type | Description |
+| ----- | ---- | ----------- |
+| PayoutAddress | Error | Required, validates Bitcoin address format |
+| Stratum version | Error | Must be "v1" or "v2" |
+| Pool port | Error | Cannot be 0 |
+| CKPool + V2 | Warning | CKPool doesn't support Stratum V2 |
+| Braiins + V1 | Warning | Braiins supports V2 for better efficiency |
+| High thread count | Warning | Unusually high (>256) |
 
 ### 7. Web Server (`webserver.hpp`)
 
@@ -461,7 +492,8 @@ tests/
 ├── test_sha256_avx.cpp   # AVX2/AVX512 tests
 ├── test_stratum.cpp      # Stratum V1 tests
 ├── test_stratum_v2.cpp   # Stratum V2 tests
-└── test_gpu.cpp          # GPU interface tests
+├── test_gpu.cpp          # GPU interface tests
+└── test_config.cpp       # Config validation tests
 ```
 
 ### Coverage

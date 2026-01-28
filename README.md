@@ -80,15 +80,25 @@ cmake .. [OPTIONS]
 
 ```ini
 # btcminer.conf
-Pool = solo.ckpool.org:3333
-PayoutAddress = bc1q...
-Password = x
-Stratum = v1              # v1 (JSON) or v2 (binary)
+
+# Solo Pool Preset (recommended)
+SoloPool = ckpool         # ckpool (V1) or braiins (V2)
+
+# Or manual configuration
+# Pool = solo.ckpool.org:3333
+# Stratum = v1
+
+PayoutAddress = bc1q...   # Your Bitcoin address (required)
 Threads = 0               # 0 = auto-detect
-EnableGPU = false
 WebPort = 8080
-IdleTimeout = 0           # Seconds, 0 = disabled
 ```
+
+**Pool Presets:**
+
+| Preset | Pool | Protocol |
+|--------|------|----------|
+| `ckpool` | solo.ckpool.org | Stratum V1 |
+| `braiins` | solo.braiins.com | Stratum V2 |
 
 &nbsp;
 
@@ -126,6 +136,7 @@ Dashboard at `http://localhost:8080`:
 ./btcminer_test --sha256     # SHA-256 tests
 ./btcminer_test --avx        # AVX tests
 ./btcminer_test --stratum    # Protocol tests
+./btcminer_test --config     # Config validation tests
 
 # Coverage report
 ./scripts/run_coverage.sh
