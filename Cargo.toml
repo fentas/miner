@@ -69,6 +69,9 @@ ocl = { version = "0.19", optional = true }
 
 [dev-dependencies]
 tempfile = "3.24"
+tokio-test = "0.4"
+wiremock = "0.6"
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 opt-level = 3
@@ -80,6 +83,10 @@ strip = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[lib]
+name = "btcminer"
+path = "src/lib.rs"
 
 [[bin]]
 name = "btcminer"

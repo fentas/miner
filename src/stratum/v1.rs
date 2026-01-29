@@ -155,7 +155,7 @@ impl StratumV1Client {
     }
 
     /// Parse a stratum notification
-    fn parse_notification(&mut self, msg: &Value) -> Result<Option<Notification>, StratumError> {
+    pub fn parse_notification(&mut self, msg: &Value) -> Result<Option<Notification>, StratumError> {
         let method = msg.get("method").and_then(|m| m.as_str());
 
         match method {

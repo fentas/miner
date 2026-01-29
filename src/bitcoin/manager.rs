@@ -768,3 +768,376 @@ fn generate_random_string(len: usize) -> String {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // Helper to create manager with temp directories
+    fn manager_with_temp_dirs() -> (BitcoindManager, TempDir, TempDir) {
+        let data_dir = TempDir::new().unwrap();
+        let install_dir = TempDir::new().unwrap();
+
+        let manager = BitcoindManager::new()
+            .with_data_dir(data_dir.path().to_path_buf());
+
+        // Manually set install_dir since there's no builder for it
+        let mut manager = manager;
+        manager.install_dir = install_dir.path().to_path_buf();
+
+        (manager, data_dir, install_dir)
+    }
+
+    #[test]
+    fn test_manager_new() {
+        let manager = BitcoindManager::new();
+        assert!(!manager.assumeutxo);
+        assert!(manager.rpc.is_none());
+        assert!(manager.process.is_none());
+        assert_eq!(manager.prune_size, 10000);
+        assert_eq!(manager.rpc_port, 8332);
+    }
+
+    #[test]
+    fn test_manager_default() {
+        let manager = BitcoindManager::default();
+        assert!(!manager.assumeutxo);
+        assert!(manager.rpc.is_none());
+    }
+
+    #[test]
+    fn test_with_data_dir() {
+        let manager = BitcoindManager::new()
+            .with_data_dir(PathBuf::from("/custom/path"));
+        assert_eq!(manager.data_dir, PathBuf::from("/custom/path"));
+    }
+
+    #[test]
+    fn test_with_prune() {
+        let manager = BitcoindManager::new().with_prune(5000);
+        assert_eq!(manager.prune_size, 5000);
+    }
+
+    #[test]
+    fn test_with_dbcache_manual() {
+        let manager = BitcoindManager::new().with_dbcache(1024);
+        assert_eq!(manager.dbcache, 1024);
+    }
+
+    #[test]
+    fn test_with_dbcache_auto() {
+        let manager = BitcoindManager::new().with_dbcache(0);
+        // Auto-calculated, should be between 450 and 16384
+        assert!(manager.dbcache >= 450);
+        assert!(manager.dbcache <= 16384);
+    }
+
+    #[test]
+    fn test_with_dbcache_clamped_low() {
+        let manager = BitcoindManager::new().with_dbcache(100);
+        assert_eq!(manager.dbcache, 450); // Clamped to minimum
+    }
+
+    #[test]
+    fn test_with_dbcache_clamped_high() {
+        let manager = BitcoindManager::new().with_dbcache(50000);
+        assert_eq!(manager.dbcache, 16384); // Clamped to maximum
+    }
+
+    #[test]
+    fn test_with_assumeutxo() {
+        let manager = BitcoindManager::new().with_assumeutxo(true);
+        assert!(manager.assumeutxo);
+        assert!(manager.assumeutxo_enabled());
+    }
+
+    #[test]
+    fn test_with_assumeutxo_magnet() {
+        let magnet = "magnet:?xt=urn:btih:test";
+        let manager = BitcoindManager::new()
+            .with_assumeutxo_magnet(Some(magnet.to_string()));
+        assert_eq!(manager.assumeutxo_magnet, Some(magnet.to_string()));
+    }
+
+    #[test]
+    fn test_with_rpc_auth() {
+        let manager = BitcoindManager::new()
+            .with_rpc_auth("myuser", "mypassword");
+        assert_eq!(manager.rpc_user, "myuser");
+        assert_eq!(manager.rpc_password, "mypassword");
+    }
+
+    #[test]
+    fn test_with_rpc_port() {
+        let manager = BitcoindManager::new().with_rpc_port(18332);
+        assert_eq!(manager.rpc_port, 18332);
+    }
+
+    #[test]
+    fn test_is_installed_false() {
+        let (manager, _data, _install) = manager_with_temp_dirs();
+        assert!(!manager.is_installed());
+    }
+
+    #[test]
+    fn test_is_installed_true() {
+        let (manager, _data, install) = manager_with_temp_dirs();
+
+        // Create fake bitcoind binary
+        let bin_dir = install.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+
+        #[cfg(target_os = "windows")]
+        fs::write(bin_dir.join("bitcoind.exe"), "fake").unwrap();
+        #[cfg(not(target_os = "windows"))]
+        fs::write(bin_dir.join("bitcoind"), "fake").unwrap();
+
+        assert!(manager.is_installed());
+    }
+
+    #[test]
+    fn test_installed_version_not_installed() {
+        let (manager, _data, _install) = manager_with_temp_dirs();
+        assert!(manager.installed_version().is_none());
+    }
+
+    #[test]
+    fn test_needs_upgrade_not_installed() {
+        let (manager, _data, _install) = manager_with_temp_dirs();
+        assert!(!manager.needs_upgrade()); // Can't upgrade what's not installed
+    }
+
+    #[test]
+    fn test_bitcoind_path() {
+        let (manager, _data, install) = manager_with_temp_dirs();
+
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            manager.bitcoind_path(),
+            install.path().join("bin").join("bitcoind.exe")
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(
+            manager.bitcoind_path(),
+            install.path().join("bin").join("bitcoind")
+        );
+    }
+
+    #[test]
+    fn test_assumeutxo_snapshot_path() {
+        let (manager, data, _install) = manager_with_temp_dirs();
+        let expected = data.path().join(format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT));
+        assert_eq!(manager.assumeutxo_snapshot_path(), expected);
+    }
+
+    #[test]
+    fn test_has_assumeutxo_snapshot_false() {
+        let (manager, _data, _install) = manager_with_temp_dirs();
+        assert!(!manager.has_assumeutxo_snapshot());
+    }
+
+    #[test]
+    fn test_has_assumeutxo_snapshot_incomplete() {
+        let (manager, data, _install) = manager_with_temp_dirs();
+
+        // Create snapshot file but no marker
+        let snapshot_path = data.path().join(format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT));
+        fs::write(&snapshot_path, "fake snapshot").unwrap();
+
+        assert!(!manager.has_assumeutxo_snapshot());
+    }
+
+    #[test]
+    fn test_has_assumeutxo_snapshot_complete() {
+        let (manager, data, _install) = manager_with_temp_dirs();
+
+        // Create both snapshot file and marker
+        let snapshot_path = data.path().join(format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT));
+        let marker_path = data.path().join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
+        fs::write(&snapshot_path, "fake snapshot").unwrap();
+        fs::write(&marker_path, "complete").unwrap();
+
+        assert!(manager.has_assumeutxo_snapshot());
+    }
+
+    #[test]
+    fn test_rpc_none_initially() {
+        let manager = BitcoindManager::new();
+        assert!(manager.rpc().is_none());
+    }
+
+    #[test]
+    fn test_write_config_creates_file() {
+        let (mut manager, data, _install) = manager_with_temp_dirs();
+        manager.rpc_user = "testuser".to_string();
+        manager.rpc_password = "testpass".to_string();
+
+        manager.write_config().unwrap();
+
+        let config_path = data.path().join("bitcoin.conf");
+        assert!(config_path.exists());
+
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(content.contains("rpcuser=testuser"));
+        assert!(content.contains("rpcpassword=testpass"));
+        assert!(content.contains("server=1"));
+        assert!(content.contains(&format!("prune={}", manager.prune_size)));
+    }
+
+    #[test]
+    fn test_write_config_respects_existing() {
+        let (mut manager, data, _install) = manager_with_temp_dirs();
+
+        // Write existing config with different credentials
+        let config_path = data.path().join("bitcoin.conf");
+        fs::write(&config_path, "rpcuser=existinguser\nrpcpassword=existingpass\n").unwrap();
+
+        // Write config should read existing
+        manager.write_config().unwrap();
+
+        // Manager should use existing credentials
+        assert_eq!(manager.rpc_user, "existinguser");
+        assert_eq!(manager.rpc_password, "existingpass");
+    }
+
+    #[test]
+    fn test_read_existing_config_with_port() {
+        let (mut manager, data, _install) = manager_with_temp_dirs();
+
+        let config_path = data.path().join("bitcoin.conf");
+        fs::write(&config_path, "rpcuser=u\nrpcpassword=p\nrpcport=18332\n").unwrap();
+
+        assert!(manager.read_existing_config());
+        assert_eq!(manager.rpc_user, "u");
+        assert_eq!(manager.rpc_password, "p");
+        assert_eq!(manager.rpc_port, 18332);
+    }
+
+    #[test]
+    fn test_read_existing_config_partial() {
+        let (mut manager, data, _install) = manager_with_temp_dirs();
+
+        // Only user, no password
+        let config_path = data.path().join("bitcoin.conf");
+        fs::write(&config_path, "rpcuser=u\n").unwrap();
+
+        // Should return false - incomplete credentials
+        assert!(!manager.read_existing_config());
+    }
+
+    #[test]
+    fn test_read_existing_config_missing() {
+        let (mut manager, _data, _install) = manager_with_temp_dirs();
+        assert!(!manager.read_existing_config());
+    }
+
+    #[test]
+    fn test_start_not_installed() {
+        let (mut manager, _data, _install) = manager_with_temp_dirs();
+        let result = manager.start();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stop_when_not_running() {
+        let (mut manager, _data, _install) = manager_with_temp_dirs();
+        // Should not panic
+        let result = manager.stop();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_generate_random_string_length() {
+        let s = generate_random_string(16);
+        assert_eq!(s.len(), 16);
+
+        let s = generate_random_string(32);
+        assert_eq!(s.len(), 32);
+    }
+
+    #[test]
+    fn test_generate_random_string_alphanumeric() {
+        let s = generate_random_string(100);
+        assert!(s.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn test_generate_random_string_different_each_time() {
+        // Small chance of collision, but very unlikely
+        let s1 = generate_random_string(32);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let s2 = generate_random_string(32);
+        assert_ne!(s1, s2);
+    }
+
+    #[test]
+    fn test_get_platform() {
+        let platform = get_platform();
+        assert!(!platform.is_empty());
+
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        assert_eq!(platform, "x86_64-linux-gnu");
+
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        assert_eq!(platform, "aarch64-linux-gnu");
+
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        assert_eq!(platform, "x86_64-apple-darwin");
+
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        assert_eq!(platform, "arm64-apple-darwin");
+
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        assert_eq!(platform, "win64");
+    }
+
+    #[test]
+    fn test_calculate_dbcache_in_range() {
+        let dbcache = BitcoindManager::calculate_dbcache();
+        assert!(dbcache >= 450, "dbcache {} should be >= 450", dbcache);
+        assert!(dbcache <= 16384, "dbcache {} should be <= 16384", dbcache);
+    }
+
+    #[test]
+    fn test_builder_chaining() {
+        let manager = BitcoindManager::new()
+            .with_data_dir(PathBuf::from("/data"))
+            .with_prune(5000)
+            .with_dbcache(2048)
+            .with_assumeutxo(true)
+            .with_rpc_auth("user", "pass")
+            .with_rpc_port(18332);
+
+        assert_eq!(manager.data_dir, PathBuf::from("/data"));
+        assert_eq!(manager.prune_size, 5000);
+        assert_eq!(manager.dbcache, 2048);
+        assert!(manager.assumeutxo);
+        assert_eq!(manager.rpc_user, "user");
+        assert_eq!(manager.rpc_password, "pass");
+        assert_eq!(manager.rpc_port, 18332);
+    }
+
+    #[tokio::test]
+    async fn test_get_sync_status_not_started() {
+        let manager = BitcoindManager::new();
+        let result = manager.get_sync_status().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_wait_ready_not_started() {
+        let manager = BitcoindManager::new();
+        let result = manager.wait_ready(1).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_load_assumeutxo_not_started() {
+        let manager = BitcoindManager::new();
+        let result = manager.load_assumeutxo().await;
+        assert!(result.is_err());
+    }
+}

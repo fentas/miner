@@ -438,3 +438,71 @@ fn format_large_number(n: u64) -> String {
         n.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_format_duration_seconds() {
+        assert_eq!(format_duration(Duration::from_secs(0)), "0s");
+        assert_eq!(format_duration(Duration::from_secs(30)), "30s");
+        assert_eq!(format_duration(Duration::from_secs(59)), "59s");
+    }
+
+    #[test]
+    fn test_format_duration_minutes() {
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m 0s");
+        assert_eq!(format_duration(Duration::from_secs(90)), "1m 30s");
+        assert_eq!(format_duration(Duration::from_secs(3599)), "59m 59s");
+    }
+
+    #[test]
+    fn test_format_duration_hours() {
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h 0m");
+        assert_eq!(format_duration(Duration::from_secs(7200)), "2h 0m");
+        assert_eq!(format_duration(Duration::from_secs(3665)), "1h 1m");
+        assert_eq!(format_duration(Duration::from_secs(86399)), "23h 59m");
+    }
+
+    #[test]
+    fn test_format_duration_days() {
+        assert_eq!(format_duration(Duration::from_secs(86400)), "1d 0h");
+        assert_eq!(format_duration(Duration::from_secs(172800)), "2d 0h");
+        assert_eq!(format_duration(Duration::from_secs(90000)), "1d 1h");
+    }
+
+    #[test]
+    fn test_format_large_number_plain() {
+        assert_eq!(format_large_number(0), "0");
+        assert_eq!(format_large_number(100), "100");
+        assert_eq!(format_large_number(999), "999");
+    }
+
+    #[test]
+    fn test_format_large_number_thousands() {
+        assert_eq!(format_large_number(1_000), "1.00K");
+        assert_eq!(format_large_number(1_500), "1.50K");
+        assert_eq!(format_large_number(999_999), "1000.00K");
+    }
+
+    #[test]
+    fn test_format_large_number_millions() {
+        assert_eq!(format_large_number(1_000_000), "1.00M");
+        assert_eq!(format_large_number(2_500_000), "2.50M");
+        assert_eq!(format_large_number(999_999_999), "1000.00M");
+    }
+
+    #[test]
+    fn test_format_large_number_billions() {
+        assert_eq!(format_large_number(1_000_000_000), "1.00G");
+        assert_eq!(format_large_number(7_500_000_000), "7.50G");
+    }
+
+    #[test]
+    fn test_format_large_number_trillions() {
+        assert_eq!(format_large_number(1_000_000_000_000), "1.00T");
+        assert_eq!(format_large_number(55_000_000_000_000), "55.00T");
+    }
+}

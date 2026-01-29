@@ -93,7 +93,7 @@ pub fn create_router(state: Arc<WebState>, static_dir: &str) -> Router {
         .route("/api/control/pause", get(api_pause))
         .route("/api/control/resume", get(api_resume))
         .route("/ws", get(ws_handler))
-        .nest_service("/", ServeDir::new(static_dir))
+        .fallback_service(ServeDir::new(static_dir))
         .with_state(state)
 }
 
@@ -196,7 +196,7 @@ fn format_hashrate_unit(hashrate: f64) -> String {
 }
 
 /// Format uptime in human-readable format
-fn format_uptime(seconds: u64) -> String {
+pub fn format_uptime(seconds: u64) -> String {
     let days = seconds / 86400;
     let hours = (seconds % 86400) / 3600;
     let minutes = (seconds % 3600) / 60;

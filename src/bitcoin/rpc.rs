@@ -101,7 +101,8 @@ impl BitcoinRpc {
             return Err(BitcoinError::RpcError(format!("{}: {}", err.code, err.message)));
         }
 
-        rpc_response.result.ok_or_else(|| BitcoinError::RpcError("Empty result".into()))
+        // Return Null for null results (like submitblock success)
+        Ok(rpc_response.result.unwrap_or(Value::Null))
     }
 
     /// Get blockchain info

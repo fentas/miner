@@ -643,4 +643,269 @@ mod tests {
         assert_eq!(LogLevel::Success.as_str(), "OK");
         assert_eq!(LogLevel::Debug.as_str(), "DEBUG");
     }
+
+    #[test]
+    fn test_log_entry_new() {
+        let entry = LogEntry::new(LogLevel::Debug, "Debug message");
+        assert_eq!(entry.level, LogLevel::Debug);
+        assert_eq!(entry.message, "Debug message");
+        // Timestamp should be in HH:MM:SS format
+        assert_eq!(entry.timestamp.len(), 8);
+        assert!(entry.timestamp.contains(':'));
+    }
+
+    #[test]
+    fn test_log_entry_factory_methods() {
+        let info = LogEntry::info("info");
+        assert_eq!(info.level, LogLevel::Info);
+
+        let warn = LogEntry::warn("warn");
+        assert_eq!(warn.level, LogLevel::Warn);
+
+        let error = LogEntry::error("error");
+        assert_eq!(error.level, LogLevel::Error);
+
+        let success = LogEntry::success("success");
+        assert_eq!(success.level, LogLevel::Success);
+    }
+
+    #[test]
+    fn test_tui_state_default() {
+        let state = TuiState::default();
+        assert_eq!(state.get_hashrate(), 0.0);
+        assert!(!state.is_connected());
+    }
+
+    #[test]
+    fn test_tui_state_gpu_methods() {
+        let state = TuiState::new();
+
+        // Test GPU configured/available separately
+        assert!(!state.is_gpu_configured());
+        assert!(!state.is_gpu_available());
+
+        state.set_gpu_configured(true);
+        assert!(state.is_gpu_configured());
+        assert!(!state.is_gpu_available());
+
+        state.set_gpu_available(true);
+        assert!(state.is_gpu_available());
+        assert!(state.is_gpu_enabled()); // Alias test
+
+        // Test set_gpu_enabled sets both
+        state.set_gpu_enabled(false);
+        assert!(!state.is_gpu_configured());
+        assert!(!state.is_gpu_available());
+    }
+
+    #[test]
+    fn test_tui_state_gpu_devices() {
+        let state = TuiState::new();
+
+        let devices = vec!["GPU 0: NVIDIA RTX 3080".to_string(), "GPU 1: AMD RX 6800".to_string()];
+        state.set_gpu_devices(devices.clone());
+
+        let retrieved = state.get_gpu_devices();
+        assert_eq!(retrieved.len(), 2);
+        assert_eq!(retrieved[0], "GPU 0: NVIDIA RTX 3080");
+    }
+
+    #[test]
+    fn test_tui_state_gpu_hashrate() {
+        let state = TuiState::new();
+        state.set_gpu_hashrate(1500000.5);
+        assert!((state.get_gpu_hashrate() - 1500000.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_tui_state_download_progress() {
+        let state = TuiState::new();
+
+        // Start download
+        state.set_downloading(true, "utxo-snapshot.dat");
+        assert!(state.is_downloading());
+        assert_eq!(state.get_download_name(), "utxo-snapshot.dat");
+
+        // Update progress
+        state.set_download_progress(1_000_000, 10_000_000);
+        let (bytes, total) = state.get_download_progress();
+        assert_eq!(bytes, 1_000_000);
+        assert_eq!(total, 10_000_000);
+
+        // Stop download (should reset progress)
+        state.set_downloading(false, "");
+        assert!(!state.is_downloading());
+        let (bytes, total) = state.get_download_progress();
+        assert_eq!(bytes, 0);
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn test_tui_state_total_hashes() {
+        let state = TuiState::new();
+        state.set_total_hashes(1_000_000);
+        assert_eq!(state.get_total_hashes(), 1_000_000);
+    }
+
+    #[test]
+    fn test_tui_state_difficulty() {
+        let state = TuiState::new();
+        state.set_difficulty(55_000_000_000_000);
+        assert_eq!(state.get_difficulty(), 55_000_000_000_000);
+    }
+
+    #[test]
+    fn test_tui_state_block_height_new_block() {
+        let state = TuiState::new();
+
+        // Set initial height
+        state.set_block_height(800000);
+        assert_eq!(state.get_block_height(), 800000);
+
+        // New block should record time
+        state.set_block_height(800001);
+        assert_eq!(state.get_block_height(), 800001);
+
+        // Check that last block time was recorded
+        let ago = state.get_last_block_ago();
+        assert!(ago.is_some());
+    }
+
+    #[test]
+    fn test_tui_state_record_share() {
+        let state = TuiState::new();
+
+        // Initially no last share time
+        assert!(state.get_last_share_ago().is_none());
+
+        // Record a share
+        state.record_share();
+
+        // Now should have a last share time
+        let ago = state.get_last_share_ago();
+        assert!(ago.is_some());
+        assert!(ago.unwrap().as_secs() < 1); // Should be very recent
+    }
+
+    #[test]
+    fn test_tui_state_web_url() {
+        let state = TuiState::new();
+        state.set_web_url("http://localhost:8080");
+        assert_eq!(state.get_web_url(), "http://localhost:8080");
+    }
+
+    #[test]
+    fn test_tui_state_bitcoin_managed() {
+        let state = TuiState::new();
+
+        assert!(!state.is_bitcoin_managed());
+        state.set_bitcoin_managed(true);
+        assert!(state.is_bitcoin_managed());
+    }
+
+    #[test]
+    fn test_tui_state_bitcoin_logs_toggle() {
+        let state = TuiState::new();
+
+        assert!(!state.is_showing_bitcoin_logs());
+
+        let showing = state.toggle_bitcoin_logs();
+        assert!(showing);
+        assert!(state.is_showing_bitcoin_logs());
+
+        let showing = state.toggle_bitcoin_logs();
+        assert!(!showing);
+        assert!(!state.is_showing_bitcoin_logs());
+    }
+
+    #[test]
+    fn test_tui_state_uptime() {
+        let state = TuiState::new();
+        let uptime = state.get_uptime();
+        // Should be at least 0 and less than 1 second (test just started)
+        assert!(uptime.as_millis() < 1000);
+    }
+
+    #[test]
+    fn test_tui_state_hashrate_history_limit() {
+        let state = TuiState::new();
+
+        // Add more than MAX_HASHRATE_HISTORY samples
+        for i in 0..150 {
+            state.set_hashrate(i as f64 * 100.0);
+        }
+
+        let history = state.get_hashrate_history();
+        // Should be limited to MAX_HASHRATE_HISTORY (120)
+        assert!(history.len() <= 120);
+    }
+
+    #[test]
+    fn test_tui_state_scroll_bounds() {
+        let state = TuiState::new();
+
+        // Scroll up when at 0 should stay at 0
+        state.scroll_up(10);
+        assert_eq!(state.get_log_scroll(), 0);
+
+        // Add some logs
+        for i in 0..10 {
+            state.log_info(format!("Log {}", i));
+        }
+
+        // Scroll down past max should clamp
+        state.scroll_down(100);
+        assert_eq!(state.get_log_scroll(), 9); // max is len - 1 = 9
+
+        // Scroll up from there
+        state.scroll_up(5);
+        assert_eq!(state.get_log_scroll(), 4);
+    }
+
+    #[test]
+    fn test_tui_state_log_max_limit() {
+        let state = TuiState::new();
+
+        // Add more than MAX_LOGS entries
+        for i in 0..1100 {
+            state.log_info(format!("Log {}", i));
+        }
+
+        // Should be limited to MAX_LOGS (1000)
+        assert_eq!(state.get_log_count(), 1000);
+    }
+
+    #[test]
+    fn test_log_level_equality() {
+        assert_eq!(LogLevel::Info, LogLevel::Info);
+        assert_ne!(LogLevel::Info, LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_log_entry_clone() {
+        let entry = LogEntry::info("test message");
+        let cloned = entry.clone();
+        assert_eq!(cloned.level, entry.level);
+        assert_eq!(cloned.message, entry.message);
+        assert_eq!(cloned.timestamp, entry.timestamp);
+    }
+
+    #[test]
+    fn test_tui_state_log_custom_entry() {
+        let state = TuiState::new();
+
+        let custom_entry = LogEntry {
+            level: LogLevel::Debug,
+            message: "Custom debug".to_string(),
+            timestamp: "12:00:00".to_string(),
+        };
+
+        state.log(custom_entry);
+
+        let logs = state.get_logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, LogLevel::Debug);
+        assert_eq!(logs[0].message, "Custom debug");
+        assert_eq!(logs[0].timestamp, "12:00:00");
+    }
 }
