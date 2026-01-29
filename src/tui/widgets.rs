@@ -488,14 +488,24 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let display_mode = state.get_hashrate_display_mode();
 
     // Determine which hashrate to show based on display mode
+    let gpu_device_names = state.get_gpu_devices();
     let (primary_hashrate, mode_label): (f64, String) = match display_mode {
         crate::tui::state::HashrateDisplayMode::Total => (total_hashrate, "Total".to_string()),
         crate::tui::state::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU".to_string()),
         crate::tui::state::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU".to_string()),
         crate::tui::state::HashrateDisplayMode::GpuDevice(idx) => {
-            // Show per-device hashrate
+            // Show per-device hashrate with device name
             let device_rate = state.get_gpu_device_hashrate(idx as u32);
-            (device_rate, format!("GPU#{}", idx))
+            let device_name = gpu_device_names.get(idx as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown");
+            // Truncate long device names
+            let short_name = if device_name.len() > 15 {
+                &device_name[..15]
+            } else {
+                device_name
+            };
+            (device_rate, format!("GPU#{} {}", idx, short_name))
         }
     };
     let hr_str = format_hashrate(primary_hashrate);
