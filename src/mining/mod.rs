@@ -2,11 +2,13 @@ mod worker;
 mod job;
 mod hasher;
 pub mod sha256_simd;
+pub mod gpu_worker;
 
 pub use worker::{Worker, WorkerHandle};
 pub use job::{Job, difficulty_to_target};
 pub use hasher::Hasher;
-pub use sha256_simd::SimdLevel;
+pub use sha256_simd::{SimdLevel, Midstate};
+pub use gpu_worker::GpuCoordinator;
 
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use tokio::sync::{mpsc, watch};
 #[derive(Debug, Default)]
 pub struct Stats {
     pub hashes: AtomicU64,
+    pub gpu_hashes: AtomicU64,
     pub shares_accepted: AtomicU64,
     pub shares_rejected: AtomicU64,
     pub blocks_found: AtomicU64,
@@ -28,6 +31,14 @@ impl Stats {
 
     pub fn add_hashes(&self, count: u64) {
         self.hashes.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn add_gpu_hashes(&self, count: u64) {
+        self.gpu_hashes.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn get_gpu_hashes(&self) -> u64 {
+        self.gpu_hashes.load(Ordering::Relaxed)
     }
 
     pub fn accept_share(&self) {
@@ -53,6 +64,7 @@ impl Stats {
     pub fn snapshot(&self) -> StatsSnapshot {
         StatsSnapshot {
             hashes: self.hashes.load(Ordering::Relaxed),
+            gpu_hashes: self.gpu_hashes.load(Ordering::Relaxed),
             shares_accepted: self.shares_accepted.load(Ordering::Relaxed),
             shares_rejected: self.shares_rejected.load(Ordering::Relaxed),
             blocks_found: self.blocks_found.load(Ordering::Relaxed),
@@ -64,6 +76,7 @@ impl Stats {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct StatsSnapshot {
     pub hashes: u64,
+    pub gpu_hashes: u64,
     pub shares_accepted: u64,
     pub shares_rejected: u64,
     pub blocks_found: u64,
@@ -261,6 +274,7 @@ mod tests {
     fn test_stats_snapshot_clone() {
         let snapshot = StatsSnapshot {
             hashes: 100,
+            gpu_hashes: 0,
             shares_accepted: 5,
             shares_rejected: 1,
             blocks_found: 0,

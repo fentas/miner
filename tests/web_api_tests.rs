@@ -153,6 +153,7 @@ async fn test_stats_update() {
 
     let stats = StatsSnapshot {
         hashes: 1_000_000,
+        gpu_hashes: 0,
         shares_accepted: 5,
         shares_rejected: 1,
         blocks_found: 0,
@@ -255,6 +256,7 @@ async fn test_api_stats_returns_updated_values() {
     // Update stats
     let stats = StatsSnapshot {
         hashes: 99_999_999,
+        gpu_hashes: 0,
         shares_accepted: 42,
         shares_rejected: 3,
         blocks_found: 1, // Found a block!

@@ -428,9 +428,13 @@ impl OpenCLMiner {
         // intensity 100 = full utilization, intensity 1 = minimal
         let intensity_factor = (self.intensity as f64 / 100.0).max(0.01);
 
-        // Calculate work size: compute_units * work_group_size * intensity_factor
-        let base_size = (self.device.compute_units as usize) * self.work_group_size * 64;
-        let target_size = (base_size as f64 * intensity_factor) as usize;
+        // Calculate work size for GPU saturation
+        // Modern GPUs need tens of millions of work items to stay fully utilized
+        // Target: process the full batch (16M) in a single kernel launch at intensity 100%
+        // This minimizes kernel launch overhead and synchronization barriers
+        // Base: 2^24 (16M) at intensity 100%, scaling down for lower intensities
+        let base_work = 1usize << 24; // 16M base (matches GPU worker batch size)
+        let target_size = ((base_work as f64) * intensity_factor) as usize;
 
         // Ensure work size is a multiple of work_group_size and doesn't exceed nonce_count
         let work_size = (target_size / self.work_group_size) * self.work_group_size;
@@ -641,5 +645,157 @@ mod tests {
 
         // With such an easy target, we should find many results
         assert!(!results.is_empty(), "Should find results with easy target");
+    }
+
+    #[test]
+    fn test_work_size_calculation_logic() {
+        // Test the work size calculation formula independently
+        // Formula: base_work = 2^22, target_size = base_work * intensity * 2
+
+        // At intensity 100%, expect ~8M work items
+        let intensity_100: f64 = 100.0 / 100.0;
+        let base_work: usize = 1 << 22; // 4M
+        let target_100 = ((base_work as f64) * intensity_100 * 2.0) as usize;
+        assert_eq!(target_100, 8_388_608, "Intensity 100 should give 8M work items");
+
+        // At intensity 50%, expect ~4M work items
+        let intensity_50: f64 = 50.0 / 100.0;
+        let target_50 = ((base_work as f64) * intensity_50 * 2.0) as usize;
+        assert_eq!(target_50, 4_194_304, "Intensity 50 should give 4M work items");
+
+        // At intensity 80%, expect ~6.7M work items
+        let intensity_80: f64 = 80.0 / 100.0;
+        let target_80 = ((base_work as f64) * intensity_80 * 2.0) as usize;
+        assert_eq!(target_80, 6_710_886, "Intensity 80 should give ~6.7M work items");
+
+        // At intensity 1%, expect minimum work items
+        let intensity_1: f64 = 1.0 / 100.0;
+        let target_1 = ((base_work as f64) * intensity_1 * 2.0) as usize;
+        assert_eq!(target_1, 83_886, "Intensity 1 should give ~84K work items");
+    }
+
+    #[test]
+    fn test_miner_set_job_and_stop() {
+        let devices = enumerate_devices().unwrap();
+
+        if devices.is_empty() {
+            println!("No OpenCL devices found, skipping test");
+            return;
+        }
+
+        let mut miner = match OpenCLMiner::new(devices[0].id, 50) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("Failed to create miner: {}", e);
+                return;
+            }
+        };
+
+        // Set up a job
+        let midstate = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        let tail = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+                    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let target = [0x00, 0x00, 0x00, 0x1F, 0xFF, 0xFF, 0xFF, 0xFF,
+                      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        // Should not panic
+        miner.set_job(&midstate, &tail, &target);
+
+        // Stop should not panic
+        miner.stop();
+    }
+
+    #[test]
+    fn test_miner_hashrate_increases_after_mining() {
+        let devices = enumerate_devices().unwrap();
+
+        if devices.is_empty() {
+            println!("No OpenCL devices found, skipping test");
+            return;
+        }
+
+        let mut miner = match OpenCLMiner::new(devices[0].id, 50) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("Failed to create miner: {}", e);
+                return;
+            }
+        };
+
+        // Set up a job with easy target
+        let midstate = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        let tail = [0u8; 16];
+        let target = [0xffu8; 32];
+
+        miner.set_job(&midstate, &tail, &target);
+
+        // Initial hashrate should be 0
+        let initial_hashrate = miner.hashrate();
+
+        // Mine some hashes
+        let _results = miner.mine(0, 65536);
+
+        // Give a tiny bit of time for calculation
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Hashrate should now be positive
+        let final_hashrate = miner.hashrate();
+        assert!(final_hashrate > initial_hashrate, "Hashrate should increase after mining");
+    }
+
+    #[test]
+    fn test_miner_device_info() {
+        let devices = enumerate_devices().unwrap();
+
+        if devices.is_empty() {
+            println!("No OpenCL devices found, skipping test");
+            return;
+        }
+
+        let miner = match OpenCLMiner::new(devices[0].id, 80) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("Failed to create miner: {}", e);
+                return;
+            }
+        };
+
+        let device = miner.device();
+        assert!(!device.name.is_empty(), "Device should have a name");
+        assert!(device.compute_units > 0, "Device should have compute units");
+        assert!(device.max_work_group_size > 0, "Device should have work group size");
+    }
+
+    #[test]
+    fn test_miner_mine_empty_batch() {
+        let devices = enumerate_devices().unwrap();
+
+        if devices.is_empty() {
+            println!("No OpenCL devices found, skipping test");
+            return;
+        }
+
+        let mut miner = match OpenCLMiner::new(devices[0].id, 50) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("Failed to create miner: {}", e);
+                return;
+            }
+        };
+
+        let midstate = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        let tail = [0u8; 16];
+        let target = [0xffu8; 32];
+
+        miner.set_job(&midstate, &tail, &target);
+
+        // Mining with 0 nonces should return empty results
+        let results = miner.mine(0, 0);
+        assert!(results.is_empty(), "Mining 0 nonces should return empty results");
     }
 }

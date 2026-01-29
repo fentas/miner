@@ -18,7 +18,7 @@ use tracing::{info, warn, error, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use config::{Config, LogFormat};
-use mining::{Coordinator, SimdLevel};
+use mining::{Coordinator, SimdLevel, GpuCoordinator};
 use idle::IdleMonitor;
 use stats::{HashrateCalculator, format_hashrate, format_duration};
 use tui::{TuiState, TuiRunner, TuiCommand};
@@ -588,6 +588,24 @@ async fn run_solo_mode_with_tui(
     let thread_count = cfg.effective_threads();
     let coordinator = Coordinator::new(thread_count);
 
+    // Setup GPU coordinator if enabled
+    let gpu_coordinator = if cfg.mining.enable_gpu {
+        let gpu_coord = GpuCoordinator::new(
+            &cfg.mining.gpu_devices,
+            cfg.mining.gpu_intensity,
+            coordinator.stats().clone(),
+        );
+        let gpu_count = gpu_coord.worker_count();
+        if gpu_count > 0 {
+            tui_state.log_info(format!("GPU mining enabled: {} device(s)", gpu_count));
+        } else {
+            tui_state.log_warn("GPU mining enabled but no devices found");
+        }
+        Some(gpu_coord)
+    } else {
+        None
+    };
+
     // Setup idle monitor
     let idle_monitor = if cfg.idle.enabled {
         let mut monitor = IdleMonitor::new();
@@ -655,8 +673,15 @@ async fn run_solo_mode_with_tui(
                 job.merkle_root_override = Some(merkle_root);
 
                 job.clean_jobs = true;
-                coordinator.update_job(job);
+                coordinator.update_job(job.clone());
                 coordinator.start();
+
+                // Start GPU mining if enabled
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.update_job(&job);
+                    gpu_coord.start();
+                }
+
                 tui_state.log_success("Mining started");
                 break;
             }
@@ -675,6 +700,7 @@ async fn run_solo_mode_with_tui(
     }
 
     let mut last_template_height: u64 = 0;
+    let mut gpu_hashrate_calc = HashrateCalculator::new(60);
 
     loop {
         // Check for TUI commands
@@ -688,9 +714,15 @@ async fn run_solo_mode_with_tui(
                     let paused = tui_state.toggle_pause();
                     if paused {
                         coordinator.stop();
+                        if let Some(ref gpu_coord) = gpu_coordinator {
+                            gpu_coord.stop();
+                        }
                         tui_state.log_warn("Mining paused");
                     } else {
                         coordinator.start();
+                        if let Some(ref gpu_coord) = gpu_coordinator {
+                            gpu_coord.start();
+                        }
                         tui_state.log_success("Mining resumed");
                     }
                 }
@@ -703,8 +735,14 @@ async fn run_solo_mode_with_tui(
         if let Some(ref monitor) = idle_monitor {
             if cfg.idle.pause_on_active && !monitor.is_idle() && !tui_state.is_paused() {
                 coordinator.stop();
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.stop();
+                }
             } else if !tui_state.is_paused() {
                 coordinator.start();
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.start();
+                }
             }
         }
 
@@ -783,7 +821,13 @@ async fn run_solo_mode_with_tui(
                         job.merkle_root_override = Some(merkle_root);
 
                         job.clean_jobs = true;
-                        coordinator.update_job(job);
+                        coordinator.update_job(job.clone());
+
+                        // Update GPU job as well
+                        if let Some(ref gpu_coord) = gpu_coordinator {
+                            gpu_coord.update_job(&job);
+                        }
+
                         last_template_height = template.height as u64;
                         tui_state.log_info(format!("New block template: height {}", template.height));
                     }
@@ -799,11 +843,18 @@ async fn run_solo_mode_with_tui(
         if last_stats.elapsed() >= stats_interval {
             let stats = coordinator.stats().snapshot();
             hashrate_calc.add_sample(stats.hashes);
-            let hashrate = hashrate_calc.hashrate();
+            let cpu_hashrate = hashrate_calc.hashrate();
 
-            tui_state.set_hashrate(hashrate);
-            tui_state.set_total_hashes(stats.hashes);
+            tui_state.set_hashrate(cpu_hashrate);
+            tui_state.set_total_hashes(stats.hashes + stats.gpu_hashes);
             tui_state.set_shares(stats.shares_accepted, stats.shares_rejected);
+
+            // Update GPU hashrate if enabled
+            if gpu_coordinator.is_some() {
+                gpu_hashrate_calc.add_sample(stats.gpu_hashes);
+                let gpu_hashrate = gpu_hashrate_calc.hashrate();
+                tui_state.set_gpu_hashrate(gpu_hashrate);
+            }
 
             last_stats = Instant::now();
         }
@@ -1446,11 +1497,30 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     let thread_count = cfg.effective_threads();
     let coordinator = Coordinator::new(thread_count);
 
+    // Setup GPU coordinator if enabled
+    let gpu_coordinator = if cfg.mining.enable_gpu {
+        let gpu_coord = GpuCoordinator::new(
+            &cfg.mining.gpu_devices,
+            cfg.mining.gpu_intensity,
+            coordinator.stats().clone(),
+        );
+        let gpu_count = gpu_coord.worker_count();
+        if gpu_count > 0 {
+            info!("GPU mining enabled: {} device(s)", gpu_count);
+        } else {
+            warn!("GPU mining enabled but no devices found");
+        }
+        Some(gpu_coord)
+    } else {
+        None
+    };
+
     // Setup idle monitor if enabled
     let idle_monitor = setup_idle_monitor(&cfg);
 
     // Setup stats
     let mut hashrate_calc = HashrateCalculator::new(60);
+    let mut gpu_hashrate_calc = HashrateCalculator::new(60);
     let start_time = Instant::now();
     let stats_interval = Duration::from_secs(cfg.logging.stats_interval as u64);
     let mut last_stats = Instant::now();
@@ -1503,8 +1573,15 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                 job.merkle_root_override = Some(merkle_root);
 
                 job.clean_jobs = true;
-                coordinator.update_job(job);
+                coordinator.update_job(job.clone());
                 coordinator.start();
+
+                // Start GPU mining if enabled
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.update_job(&job);
+                    gpu_coord.start();
+                }
+
                 print_mining_started();
                 break;
             }
@@ -1527,8 +1604,14 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         if let Some(ref monitor) = idle_monitor {
             if cfg.idle.pause_on_active && !monitor.is_idle() {
                 coordinator.stop();
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.stop();
+                }
             } else {
                 coordinator.start();
+                if let Some(ref gpu_coord) = gpu_coordinator {
+                    gpu_coord.start();
+                }
             }
         }
 
@@ -1536,6 +1619,9 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         let peer_count = rpc.get_connection_count().await.unwrap_or(0);
         if peer_count == 0 {
             coordinator.stop();
+            if let Some(ref gpu_coord) = gpu_coordinator {
+                gpu_coord.stop();
+            }
             warn!("No peers connected - waiting for network...");
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
@@ -1593,14 +1679,37 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             job.merkle_root_override = Some(merkle_root);
 
             job.clean_jobs = true;
-            coordinator.update_job(job);
+            coordinator.update_job(job.clone());
+
+            // Update GPU job as well
+            if let Some(ref gpu_coord) = gpu_coordinator {
+                gpu_coord.update_job(&job);
+            }
+
             last_template_height = template.height as u64;
             info!("New block template: height {}", template.height);
         }
 
         // Print stats periodically
         if last_stats.elapsed() >= stats_interval {
-            print_stats(&coordinator, &mut hashrate_calc, start_time, &cfg);
+            // Include GPU stats in output
+            let stats = coordinator.stats().snapshot();
+            if gpu_coordinator.is_some() && stats.gpu_hashes > 0 {
+                gpu_hashrate_calc.add_sample(stats.gpu_hashes);
+                let gpu_rate = gpu_hashrate_calc.hashrate();
+                hashrate_calc.add_sample(stats.hashes);
+                let cpu_rate = hashrate_calc.hashrate();
+                let total_rate = cpu_rate + gpu_rate;
+                info!(
+                    "Hashrate: {}/s (CPU: {}/s, GPU: {}/s) | Hashes: {}",
+                    format_hashrate(total_rate),
+                    format_hashrate(cpu_rate),
+                    format_hashrate(gpu_rate),
+                    stats.hashes + stats.gpu_hashes
+                );
+            } else {
+                print_stats(&coordinator, &mut hashrate_calc, start_time, &cfg);
+            }
             last_stats = Instant::now();
         }
 

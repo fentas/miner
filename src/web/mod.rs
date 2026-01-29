@@ -368,6 +368,7 @@ mod tests {
 
         let stats = StatsSnapshot {
             hashes: 1_000_000,
+            gpu_hashes: 0,
             shares_accepted: 10,
             shares_rejected: 1,
             blocks_found: 0,
