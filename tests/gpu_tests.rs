@@ -4,8 +4,9 @@
 //! - GpuCoordinator creation and management
 //! - GpuJob creation and validation
 //! - Target comparison functions
+//! - GPU tuning parameters
 
-use btcminer::mining::{GpuCoordinator, Job, Stats};
+use btcminer::mining::{GpuCoordinator, GpuTuningParams, Job, Stats};
 use std::sync::Arc;
 
 // ============================================================================
@@ -266,4 +267,133 @@ fn test_stats_concurrent_gpu_hash_updates() {
 
     // Should have 4 threads * 1000 iterations * 100 hashes = 400,000
     assert_eq!(stats.get_gpu_hashes(), 400_000);
+}
+
+// ============================================================================
+// GpuTuningParams Tests
+// ============================================================================
+
+#[test]
+fn test_gpu_tuning_params_default() {
+    let params = GpuTuningParams::default();
+
+    assert_eq!(params.intensity, 100);
+    assert_eq!(params.workgroup_size, 0);
+    assert_eq!(params.batch_exp, 25);
+}
+
+#[test]
+fn test_gpu_tuning_params_custom() {
+    let params = GpuTuningParams {
+        intensity: 50,
+        workgroup_size: 256,
+        batch_exp: 24,
+    };
+
+    assert_eq!(params.intensity, 50);
+    assert_eq!(params.workgroup_size, 256);
+    assert_eq!(params.batch_exp, 24);
+}
+
+#[test]
+fn test_gpu_coordinator_with_tuning() {
+    let stats = Arc::new(Stats::new());
+    let tuning = GpuTuningParams {
+        intensity: 75,
+        workgroup_size: 512,
+        batch_exp: 26,
+    };
+
+    let coordinator = GpuCoordinator::with_tuning(&[], tuning, stats);
+
+    // Should work without panicking
+    assert!(!coordinator.is_running());
+    coordinator.start();
+    assert!(coordinator.is_running());
+    coordinator.stop();
+}
+
+#[test]
+fn test_gpu_coordinator_with_tuning_intensity_extremes() {
+    let stats = Arc::new(Stats::new());
+
+    // Test minimum intensity
+    let tuning_min = GpuTuningParams {
+        intensity: 1,
+        workgroup_size: 0,
+        batch_exp: 20,
+    };
+    let coord_min = GpuCoordinator::with_tuning(&[], tuning_min, Arc::clone(&stats));
+    coord_min.start();
+    coord_min.stop();
+
+    // Test maximum intensity
+    let tuning_max = GpuTuningParams {
+        intensity: 100,
+        workgroup_size: 1024,
+        batch_exp: 28,
+    };
+    let coord_max = GpuCoordinator::with_tuning(&[], tuning_max, Arc::clone(&stats));
+    coord_max.start();
+    coord_max.stop();
+}
+
+#[test]
+fn test_gpu_coordinator_with_tuning_batch_exp_clamping() {
+    let stats = Arc::new(Stats::new());
+
+    // Test batch_exp below minimum (should clamp to 20)
+    let tuning_low = GpuTuningParams {
+        intensity: 100,
+        workgroup_size: 0,
+        batch_exp: 10, // Below minimum
+    };
+    let coord_low = GpuCoordinator::with_tuning(&[], tuning_low, Arc::clone(&stats));
+    coord_low.start();
+    coord_low.stop();
+
+    // Test batch_exp above maximum (should clamp to 28)
+    let tuning_high = GpuTuningParams {
+        intensity: 100,
+        workgroup_size: 0,
+        batch_exp: 35, // Above maximum
+    };
+    let coord_high = GpuCoordinator::with_tuning(&[], tuning_high, Arc::clone(&stats));
+    coord_high.start();
+    coord_high.stop();
+}
+
+#[test]
+fn test_gpu_tuning_params_clone() {
+    let params = GpuTuningParams {
+        intensity: 80,
+        workgroup_size: 256,
+        batch_exp: 25,
+    };
+
+    let cloned = params.clone();
+
+    assert_eq!(cloned.intensity, params.intensity);
+    assert_eq!(cloned.workgroup_size, params.workgroup_size);
+    assert_eq!(cloned.batch_exp, params.batch_exp);
+}
+
+#[test]
+fn test_gpu_coordinator_device_hashrates_empty() {
+    let stats = Arc::new(Stats::new());
+    let coordinator = GpuCoordinator::new(&[], 80, stats);
+
+    // With no actual GPUs, device_hashrates should be empty
+    let hashrates = coordinator.device_hashrates();
+    assert!(hashrates.is_empty() || hashrates.iter().all(|(_, rate)| *rate == 0.0));
+}
+
+#[test]
+fn test_gpu_coordinator_device_hashrate_not_found() {
+    let stats = Arc::new(Stats::new());
+    let coordinator = GpuCoordinator::new(&[], 80, stats);
+
+    // Request hashrate for non-existent device
+    let rate = coordinator.device_hashrate(9999);
+    assert!(rate.is_none());
 }

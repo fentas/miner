@@ -787,4 +787,76 @@ mod tests {
         let preset = PoolPreset::default();
         assert_eq!(preset, PoolPreset::Ckpool);
     }
+
+    #[test]
+    fn test_mining_config_gpu_tuning_from_toml() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            enable_gpu = true
+            gpu_intensity = 75
+            gpu_workgroup_size = 512
+            gpu_batch_exp = 26
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.mining.enable_gpu);
+        assert_eq!(config.mining.gpu_intensity, 75);
+        assert_eq!(config.mining.gpu_workgroup_size, 512);
+        assert_eq!(config.mining.gpu_batch_exp, 26);
+    }
+
+    #[test]
+    fn test_mining_config_gpu_tuning_defaults_in_toml() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            enable_gpu = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        // Should use defaults for unspecified GPU tuning options
+        assert!(config.mining.enable_gpu);
+        assert_eq!(config.mining.gpu_intensity, 100);  // default
+        assert_eq!(config.mining.gpu_workgroup_size, 0);  // default
+        assert_eq!(config.mining.gpu_batch_exp, 25);  // default
+    }
+
+    #[test]
+    fn test_mining_config_gpu_devices_from_toml() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            enable_gpu = true
+            gpu_devices = [0, 1, 2]
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.gpu_devices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_mining_config_gpu_extreme_values() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            enable_gpu = true
+            gpu_intensity = 1
+            gpu_workgroup_size = 64
+            gpu_batch_exp = 20
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.gpu_intensity, 1);
+        assert_eq!(config.mining.gpu_workgroup_size, 64);
+        assert_eq!(config.mining.gpu_batch_exp, 20);
+    }
 }

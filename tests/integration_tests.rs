@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 // Re-use library code
-use btcminer::mining::{Job, Hasher, Stats, Coordinator, difficulty_to_target};
+use btcminer::mining::{Job, Hasher, Stats, Coordinator, GpuCoordinator, GpuTuningParams, difficulty_to_target};
 use btcminer::bitcoin::{BlockTemplate, SyncStatus};
 
 /// Test that the complete mining flow works correctly
@@ -445,4 +445,211 @@ fn test_block_hex_encoding() {
     // Should be valid hex
     assert!(hex::decode(&block_hex).is_ok());
     assert_eq!(hex::decode(&block_hex).unwrap(), block);
+}
+
+// ============================================================================
+// GPU Mining Integration Tests
+// ============================================================================
+
+/// Test GPU coordinator creation with tuning parameters
+#[test]
+fn test_gpu_coordinator_with_tuning_params() {
+    let stats = Arc::new(Stats::new());
+
+    let tuning = GpuTuningParams {
+        intensity: 80,
+        workgroup_size: 256,
+        batch_exp: 24,
+    };
+
+    let gpu_coord = GpuCoordinator::with_tuning(&[], tuning, Arc::clone(&stats));
+
+    // Should not panic, even without physical GPUs
+    assert!(!gpu_coord.is_running());
+
+    gpu_coord.start();
+    assert!(gpu_coord.is_running());
+
+    gpu_coord.stop();
+    assert!(!gpu_coord.is_running());
+}
+
+/// Test GPU coordinator job update flow
+#[test]
+fn test_gpu_coordinator_job_flow() {
+    let stats = Arc::new(Stats::new());
+    let gpu_coord = GpuCoordinator::new(&[], 100, stats);
+
+    // Create a test job
+    let mut job = Job::new("gpu-flow-test".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x12; 32];
+    job.merkle_root_override = Some([0x34; 32]);
+    job.target = [0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+    // Update job
+    gpu_coord.update_job(&job);
+
+    // Create GPU job directly for testing
+    let gpu_job = GpuCoordinator::create_gpu_job(&job);
+
+    // Verify GPU job structure
+    assert_eq!(gpu_job.job_id, "gpu-flow-test");
+    assert_eq!(gpu_job.target, job.target);
+    assert_eq!(gpu_job.midstate.len(), 8);
+    assert_eq!(gpu_job.tail.len(), 16);
+
+    // Clear job
+    gpu_coord.clear_job();
+}
+
+/// Test GPU coordinator with network target (solo mining mode)
+#[test]
+fn test_gpu_coordinator_solo_mining_job() {
+    let stats = Arc::new(Stats::new());
+    let gpu_coord = GpuCoordinator::new(&[], 100, stats);
+
+    let mut job = Job::new("gpu-solo-test".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x170c69e6; // Mainnet difficulty
+    job.prev_hash = [0x56; 32];
+    job.merkle_root_override = Some([0x78; 32]);
+
+    // Pool target (easier)
+    job.target = [0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+    // Network target (harder, for block detection)
+    job.network_target = Some([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F,
+                               0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                               0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                               0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+    gpu_coord.update_job(&job);
+
+    let gpu_job = GpuCoordinator::create_gpu_job(&job);
+
+    // Verify network target is preserved
+    assert!(gpu_job.network_target.is_some());
+    let net_target = gpu_job.network_target.unwrap();
+    assert!(net_target < gpu_job.target, "Network target should be harder than pool target");
+}
+
+/// Test CPU and GPU coordinators sharing stats
+#[test]
+fn test_cpu_gpu_shared_stats() {
+    // Create CPU coordinator first (it creates its own stats)
+    let cpu_coord = Coordinator::new(2);
+
+    // Share CPU coordinator's stats with GPU coordinator
+    let shared_stats = cpu_coord.stats().clone();
+    let gpu_coord = GpuCoordinator::new(&[], 100, Arc::clone(&shared_stats));
+
+    // Add CPU hashes through CPU coordinator
+    cpu_coord.stats().add_hashes(1_000_000);
+
+    // Add GPU hashes through the GPU coordinator's stats
+    gpu_coord.stats().add_gpu_hashes(2_000_000);
+
+    // Both should see the same stats since they share the same Arc
+    let snapshot = shared_stats.snapshot();
+    assert_eq!(snapshot.hashes, 1_000_000);
+    assert_eq!(snapshot.gpu_hashes, 2_000_000);
+
+    // Verify through coordinators
+    assert_eq!(cpu_coord.stats().get_hashes(), 1_000_000);
+    assert_eq!(gpu_coord.stats().get_gpu_hashes(), 2_000_000);
+}
+
+/// Test GPU tuning parameters with edge cases
+#[test]
+fn test_gpu_tuning_edge_cases() {
+    let stats = Arc::new(Stats::new());
+
+    // Minimum values
+    let tuning_min = GpuTuningParams {
+        intensity: 1,
+        workgroup_size: 64,
+        batch_exp: 20,
+    };
+    let coord_min = GpuCoordinator::with_tuning(&[], tuning_min.clone(), Arc::clone(&stats));
+    assert_eq!(coord_min.hashrate(), 0.0); // No actual GPUs
+
+    // Maximum values
+    let tuning_max = GpuTuningParams {
+        intensity: 100,
+        workgroup_size: 1024,
+        batch_exp: 28,
+    };
+    let coord_max = GpuCoordinator::with_tuning(&[], tuning_max.clone(), Arc::clone(&stats));
+    assert_eq!(coord_max.hashrate(), 0.0);
+
+    // Auto workgroup size
+    let tuning_auto = GpuTuningParams {
+        intensity: 100,
+        workgroup_size: 0, // Auto
+        batch_exp: 25,
+    };
+    let coord_auto = GpuCoordinator::with_tuning(&[], tuning_auto.clone(), Arc::clone(&stats));
+    assert!(!coord_auto.is_running());
+}
+
+/// Test GPU job midstate consistency
+#[test]
+fn test_gpu_job_midstate_consistency() {
+    let mut job = Job::new("midstate-consistency".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0xAB; 32];
+    job.merkle_root_override = Some([0xCD; 32]);
+    job.target = [0xFF; 32];
+
+    // Create multiple GPU jobs
+    let gpu_job1 = GpuCoordinator::create_gpu_job(&job);
+    let gpu_job2 = GpuCoordinator::create_gpu_job(&job);
+    let gpu_job3 = GpuCoordinator::create_gpu_job(&job);
+
+    // All should produce identical midstates
+    assert_eq!(gpu_job1.midstate, gpu_job2.midstate);
+    assert_eq!(gpu_job2.midstate, gpu_job3.midstate);
+    assert_eq!(gpu_job1.tail, gpu_job2.tail);
+    assert_eq!(gpu_job2.tail, gpu_job3.tail);
+
+    // Midstate should not be all zeros
+    assert!(!gpu_job1.midstate.iter().all(|&v| v == 0));
+}
+
+/// Test GPU coordinator device query methods
+#[test]
+fn test_gpu_coordinator_device_queries() {
+    let stats = Arc::new(Stats::new());
+    let gpu_coord = GpuCoordinator::new(&[], 100, stats);
+
+    // Device list (may be empty without physical GPUs)
+    let devices = gpu_coord.devices();
+
+    // Device hashrates
+    let hashrates = gpu_coord.device_hashrates();
+
+    // Combined hashrate
+    let total_rate = gpu_coord.hashrate();
+
+    // Query non-existent device
+    let missing_rate = gpu_coord.device_hashrate(9999);
+    assert!(missing_rate.is_none());
+
+    // These should all be consistent
+    if devices.is_empty() {
+        assert!(hashrates.is_empty());
+        assert_eq!(total_rate, 0.0);
+    }
 }
