@@ -554,9 +554,11 @@ blockmaxweight=4000000
         info!("Magnet: {}", magnet);
         info!("This is a ~9GB file - torrent provides trustless verification via infohash");
 
-        // Configure download engine
+        // Configure download engine with persistent session state
+        // database_path stores torrent session for proper resume across restarts
         let config = EngineConfig {
             download_dir: self.data_dir.clone(),
+            database_path: Some(self.data_dir.join("gosh-dl.db")),
             ..Default::default()
         };
 

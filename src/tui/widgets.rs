@@ -366,24 +366,27 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn draw_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
+    let key_style = Style::default().fg(Color::Cyan);
+    let action_style = Style::default().fg(Color::DarkGray);
+
     let mut shortcuts = vec![
-        Span::styled(" q ", Style::default().fg(Color::Black).bg(Color::White)),
-        Span::raw(" Quit  "),
-        Span::styled(" p ", Style::default().fg(Color::Black).bg(Color::White)),
-        Span::raw(" Pause  "),
-        Span::styled(" c ", Style::default().fg(Color::Black).bg(Color::White)),
-        Span::raw(" Clear  "),
-        Span::styled(" ↑↓ ", Style::default().fg(Color::Black).bg(Color::White)),
-        Span::raw(" Scroll  "),
+        Span::styled("<q>", key_style),
+        Span::styled(" Quit ", action_style),
+        Span::styled("<p>", key_style),
+        Span::styled(" Pause ", action_style),
+        Span::styled("<c>", key_style),
+        Span::styled(" Clear ", action_style),
+        Span::styled("<↑/↓>", key_style),
+        Span::styled(" Scroll ", action_style),
     ];
 
     // Add Bitcoin Core logs toggle if in managed mode
     if state.is_bitcoin_managed() {
-        shortcuts.push(Span::styled(" l ", Style::default().fg(Color::Black).bg(Color::White)));
+        shortcuts.push(Span::styled("<l>", key_style));
         if state.is_showing_bitcoin_logs() {
-            shortcuts.push(Span::raw(" Miner Logs  "));
+            shortcuts.push(Span::styled(" Miner Logs ", action_style));
         } else {
-            shortcuts.push(Span::raw(" Core Logs  "));
+            shortcuts.push(Span::styled(" Core Logs ", action_style));
         }
     }
 
