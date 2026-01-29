@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use super::{BitcoinError, BlockTemplate, SyncStatus};
 
 /// Bitcoin Core JSON-RPC client
+#[derive(Clone)]
 pub struct BitcoinRpc {
     client: Client,
     url: String,

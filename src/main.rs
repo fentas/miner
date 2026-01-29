@@ -280,8 +280,25 @@ async fn run_solo_mode_with_tui(
             tui_state.log_info("Waiting for headers sync before loading AssumeUTXO...");
             let tui = tui_state.clone();
             tui.set_downloading(true, "Headers (AssumeUTXO)");
-            match bitcoind.load_assumeutxo_with_progress(move |headers, target| {
-                tui.set_download_progress(headers, target);
+            match bitcoind.load_assumeutxo_with_progress(move |progress| {
+                use crate::bitcoin::LoadProgress;
+                match progress {
+                    LoadProgress::SyncingHeaders { current, target } => {
+                        tui.set_download_progress(current, target);
+                    }
+                    LoadProgress::LoadingSnapshot { elapsed_secs, progress_pct } => {
+                        // Encode: total = (elapsed_secs << 16) | (pct * 100, or 0xFFFF if unknown)
+                        let pct_encoded = progress_pct
+                            .map(|p| (p * 100.0) as u64)
+                            .unwrap_or(0xFFFF);
+                        let encoded_total = (elapsed_secs << 16) | pct_encoded;
+                        tui.set_downloading(true, "Loading AssumeUTXO Snapshot");
+                        tui.set_download_progress(0, encoded_total);
+                    }
+                    LoadProgress::AlreadySynced => {
+                        // Nothing to do, will return soon
+                    }
+                }
             }).await {
                 Ok(_) => {
                     tui_state.set_downloading(false, "");
@@ -755,27 +772,82 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                 "Waiting for headers sync before loading AssumeUTXO...".bright_white()
             );
             let last_progress = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let last_elapsed = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let loading_started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let last_progress_clone = last_progress.clone();
-            match bitcoind.load_assumeutxo_with_progress(move |headers, target| {
-                let progress = (headers as f64 / target as f64 * 100.0) as u64;
-                let last = last_progress_clone.load(std::sync::atomic::Ordering::Relaxed);
-                // Only print when progress changes
-                if progress > last {
-                    last_progress_clone.store(progress, std::sync::atomic::Ordering::Relaxed);
-                    let bar_width: usize = 30;
-                    let filled = (progress as usize * bar_width / 100).min(bar_width);
-                    let empty = bar_width.saturating_sub(filled);
-                    print!(
-                        "\r{} [{}{}] {:.1}% ({}/{})    ",
-                        "⏳".bright_yellow(),
-                        "█".repeat(filled).bright_cyan(),
-                        "░".repeat(empty).dimmed(),
-                        progress,
-                        headers.to_string().bright_cyan(),
-                        target.to_string().dimmed()
-                    );
-                    use std::io::Write;
-                    std::io::stdout().flush().ok();
+            let last_elapsed_clone = last_elapsed.clone();
+            let loading_started_clone = loading_started.clone();
+            match bitcoind.load_assumeutxo_with_progress(move |progress| {
+                use crate::bitcoin::LoadProgress;
+                match progress {
+                    LoadProgress::SyncingHeaders { current, target } => {
+                        let progress_pct = (current as f64 / target as f64 * 100.0) as u64;
+                        let last = last_progress_clone.load(std::sync::atomic::Ordering::Relaxed);
+                        // Only print when progress changes
+                        if progress_pct > last {
+                            last_progress_clone.store(progress_pct, std::sync::atomic::Ordering::Relaxed);
+                            let bar_width: usize = 30;
+                            let filled = (progress_pct as usize * bar_width / 100).min(bar_width);
+                            let empty = bar_width.saturating_sub(filled);
+                            print!(
+                                "\r{} [{}{}] {:.1}% ({}/{})    ",
+                                "⏳".bright_yellow(),
+                                "█".repeat(filled).bright_cyan(),
+                                "░".repeat(empty).dimmed(),
+                                progress_pct,
+                                current.to_string().bright_cyan(),
+                                target.to_string().dimmed()
+                            );
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                    LoadProgress::LoadingSnapshot { elapsed_secs, progress_pct } => {
+                        let was_started = loading_started_clone.swap(true, std::sync::atomic::Ordering::Relaxed);
+                        let prev_elapsed = last_elapsed_clone.load(std::sync::atomic::Ordering::Relaxed);
+
+                        // Print new line on first call
+                        if !was_started {
+                            println!();
+                        }
+                        // Update when elapsed time changes or percentage changes
+                        if elapsed_secs != prev_elapsed || !was_started {
+                            last_elapsed_clone.store(elapsed_secs, std::sync::atomic::Ordering::Relaxed);
+                            let mins = elapsed_secs / 60;
+                            let secs = elapsed_secs % 60;
+                            let time_str = if mins > 0 {
+                                format!("{}m {}s", mins, secs)
+                            } else {
+                                format!("{}s", secs)
+                            };
+
+                            // Show progress bar if percentage is available
+                            if let Some(pct) = progress_pct {
+                                let bar_width: usize = 30;
+                                let filled = (pct as usize * bar_width / 100).min(bar_width);
+                                let empty = bar_width.saturating_sub(filled);
+                                print!(
+                                    "\r{} [{}{}] {:.1}% ({} elapsed)   ",
+                                    "⏳".bright_yellow(),
+                                    "█".repeat(filled).bright_yellow(),
+                                    "░".repeat(empty).dimmed(),
+                                    pct,
+                                    time_str.bright_cyan()
+                                );
+                            } else {
+                                print!(
+                                    "\r{} Loading AssumeUTXO snapshot... ({} elapsed)   ",
+                                    "⏳".bright_yellow(),
+                                    time_str.bright_cyan()
+                                );
+                            }
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                    LoadProgress::AlreadySynced => {
+                        // Will return soon
+                    }
                 }
             }).await {
                 Ok(_) => {

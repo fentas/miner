@@ -3,7 +3,7 @@ use std::process::{Child, Command, Stdio};
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 
-use super::{BitcoinError, BitcoinRpc, SyncStatus};
+use super::{BitcoinError, BitcoinRpc, LoadProgress, SyncStatus};
 
 const BITCOIN_CORE_VERSION: &str = "30.2";
 const DOWNLOAD_BASE_URL: &str = "https://bitcoincore.org/bin";
@@ -903,14 +903,14 @@ blockmaxweight=4000000
     /// Load AssumeUTXO snapshot via RPC (requires Bitcoin Core to be running)
     /// Waits for headers to sync to snapshot height before loading
     pub async fn load_assumeutxo(&self) -> Result<(), BitcoinError> {
-        self.load_assumeutxo_with_progress(|_, _| {}).await
+        self.load_assumeutxo_with_progress(|_| {}).await
     }
 
-    /// Load AssumeUTXO snapshot with progress callback for header sync
-    /// Callback receives (current_headers, target_headers) during header sync
+    /// Load AssumeUTXO snapshot with progress callback
+    /// Callback receives LoadProgress enum indicating current phase
     pub async fn load_assumeutxo_with_progress<F>(&self, progress_callback: F) -> Result<(), BitcoinError>
     where
-        F: Fn(u64, u64) + Send + Sync + 'static,
+        F: Fn(LoadProgress) + Send + Sync + 'static,
     {
         let rpc = self.rpc.as_ref()
             .ok_or_else(|| BitcoinError::ConnectionError("Bitcoin Core not running".into()))?;
@@ -926,11 +926,15 @@ blockmaxweight=4000000
             match rpc.get_blockchain_info().await {
                 Ok(status) => {
                     // Report progress to callback
-                    progress_callback(status.headers, ASSUMEUTXO_HEIGHT);
+                    progress_callback(LoadProgress::SyncingHeaders {
+                        current: status.headers,
+                        target: ASSUMEUTXO_HEIGHT,
+                    });
 
                     // If already synced past snapshot height, no need to load it
                     if status.blocks >= ASSUMEUTXO_HEIGHT {
                         info!("Already synced to block {} - snapshot not needed", status.blocks);
+                        progress_callback(LoadProgress::AlreadySynced);
                         return Ok(());
                     }
                     if status.headers >= ASSUMEUTXO_HEIGHT {
@@ -953,13 +957,96 @@ blockmaxweight=4000000
 
         info!("Loading AssumeUTXO snapshot (height {})...", ASSUMEUTXO_HEIGHT);
 
-        // Call loadtxoutset RPC
-        rpc.load_utxo_snapshot(&snapshot_path).await?;
+        // Signal that we're now loading the snapshot
+        progress_callback(LoadProgress::LoadingSnapshot { elapsed_secs: 0, progress_pct: None });
 
-        info!("AssumeUTXO snapshot loaded successfully!");
-        info!("Node will sync remaining blocks in background");
+        // Open debug.log to monitor progress (Bitcoin Core logs loading percentage)
+        let debug_log_path = self.data_dir.join("debug.log");
+        let mut log_position = std::fs::metadata(&debug_log_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
 
-        Ok(())
+        // Spawn the RPC call in a background task so we can update progress
+        let rpc_clone = rpc.clone();
+        let snapshot_path_clone = snapshot_path.clone();
+        let load_task = tokio::spawn(async move {
+            rpc_clone.load_utxo_snapshot(&snapshot_path_clone).await
+        });
+
+        // Poll for completion while updating elapsed time and parsing debug.log
+        let start = std::time::Instant::now();
+        let mut last_progress_pct: Option<f64> = None;
+
+        loop {
+            // Check if the task is done
+            if load_task.is_finished() {
+                break;
+            }
+
+            // Try to parse progress from debug.log
+            if let Ok(file) = std::fs::File::open(&debug_log_path) {
+                use std::io::{BufRead, BufReader, Seek, SeekFrom};
+                let mut reader = BufReader::new(file);
+                if reader.seek(SeekFrom::Start(log_position)).is_ok() {
+                    loop {
+                        let mut line = String::new();
+                        match reader.read_line(&mut line) {
+                            Ok(0) => break, // EOF
+                            Ok(_) => {
+                                // Look for patterns like "loading coins...71.2%" or "PopulateAndValidateSnapshot...50%"
+                                if let Some(pct) = Self::parse_loading_progress(&line) {
+                                    last_progress_pct = Some(pct);
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    // Update position to current end
+                    log_position = reader.stream_position().unwrap_or(log_position);
+                }
+            }
+
+            // Update progress with elapsed time and any parsed percentage
+            let elapsed = start.elapsed().as_secs();
+            progress_callback(LoadProgress::LoadingSnapshot {
+                elapsed_secs: elapsed,
+                progress_pct: last_progress_pct,
+            });
+
+            sleep(Duration::from_millis(500)).await;
+        }
+
+        // Get the result
+        match load_task.await {
+            Ok(Ok(())) => {
+                info!("AssumeUTXO snapshot loaded successfully!");
+                info!("Node will sync remaining blocks in background");
+                Ok(())
+            }
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(BitcoinError::RpcError(format!("Task panicked: {}", e))),
+        }
+    }
+
+    /// Parse loading progress percentage from Bitcoin Core debug.log line
+    fn parse_loading_progress(line: &str) -> Option<f64> {
+        // Bitcoin Core logs patterns like:
+        // "2026-01-29T17:54:45Z [snapshot] 116000000 coins loaded (69.12%, 16711 MB)"
+        // Look for percentage pattern near snapshot keywords
+        if line.contains("[snapshot]") || line.contains("loadtxoutset") {
+            // Find percentage pattern like "(69.12%," or "(50%)"
+            if let Some(start) = line.find('(') {
+                if let Some(pct_pos) = line[start..].find('%') {
+                    let num_str = &line[start + 1..start + pct_pos];
+                    if let Ok(pct) = num_str.trim().parse::<f64>() {
+                        if (0.0..=100.0).contains(&pct) {
+                            return Some(pct);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 

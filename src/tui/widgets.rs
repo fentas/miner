@@ -156,10 +156,10 @@ fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
         ]),
     ];
 
-    // Add Bitcoin Core logs toggle if in managed mode
-    if state.is_bitcoin_managed() {
+    // Add Bitcoin Core logs toggle when Bitcoin Core is running (connected, syncing, or downloading)
+    if state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading() {
         lines.push(Line::from(vec![
-            Span::styled("<l>", key_style),
+            Span::styled("<Shift+l>", key_style),
             if state.is_showing_bitcoin_logs() {
                 Span::styled(" Miner Logs", action_style)
             } else {
@@ -391,11 +391,61 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
     if state.is_downloading() {
         let (current, total) = state.get_download_progress();
         let name = state.get_download_name();
-        let percent = if total > 0 {
-            ((current as f64 / total as f64) * 100.0).min(100.0)
-        } else {
-            0.0
-        };
+
+        // Handle snapshot loading progress
+        // Encoding: total contains packed (elapsed_secs << 16) | (pct_100 or 0xFFFF if unknown)
+        // When pct_100 == 0xFFFF (65535), show only elapsed time
+        // Otherwise show both percentage and elapsed time
+        if name.contains("Snapshot") {
+            let elapsed_secs = (total >> 16) as u64;
+            let pct_100 = (total & 0xFFFF) as u16;
+
+            let title = format!(" {} ", name);
+
+            if pct_100 == 0xFFFF || pct_100 == 0 {
+                // No percentage available, show elapsed time only
+                let elapsed_str = if elapsed_secs > 0 {
+                    format!("Loading... ({} elapsed)", format_duration(std::time::Duration::from_secs(elapsed_secs)))
+                } else {
+                    "Loading...".to_string()
+                };
+                let paragraph = Paragraph::new(elapsed_str)
+                    .block(Block::default().title(title).borders(Borders::ALL))
+                    .style(Style::default().fg(Color::Yellow))
+                    .alignment(Alignment::Center);
+                f.render_widget(paragraph, area);
+            } else {
+                // Show progress bar with percentage and elapsed time
+                let pct = pct_100 as f64 / 100.0;
+                let elapsed_str = format_duration(std::time::Duration::from_secs(elapsed_secs));
+                let label = format!("{:.1}% ({} elapsed)", pct, elapsed_str);
+                let gauge = Gauge::default()
+                    .block(Block::default().title(title).borders(Borders::ALL))
+                    .gauge_style(Style::default().fg(Color::Yellow))
+                    .percent(pct.min(100.0) as u16)
+                    .label(label);
+                f.render_widget(gauge, area);
+            }
+            return;
+        }
+
+        // Handle indeterminate progress (total == 0) - e.g., other loading states
+        if total == 0 {
+            let title = format!(" {} ", name);
+            let elapsed_str = if current > 0 {
+                format!("Loading... ({} elapsed)", format_duration(std::time::Duration::from_secs(current)))
+            } else {
+                "Loading...".to_string()
+            };
+            let paragraph = Paragraph::new(elapsed_str)
+                .block(Block::default().title(title).borders(Borders::ALL))
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Center);
+            f.render_widget(paragraph, area);
+            return;
+        }
+
+        let percent = ((current as f64 / total as f64) * 100.0).min(100.0);
 
         // Use different format for headers sync vs file download
         let (title, label, color) = if name.contains("Headers") {

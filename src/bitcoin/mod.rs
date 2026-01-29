@@ -46,6 +46,19 @@ pub struct SyncStatus {
     pub difficulty: f64,
 }
 
+/// Progress status for AssumeUTXO loading
+#[derive(Debug, Clone)]
+pub enum LoadProgress {
+    /// Syncing block headers (current, target)
+    SyncingHeaders { current: u64, target: u64 },
+    /// Loading the UTXO snapshot into Bitcoin Core
+    /// - elapsed_secs: how long we've been loading
+    /// - progress_pct: optional loading percentage from debug.log (0.0-100.0)
+    LoadingSnapshot { elapsed_secs: u64, progress_pct: Option<f64> },
+    /// Snapshot already not needed (blocks already synced past snapshot height)
+    AlreadySynced,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

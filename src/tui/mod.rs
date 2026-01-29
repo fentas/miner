@@ -90,9 +90,9 @@ impl TuiRunner {
                             let _ = self.cmd_tx.send(TuiCommand::ClearLogs);
                             self.state.clear_logs();
                         }
-                        // Toggle Bitcoin Core logs: l (only if managed mode)
-                        (KeyCode::Char('l'), KeyModifiers::NONE) => {
-                            if self.state.is_bitcoin_managed() {
+                        // Toggle Bitcoin Core logs: Shift+L (when Bitcoin Core is running)
+                        (KeyCode::Char('L'), KeyModifiers::SHIFT) | (KeyCode::Char('L'), KeyModifiers::NONE) => {
+                            if self.state.is_bitcoin_managed() || self.state.is_connected() || self.state.is_syncing() || self.state.is_downloading() {
                                 self.state.toggle_bitcoin_logs();
                                 let _ = self.cmd_tx.send(TuiCommand::ToggleBitcoinLogs);
                             }
