@@ -24,6 +24,7 @@ pub enum TuiCommand {
     Quit,
     TogglePause,
     ClearLogs,
+    ToggleBitcoinLogs,
 }
 
 /// Run the TUI in a separate thread
@@ -86,6 +87,13 @@ impl TuiRunner {
                         (KeyCode::Char('c'), KeyModifiers::NONE) => {
                             let _ = self.cmd_tx.send(TuiCommand::ClearLogs);
                             self.state.clear_logs();
+                        }
+                        // Toggle Bitcoin Core logs: l (only if managed mode)
+                        (KeyCode::Char('l'), KeyModifiers::NONE) => {
+                            if self.state.is_bitcoin_managed() {
+                                self.state.toggle_bitcoin_logs();
+                                let _ = self.cmd_tx.send(TuiCommand::ToggleBitcoinLogs);
+                            }
                         }
                         // Scroll logs: up/down, j/k, Page Up/Down
                         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {

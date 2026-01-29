@@ -251,7 +251,7 @@ async fn run_solo_mode_with_tui(
 
         // Download AssumeUTXO snapshot if enabled and not already present
         if cfg.bitcoind.assumeutxo && !bitcoind.has_assumeutxo_snapshot() {
-            tui_state.log_info("AssumeUTXO enabled - downloading UTXO snapshot (~7GB)...");
+            tui_state.log_info("AssumeUTXO enabled - downloading UTXO snapshot...");
             tui_state.set_downloading(true, "AssumeUTXO");
 
             let tui_state_clone = Arc::clone(&tui_state);
@@ -273,11 +273,10 @@ async fn run_solo_mode_with_tui(
 
         // Load AssumeUTXO if enabled (after Bitcoin Core starts)
         if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
-            // Wait a moment for RPC to be ready
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tui_state.log_info("Waiting for headers sync before loading AssumeUTXO...");
             match bitcoind.load_assumeutxo().await {
                 Ok(_) => tui_state.log_success("AssumeUTXO snapshot loaded - fast sync enabled"),
-                Err(e) => tui_state.log_warn(format!("AssumeUTXO load skipped: {}", e)),
+                Err(e) => tui_state.log_warn(format!("AssumeUTXO load failed: {}", e)),
             }
         }
 
@@ -357,6 +356,7 @@ async fn run_solo_mode_with_tui(
                     }
                 }
                 TuiCommand::ClearLogs => {}
+                TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 
@@ -461,6 +461,7 @@ async fn run_sv2_mode_with_tui(
                     }
                 }
                 TuiCommand::ClearLogs => {}
+                TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 
@@ -585,6 +586,7 @@ async fn run_pool_mode_with_tui(
                     }
                 }
                 TuiCommand::ClearLogs => {}
+                TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 

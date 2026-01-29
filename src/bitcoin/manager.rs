@@ -8,12 +8,13 @@ use super::{BitcoinError, BitcoinRpc, SyncStatus};
 const BITCOIN_CORE_VERSION: &str = "30.2";
 const DOWNLOAD_BASE_URL: &str = "https://bitcoincore.org/bin";
 
-// AssumeUTXO snapshot info (Bitcoin Core v28+)
+// AssumeUTXO snapshot info (Bitcoin Core v30+)
 // The hash is verified by Bitcoin Core when loading via loadtxoutset RPC.
 // Using torrent for trustless download - verified by infohash + Bitcoin Core hash check.
-// Alternative: generate with bitcoin-cli dumptxoutset utxo-840000.dat
-const ASSUMEUTXO_HEIGHT: u64 = 840000;
-const ASSUMEUTXO_MAGNET: &str = "magnet:?xt=urn:btih:596c26cc709e213fdfec997183ff67067241440c&dn=utxo-840000.dat&tr=udp://tracker.bitcoin.sprovoost.nl:6969";
+// Alternative: generate with bitcoin-cli dumptxoutset utxo-910000.dat rollback=910000
+// PR: https://github.com/bitcoin/bitcoin/pull/33274
+const ASSUMEUTXO_HEIGHT: u64 = 910000;
+const ASSUMEUTXO_MAGNET: &str = "magnet:?xt=urn:btih:7019437a2b1530624b100c0795cfc5f90b8322ca&dn=utxo-910000.dat&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.bitcoin.sprovoost.nl:6969";
 
 /// Manages Bitcoin Core installation and lifecycle
 pub struct BitcoindManager {
@@ -43,9 +44,11 @@ impl BitcoindManager {
             let appdata = std::env::var("APPDATA")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
+            // On Windows, Bitcoin Core uses "Bitcoin Core" as default data directory
+            let bitcoin_core_dir = appdata.join("Bitcoin Core");
             (
-                appdata.join("Bitcoin"),
-                appdata.join("Bitcoin Core"),
+                bitcoin_core_dir.clone(),
+                bitcoin_core_dir,
             )
         };
 
@@ -494,14 +497,26 @@ blockmaxweight=4000000
         self.assumeutxo
     }
 
-    /// Check if AssumeUTXO snapshot exists
+    /// Check if AssumeUTXO snapshot exists and download is complete
+    /// Uses a .complete marker file to track successful torrent completion
     pub fn has_assumeutxo_snapshot(&self) -> bool {
-        self.data_dir.join("utxo-snapshot.dat").exists()
+        let path = self.assumeutxo_snapshot_path();
+        let marker = self.data_dir.join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
+
+        // Both the snapshot and the completion marker must exist
+        if path.exists() && marker.exists() {
+            return true;
+        }
+
+        if path.exists() && !marker.exists() {
+            info!("AssumeUTXO snapshot exists but download may be incomplete - will verify via torrent");
+        }
+        false
     }
 
     /// Get AssumeUTXO snapshot path
     pub fn assumeutxo_snapshot_path(&self) -> PathBuf {
-        self.data_dir.join("utxo-snapshot.dat")
+        self.data_dir.join(format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT))
     }
 
     /// Download AssumeUTXO snapshot via BitTorrent with progress callback
@@ -519,6 +534,7 @@ blockmaxweight=4000000
     }
 
     /// Download AssumeUTXO snapshot from custom magnet URI
+    /// Torrent will automatically resume partial downloads and verify integrity
     pub async fn download_assumeutxo_magnet_with_progress<F>(
         &self,
         magnet: &str,
@@ -529,12 +545,7 @@ blockmaxweight=4000000
     {
         use gosh_dl::{DownloadEngine, EngineConfig, DownloadOptions, DownloadEvent};
 
-        // Check for existing snapshot (any utxo-*.dat file)
-        let snapshot_path = self.data_dir.join("utxo-840000.dat");
-        if snapshot_path.exists() {
-            info!("AssumeUTXO snapshot already downloaded");
-            return Ok(snapshot_path);
-        }
+        let snapshot_path = self.assumeutxo_snapshot_path();
 
         // Ensure data directory exists
         std::fs::create_dir_all(&self.data_dir)?;
@@ -579,9 +590,15 @@ blockmaxweight=4000000
                                 progress_callback(last_downloaded, total_size);
                             }
                         }
-                        DownloadEvent::Completed { id } if id == download_id => {
-                            info!("AssumeUTXO snapshot download completed");
-                            break;
+                        // Torrent transitions to Seeding/Completed state when download finishes
+                        DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
+                            match new_state {
+                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
+                                    info!("AssumeUTXO snapshot download complete");
+                                    break;
+                                }
+                                _ => {}
+                            }
                         }
                         DownloadEvent::Failed { id, error, .. } if id == download_id => {
                             return Err(BitcoinError::DownloadError(format!(
@@ -611,7 +628,13 @@ blockmaxweight=4000000
             ));
         }
 
-        info!("AssumeUTXO snapshot downloaded to {:?}", snapshot_path);
+        // Create completion marker file
+        let marker = self.data_dir.join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
+        if let Err(e) = std::fs::write(&marker, "complete") {
+            warn!("Failed to create completion marker: {}", e);
+        }
+
+        info!("AssumeUTXO snapshot downloaded and verified: {:?}", snapshot_path);
         Ok(snapshot_path)
     }
 
@@ -621,13 +644,42 @@ blockmaxweight=4000000
     }
 
     /// Load AssumeUTXO snapshot via RPC (requires Bitcoin Core to be running)
+    /// Waits for headers to sync to snapshot height before loading
     pub async fn load_assumeutxo(&self) -> Result<(), BitcoinError> {
         let rpc = self.rpc.as_ref()
             .ok_or_else(|| BitcoinError::ConnectionError("Bitcoin Core not running".into()))?;
 
-        let snapshot_path = self.data_dir.join("utxo-snapshot.dat");
+        let snapshot_path = self.assumeutxo_snapshot_path();
         if !snapshot_path.exists() {
             return Err(BitcoinError::NotSynced { progress: 0.0 });
+        }
+
+        // Wait for headers to sync to at least the snapshot height
+        info!("Waiting for headers to sync to height {}...", ASSUMEUTXO_HEIGHT);
+        loop {
+            match rpc.get_blockchain_info().await {
+                Ok(status) => {
+                    // If already synced past snapshot height, no need to load it
+                    if status.blocks >= ASSUMEUTXO_HEIGHT {
+                        info!("Already synced to block {} - snapshot not needed", status.blocks);
+                        return Ok(());
+                    }
+                    if status.headers >= ASSUMEUTXO_HEIGHT {
+                        info!("Headers synced to {} - ready to load snapshot", status.headers);
+                        break;
+                    }
+                    // Log progress every check
+                    let progress = (status.headers as f64 / ASSUMEUTXO_HEIGHT as f64) * 100.0;
+                    info!("Headers sync: {:.1}% ({}/{})", progress, status.headers, ASSUMEUTXO_HEIGHT);
+                }
+                Err(e) => {
+                    // Warmup errors are expected, keep waiting
+                    if !e.to_string().contains("warming up") {
+                        warn!("Error checking headers: {}", e);
+                    }
+                }
+            }
+            sleep(Duration::from_secs(2)).await;
         }
 
         info!("Loading AssumeUTXO snapshot (height {})...", ASSUMEUTXO_HEIGHT);

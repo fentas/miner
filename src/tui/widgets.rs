@@ -10,12 +10,6 @@ use ratatui::{
 use super::state::{LogLevel, TuiState};
 use crate::stats::format_hashrate;
 
-const BANNER: &str = r#" ____  _____ ____    __  __ _
-| __ )|_   _/ ___|  |  \/  (_)_ __   ___ _ __
-|  _ \  | || |      | |\/| | | '_ \ / _ \ '__|
-| |_) | | || |___   | |  | | | | | |  __/ |
-|____/  |_| \____|  |_|  |_|_|_| |_|\___|_|   "#;
-
 pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     let size = f.area();
 
@@ -23,9 +17,9 @@ pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // Header with banner
+            Constraint::Length(4),  // Compact header
             Constraint::Min(10),    // Body
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3),  // Footer with shortcuts
         ])
         .split(size);
 
@@ -35,24 +29,10 @@ pub fn draw_ui(f: &mut Frame, state: &TuiState) {
 }
 
 fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
-    // Split header into banner and status
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(50), Constraint::Min(30)])
-        .split(area);
-
-    // Banner
-    let banner_text: Vec<Line> = BANNER
-        .lines()
-        .map(|l| Line::from(Span::styled(l, Style::default().fg(Color::Yellow))))
-        .collect();
-    let banner = Paragraph::new(banner_text);
-    f.render_widget(banner, chunks[0]);
-
-    // Status info
     let mode = state.get_mode();
     let simd = state.get_simd_level();
     let workers = state.get_worker_count();
+    let web_url = state.get_web_url();
 
     let status_color = if state.is_connected() {
         Color::Green
@@ -71,62 +51,69 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
     };
 
     let paused_indicator = if state.is_paused() {
-        Span::styled(" [PAUSED]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        " [PAUSED]"
     } else {
-        Span::raw("")
+        ""
     };
 
-    // GPU info - distinguish between "user disabled" vs "not available"
+    // GPU info
     let gpu_configured = state.is_gpu_configured();
     let gpu_available = state.is_gpu_available();
     let gpu_devices = state.get_gpu_devices();
 
     let (gpu_text, gpu_color) = if gpu_available && !gpu_devices.is_empty() {
-        // GPU working with devices
         (format!("{} GPU(s)", gpu_devices.len()), Color::Green)
     } else if gpu_configured && !gpu_available {
-        // User enabled GPU but OpenCL not available
         ("N/A".to_string(), Color::Red)
     } else if !gpu_configured {
-        // User explicitly disabled GPU in config
         ("Off".to_string(), Color::DarkGray)
     } else {
-        // GPU configured but no devices found (edge case)
         ("No devices".to_string(), Color::Yellow)
     };
 
-    let status_lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!("v{}", env!("CARGO_PKG_VERSION")),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            ),
-            paused_indicator,
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Mode: "),
-            Span::styled(&mode, Style::default().fg(Color::Cyan)),
-        ]),
+    // Build second line with optional web URL
+    let second_line = if !web_url.is_empty() {
         Line::from(vec![
             Span::raw("SIMD: "),
             Span::styled(&simd, Style::default().fg(Color::Cyan)),
-            Span::raw("  GPU: "),
-            Span::styled(gpu_text, Style::default().fg(gpu_color)),
-        ]),
+            Span::raw("  │  "),
+            Span::raw("GPU: "),
+            Span::styled(&gpu_text, Style::default().fg(gpu_color)),
+            Span::raw("  │  "),
+            Span::raw("Web: "),
+            Span::styled(&web_url, Style::default().fg(Color::Blue)),
+        ])
+    } else {
         Line::from(vec![
+            Span::raw("SIMD: "),
+            Span::styled(&simd, Style::default().fg(Color::Cyan)),
+            Span::raw("  │  "),
+            Span::raw("GPU: "),
+            Span::styled(&gpu_text, Style::default().fg(gpu_color)),
+        ])
+    };
+
+    let header_lines = vec![
+        Line::from(vec![
+            Span::styled("BTC Miner ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::White)),
+            Span::styled(paused_indicator, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw("  │  "),
+            Span::raw("Mode: "),
+            Span::styled(&mode, Style::default().fg(Color::Cyan)),
+            Span::raw("  │  "),
             Span::raw("Workers: "),
             Span::styled(workers.to_string(), Style::default().fg(Color::Cyan)),
-        ]),
-        Line::from(vec![
+            Span::raw("  │  "),
             Span::raw("Status: "),
             Span::styled(status_text, Style::default().fg(status_color)),
         ]),
+        second_line,
     ];
 
-    let status = Paragraph::new(status_lines)
-        .block(Block::default().borders(Borders::NONE));
-    f.render_widget(status, chunks[1]);
+    let header = Paragraph::new(header_lines)
+        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray)));
+    f.render_widget(header, area);
 }
 
 fn draw_body(f: &mut Frame, area: Rect, state: &TuiState) {
@@ -374,25 +361,36 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
             .label(format!("{:.2}%", progress));
         f.render_widget(gauge, area);
     } else {
-        // Key bindings
-        let help_text = vec![Line::from(vec![
-            Span::styled(" q ", Style::default().fg(Color::Black).bg(Color::White)),
-            Span::raw(" Quit  "),
-            Span::styled(" p ", Style::default().fg(Color::Black).bg(Color::White)),
-            Span::raw(" Pause  "),
-            Span::styled(" c ", Style::default().fg(Color::Black).bg(Color::White)),
-            Span::raw(" Clear Logs  "),
-            Span::styled(" ↑↓ ", Style::default().fg(Color::Black).bg(Color::White)),
-            Span::raw(" Scroll  "),
-            Span::styled(" PgUp/PgDn ", Style::default().fg(Color::Black).bg(Color::White)),
-            Span::raw(" Page Scroll"),
-        ])];
-
-        let help = Paragraph::new(help_text)
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        f.render_widget(help, area);
+        draw_shortcuts(f, area, state);
     }
+}
+
+fn draw_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
+    let mut shortcuts = vec![
+        Span::styled(" q ", Style::default().fg(Color::Black).bg(Color::White)),
+        Span::raw(" Quit  "),
+        Span::styled(" p ", Style::default().fg(Color::Black).bg(Color::White)),
+        Span::raw(" Pause  "),
+        Span::styled(" c ", Style::default().fg(Color::Black).bg(Color::White)),
+        Span::raw(" Clear  "),
+        Span::styled(" ↑↓ ", Style::default().fg(Color::Black).bg(Color::White)),
+        Span::raw(" Scroll  "),
+    ];
+
+    // Add Bitcoin Core logs toggle if in managed mode
+    if state.is_bitcoin_managed() {
+        shortcuts.push(Span::styled(" l ", Style::default().fg(Color::Black).bg(Color::White)));
+        if state.is_showing_bitcoin_logs() {
+            shortcuts.push(Span::raw(" Miner Logs  "));
+        } else {
+            shortcuts.push(Span::raw(" Core Logs  "));
+        }
+    }
+
+    let help = Paragraph::new(vec![Line::from(shortcuts)])
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray)));
+    f.render_widget(help, area);
 }
 
 fn format_duration(duration: std::time::Duration) -> String {

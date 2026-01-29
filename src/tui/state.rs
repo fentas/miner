@@ -81,6 +81,7 @@ pub struct TuiState {
     mode: RwLock<String>,
     simd_level: RwLock<String>,
     worker_count: AtomicUsize,
+    web_url: RwLock<String>,
 
     // GPU info
     gpu_configured: AtomicBool,  // User enabled GPU in config
@@ -111,6 +112,10 @@ pub struct TuiState {
 
     // Control
     should_quit: AtomicBool,
+
+    // Bitcoin Core managed mode
+    bitcoin_managed: AtomicBool,
+    show_bitcoin_logs: AtomicBool,
 }
 
 impl TuiState {
@@ -127,6 +132,7 @@ impl TuiState {
             mode: RwLock::new("Initializing".to_string()),
             simd_level: RwLock::new("Unknown".to_string()),
             worker_count: AtomicUsize::new(0),
+            web_url: RwLock::new(String::new()),
             gpu_configured: AtomicBool::new(false),
             gpu_available: AtomicBool::new(false),
             gpu_devices: RwLock::new(Vec::new()),
@@ -145,6 +151,8 @@ impl TuiState {
             logs: RwLock::new(VecDeque::with_capacity(MAX_LOGS)),
             log_scroll: AtomicUsize::new(0),
             should_quit: AtomicBool::new(false),
+            bitcoin_managed: AtomicBool::new(false),
+            show_bitcoin_logs: AtomicBool::new(false),
         }
     }
 
@@ -211,6 +219,12 @@ impl TuiState {
         self.worker_count.store(count, Ordering::Relaxed);
     }
 
+    pub fn set_web_url(&self, url: impl Into<String>) {
+        if let Ok(mut u) = self.web_url.write() {
+            *u = url.into();
+        }
+    }
+
     pub fn set_gpu_configured(&self, configured: bool) {
         self.gpu_configured.store(configured, Ordering::Relaxed);
     }
@@ -269,6 +283,15 @@ impl TuiState {
         self.should_quit.store(true, Ordering::Relaxed);
     }
 
+    pub fn set_bitcoin_managed(&self, managed: bool) {
+        self.bitcoin_managed.store(managed, Ordering::Relaxed);
+    }
+
+    pub fn toggle_bitcoin_logs(&self) -> bool {
+        let prev = self.show_bitcoin_logs.fetch_xor(true, Ordering::Relaxed);
+        !prev
+    }
+
     // Getters
     pub fn get_hashrate(&self) -> f64 {
         f64::from_bits(self.hashrate.load(Ordering::Relaxed))
@@ -311,6 +334,10 @@ impl TuiState {
 
     pub fn get_worker_count(&self) -> usize {
         self.worker_count.load(Ordering::Relaxed)
+    }
+
+    pub fn get_web_url(&self) -> String {
+        self.web_url.read().map(|u| u.clone()).unwrap_or_default()
     }
 
     pub fn is_gpu_configured(&self) -> bool {
@@ -379,6 +406,14 @@ impl TuiState {
 
     pub fn should_quit(&self) -> bool {
         self.should_quit.load(Ordering::Relaxed)
+    }
+
+    pub fn is_bitcoin_managed(&self) -> bool {
+        self.bitcoin_managed.load(Ordering::Relaxed)
+    }
+
+    pub fn is_showing_bitcoin_logs(&self) -> bool {
+        self.show_bitcoin_logs.load(Ordering::Relaxed)
     }
 
     // Logging
