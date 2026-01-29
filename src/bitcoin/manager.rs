@@ -903,6 +903,15 @@ blockmaxweight=4000000
     /// Load AssumeUTXO snapshot via RPC (requires Bitcoin Core to be running)
     /// Waits for headers to sync to snapshot height before loading
     pub async fn load_assumeutxo(&self) -> Result<(), BitcoinError> {
+        self.load_assumeutxo_with_progress(|_, _| {}).await
+    }
+
+    /// Load AssumeUTXO snapshot with progress callback for header sync
+    /// Callback receives (current_headers, target_headers) during header sync
+    pub async fn load_assumeutxo_with_progress<F>(&self, progress_callback: F) -> Result<(), BitcoinError>
+    where
+        F: Fn(u64, u64) + Send + Sync + 'static,
+    {
         let rpc = self.rpc.as_ref()
             .ok_or_else(|| BitcoinError::ConnectionError("Bitcoin Core not running".into()))?;
 
@@ -916,6 +925,9 @@ blockmaxweight=4000000
         loop {
             match rpc.get_blockchain_info().await {
                 Ok(status) => {
+                    // Report progress to callback
+                    progress_callback(status.headers, ASSUMEUTXO_HEIGHT);
+
                     // If already synced past snapshot height, no need to load it
                     if status.blocks >= ASSUMEUTXO_HEIGHT {
                         info!("Already synced to block {} - snapshot not needed", status.blocks);

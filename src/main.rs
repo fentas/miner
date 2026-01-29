@@ -278,9 +278,19 @@ async fn run_solo_mode_with_tui(
         // Load AssumeUTXO if enabled (after Bitcoin Core starts)
         if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
             tui_state.log_info("Waiting for headers sync before loading AssumeUTXO...");
-            match bitcoind.load_assumeutxo().await {
-                Ok(_) => tui_state.log_success("AssumeUTXO snapshot loaded - fast sync enabled"),
-                Err(e) => tui_state.log_warn(format!("AssumeUTXO load failed: {}", e)),
+            let tui = tui_state.clone();
+            tui.set_downloading(true, "Headers (AssumeUTXO)");
+            match bitcoind.load_assumeutxo_with_progress(move |headers, target| {
+                tui.set_download_progress(headers, target);
+            }).await {
+                Ok(_) => {
+                    tui_state.set_downloading(false, "");
+                    tui_state.log_success("AssumeUTXO snapshot loaded - fast sync enabled");
+                }
+                Err(e) => {
+                    tui_state.set_downloading(false, "");
+                    tui_state.log_warn(format!("AssumeUTXO load failed: {}", e));
+                }
             }
         }
 
@@ -739,10 +749,43 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
         // Load AssumeUTXO if enabled (after Bitcoin Core starts)
         if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
-            info!("Waiting for headers sync before loading AssumeUTXO...");
-            match bitcoind.load_assumeutxo().await {
-                Ok(_) => println!("{} {}", "✓".bright_green(), "AssumeUTXO snapshot loaded - fast sync enabled".bright_white()),
-                Err(e) => warn!("AssumeUTXO load failed: {}", e),
+            println!(
+                "{} {}",
+                "⏳".bright_yellow(),
+                "Waiting for headers sync before loading AssumeUTXO...".bright_white()
+            );
+            let last_progress = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let last_progress_clone = last_progress.clone();
+            match bitcoind.load_assumeutxo_with_progress(move |headers, target| {
+                let progress = (headers as f64 / target as f64 * 100.0) as u64;
+                let last = last_progress_clone.load(std::sync::atomic::Ordering::Relaxed);
+                // Only print when progress changes
+                if progress > last {
+                    last_progress_clone.store(progress, std::sync::atomic::Ordering::Relaxed);
+                    let bar_width: usize = 30;
+                    let filled = (progress as usize * bar_width / 100).min(bar_width);
+                    let empty = bar_width.saturating_sub(filled);
+                    print!(
+                        "\r{} [{}{}] {:.1}% ({}/{})    ",
+                        "⏳".bright_yellow(),
+                        "█".repeat(filled).bright_cyan(),
+                        "░".repeat(empty).dimmed(),
+                        progress,
+                        headers.to_string().bright_cyan(),
+                        target.to_string().dimmed()
+                    );
+                    use std::io::Write;
+                    std::io::stdout().flush().ok();
+                }
+            }).await {
+                Ok(_) => {
+                    println!();
+                    println!("{} {}", "✓".bright_green(), "AssumeUTXO snapshot loaded - fast sync enabled".bright_white());
+                }
+                Err(e) => {
+                    println!();
+                    warn!("AssumeUTXO load failed: {}", e);
+                }
             }
         }
 

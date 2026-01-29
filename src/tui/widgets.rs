@@ -389,24 +389,32 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
 fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
     // Show download/sync progress bar if active
     if state.is_downloading() {
-        let (bytes, total) = state.get_download_progress();
+        let (current, total) = state.get_download_progress();
         let name = state.get_download_name();
         let percent = if total > 0 {
-            ((bytes as f64 / total as f64) * 100.0).min(100.0)
+            ((current as f64 / total as f64) * 100.0).min(100.0)
         } else {
             0.0
         };
 
-        let label = format!(
-            "{:.1}% ({:.1} GB / {:.1} GB)",
-            percent,
-            bytes as f64 / 1_000_000_000.0,
-            total as f64 / 1_000_000_000.0
-        );
+        // Use different format for headers sync vs file download
+        let (title, label, color) = if name.contains("Headers") {
+            (
+                format!(" Syncing {} ", name),
+                format!("{:.1}% ({} / {})", percent, format_large_number(current), format_large_number(total)),
+                Color::Yellow
+            )
+        } else {
+            (
+                format!(" Downloading {} ", name),
+                format!("{:.1}% ({:.1} GB / {:.1} GB)", percent, current as f64 / 1_000_000_000.0, total as f64 / 1_000_000_000.0),
+                Color::Cyan
+            )
+        };
 
         let gauge = Gauge::default()
-            .block(Block::default().title(format!(" Downloading {} ", name)).borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Color::Cyan))
+            .block(Block::default().title(title).borders(Borders::ALL))
+            .gauge_style(Style::default().fg(color))
             .percent(percent as u16)
             .label(label);
         f.render_widget(gauge, area);
