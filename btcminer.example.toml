@@ -39,8 +39,18 @@ enable_gpu = false
 # GPU devices (comma-separated, empty = all)
 # gpu_devices = [0, 1, 2]
 
-# GPU intensity (1-100)
-# gpu_intensity = 80
+# GPU intensity (1-100, default 100)
+# Higher = more GPU utilization, may affect system responsiveness
+# gpu_intensity = 100
+
+# GPU work group size (0 = auto, 64-1024)
+# Higher values may improve performance on modern GPUs (RDNA2+)
+# gpu_workgroup_size = 0
+
+# GPU batch size exponent (20-28, default 25 = 32M nonces)
+# Higher = better GPU utilization but more latency between job updates
+# 24 = 16M, 25 = 32M, 26 = 64M, 27 = 128M, 28 = 256M
+# gpu_batch_exp = 25
 
 # ============================================
 # BITCOIN CORE

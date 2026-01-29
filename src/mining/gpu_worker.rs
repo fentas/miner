@@ -48,6 +48,27 @@ pub struct GpuJob {
     pub network_target: Option<[u8; 32]>,
 }
 
+/// GPU tuning parameters
+#[derive(Clone, Debug)]
+pub struct GpuTuningParams {
+    /// Intensity (1-100)
+    pub intensity: u8,
+    /// Work group size (0 = auto)
+    pub workgroup_size: usize,
+    /// Batch size exponent (e.g., 25 = 2^25 nonces)
+    pub batch_exp: u8,
+}
+
+impl Default for GpuTuningParams {
+    fn default() -> Self {
+        Self {
+            intensity: 100,
+            workgroup_size: 0,
+            batch_exp: 25,
+        }
+    }
+}
+
 impl GpuCoordinator {
     /// Create a new GPU coordinator
     ///
@@ -56,6 +77,14 @@ impl GpuCoordinator {
     /// * `intensity` - Mining intensity (1-100)
     /// * `stats` - Shared stats for hash counting
     pub fn new(device_ids: &[u32], intensity: u8, stats: Arc<Stats>) -> Self {
+        Self::with_tuning(device_ids, GpuTuningParams {
+            intensity,
+            ..Default::default()
+        }, stats)
+    }
+
+    /// Create a new GPU coordinator with custom tuning parameters
+    pub fn with_tuning(device_ids: &[u32], tuning: GpuTuningParams, stats: Arc<Stats>) -> Self {
         let running = Arc::new(AtomicBool::new(false));
         let (job_tx, _job_rx) = watch::channel(None);
 
@@ -75,8 +104,12 @@ impl GpuCoordinator {
                 .collect()
         };
 
+        // Clamp batch_exp to valid range (20-28)
+        let batch_exp = tuning.batch_exp.clamp(20, 28);
+        let batch_size: u32 = 1 << batch_exp;
+
         for device in devices_to_use {
-            match gpu_manager.create_miner(device.id, intensity) {
+            match gpu_manager.create_miner(device.id, tuning.intensity) {
                 Ok(miner) => {
                     let device_clone = device.clone();
                     // Create per-device hashrate tracker
@@ -88,6 +121,7 @@ impl GpuCoordinator {
                         Arc::clone(&running),
                         job_tx.subscribe(),
                         Arc::clone(&device_hashrate),
+                        batch_size,
                     );
                     workers.push(GpuWorkerHandle {
                         device: device_clone,
@@ -117,11 +151,11 @@ impl GpuCoordinator {
         running: Arc<AtomicBool>,
         mut job_rx: watch::Receiver<Option<GpuJob>>,
         hashrate: Arc<AtomicU64>,
+        batch_size: u32,
     ) -> JoinHandle<()> {
         thread::Builder::new()
             .name(format!("gpu-miner-{}", device.id))
             .spawn(move || {
-                const BATCH_SIZE: u32 = 1 << 25; // 32M nonces per batch - doubled for better GPU utilization
                 let mut nonce: u32 = device.id * (u32::MAX / 16); // Offset by device ID
                 let mut last_job_id = String::new();
 
@@ -161,10 +195,10 @@ impl GpuCoordinator {
                     }
 
                     // Mine a batch
-                    let results = miner.mine(nonce, BATCH_SIZE);
+                    let results = miner.mine(nonce, batch_size);
 
                     // Update stats with actual hashes done
-                    let hashes_this_batch = BATCH_SIZE as u64;
+                    let hashes_this_batch = batch_size as u64;
                     stats.add_gpu_hashes(hashes_this_batch);
 
                     // Store current hashrate
@@ -185,7 +219,7 @@ impl GpuCoordinator {
                     }
 
                     // Advance nonce
-                    nonce = nonce.wrapping_add(BATCH_SIZE);
+                    nonce = nonce.wrapping_add(batch_size);
                 }
             })
             .expect("Failed to spawn GPU worker thread")

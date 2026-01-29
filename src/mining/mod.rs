@@ -8,7 +8,7 @@ pub use worker::{Worker, WorkerHandle};
 pub use job::{Job, difficulty_to_target};
 pub use hasher::Hasher;
 pub use sha256_simd::{SimdLevel, Midstate};
-pub use gpu_worker::GpuCoordinator;
+pub use gpu_worker::{GpuCoordinator, GpuTuningParams};
 
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;

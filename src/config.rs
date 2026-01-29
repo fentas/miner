@@ -109,6 +109,14 @@ pub struct MiningConfig {
     pub gpu_devices: Vec<u32>,
     #[serde(default = "default_gpu_intensity")]
     pub gpu_intensity: u8,
+    /// GPU work group size (0 = auto, 64-1024 recommended)
+    /// Higher values may improve performance on modern GPUs
+    #[serde(default)]
+    pub gpu_workgroup_size: usize,
+    /// GPU batch size as power of 2 (e.g., 25 = 2^25 = 32M nonces per batch)
+    /// Range: 20-28, default 25. Higher = better GPU utilization but more latency
+    #[serde(default = "default_gpu_batch_exp")]
+    pub gpu_batch_exp: u8,
 }
 
 fn default_true() -> bool {
@@ -119,6 +127,10 @@ fn default_gpu_intensity() -> u8 {
     100  // Maximum intensity for best GPU performance
 }
 
+fn default_gpu_batch_exp() -> u8 {
+    25  // 2^25 = 32M nonces per batch
+}
+
 impl Default for MiningConfig {
     fn default() -> Self {
         Self {
@@ -126,7 +138,9 @@ impl Default for MiningConfig {
             threads: 0,
             enable_gpu: false,
             gpu_devices: vec![],
-            gpu_intensity: 80,
+            gpu_intensity: 100,
+            gpu_workgroup_size: 0,  // Auto
+            gpu_batch_exp: 25,      // 32M nonces
         }
     }
 }
@@ -710,7 +724,9 @@ mod tests {
         assert_eq!(mining.threads, 0);
         assert!(!mining.enable_gpu);
         assert!(mining.gpu_devices.is_empty());
-        assert_eq!(mining.gpu_intensity, 80);
+        assert_eq!(mining.gpu_intensity, 100);
+        assert_eq!(mining.gpu_workgroup_size, 0);
+        assert_eq!(mining.gpu_batch_exp, 25);
     }
 
     #[test]

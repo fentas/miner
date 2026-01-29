@@ -590,9 +590,14 @@ async fn run_solo_mode_with_tui(
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
-        let gpu_coord = GpuCoordinator::new(
+        let tuning = mining::GpuTuningParams {
+            intensity: cfg.mining.gpu_intensity,
+            workgroup_size: cfg.mining.gpu_workgroup_size,
+            batch_exp: cfg.mining.gpu_batch_exp,
+        };
+        let gpu_coord = GpuCoordinator::with_tuning(
             &cfg.mining.gpu_devices,
-            cfg.mining.gpu_intensity,
+            tuning,
             coordinator.stats().clone(),
         );
         let gpu_count = gpu_coord.worker_count();
@@ -1501,9 +1506,14 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
-        let gpu_coord = GpuCoordinator::new(
+        let tuning = mining::GpuTuningParams {
+            intensity: cfg.mining.gpu_intensity,
+            workgroup_size: cfg.mining.gpu_workgroup_size,
+            batch_exp: cfg.mining.gpu_batch_exp,
+        };
+        let gpu_coord = GpuCoordinator::with_tuning(
             &cfg.mining.gpu_devices,
-            cfg.mining.gpu_intensity,
+            tuning,
             coordinator.stats().clone(),
         );
         let gpu_count = gpu_coord.worker_count();

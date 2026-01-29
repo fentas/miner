@@ -108,7 +108,9 @@ enable_cpu = true
 threads = 0                    # 0 = auto-detect
 enable_gpu = false             # Enable OpenCL/CUDA
 gpu_devices = []               # Specific GPU IDs or empty for all
-gpu_intensity = 80             # GPU intensity (1-100)
+gpu_intensity = 100            # GPU intensity (1-100)
+gpu_workgroup_size = 0         # 0 = auto, or 64-1024
+gpu_batch_exp = 25             # Batch size: 2^25 = 32M nonces
 
 [bitcoind]
 enabled = false
@@ -193,9 +195,23 @@ Enable GPU acceleration for additional hashrate:
 [mining]
 enable_cpu = true
 enable_gpu = true
-gpu_devices = []       # Empty = all GPUs, or [0, 1] for specific devices
-gpu_intensity = 80     # 1-100, higher = more GPU usage
+gpu_devices = []           # Empty = all GPUs, or [0, 1] for specific devices
+gpu_intensity = 100        # 1-100, higher = more GPU usage
+gpu_workgroup_size = 0     # 0 = auto, 64-1024 for manual tuning
+gpu_batch_exp = 25         # Batch size 2^n: 24=16M, 25=32M, 26=64M, 27=128M
 ```
+
+**GPU Tuning:**
+
+- `gpu_intensity` - Controls work size, 100 = maximum utilization
+- `gpu_workgroup_size` - Work group size for OpenCL (0 = auto-detect optimal)
+- `gpu_batch_exp` - Nonces per batch: higher = better utilization, more latency
+
+**Performance Tips (AMD RDNA2+):**
+
+- Use `gpu_workgroup_size = 1024` for modern AMD GPUs
+- Use `gpu_batch_exp = 26` or higher for dedicated GPUs
+- SHA256 on GPUs is fundamentally limited - ASICs are 100,000x faster
 
 **Install dependencies:**
 

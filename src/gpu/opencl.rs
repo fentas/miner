@@ -12,83 +12,175 @@ use super::{GpuDevice, GpuError};
 /// Maximum number of results that can be returned from a single kernel execution
 const MAX_RESULTS: usize = 64;
 
-/// SHA-256d OpenCL kernel source
+/// SHA-256d OpenCL kernel source - OPTIMIZED VERSION
 ///
 /// This kernel implements double SHA-256 hashing for Bitcoin mining.
-/// It uses midstate optimization: the first 64 bytes of the block header
-/// are pre-hashed on the CPU, and only the remaining 16 bytes + nonce
-/// are processed on the GPU.
+/// Optimizations:
+/// - Fully unrolled SHA256 rounds (no loops)
+/// - Inline message schedule expansion
+/// - Early exit on target comparison (check high bytes first)
+/// - Optimized register usage
+/// - Pre-computed constants fused into rounds
 const SHA256D_KERNEL: &str = r#"
-// SHA-256 round constants
-__constant uint K[64] = {
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-};
+// SHA-256 helper macros - optimized for GPU
+#define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+#define SHR(x, n) ((x) >> (n))
 
-// SHA-256 helper functions
-#define rotr(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
-#define Ch(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
-#define Maj(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-#define Sigma0(x) (rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22))
-#define Sigma1(x) (rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25))
-#define sigma0(x) (rotr(x, 7) ^ rotr(x, 18) ^ ((x) >> 3))
-#define sigma1(x) (rotr(x, 17) ^ rotr(x, 19) ^ ((x) >> 10))
+// SHA-256 functions
+#define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define EP0(x) (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+#define EP1(x) (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+#define SIG0(x) (ROTR(x, 7) ^ ROTR(x, 18) ^ SHR(x, 3))
+#define SIG1(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ SHR(x, 10))
 
-// SHA-256 compression function
-void sha256_transform(uint* state, const uint* block) {
-    uint W[64];
-    uint a, b, c, d, e, f, g, h;
-
-    // Prepare message schedule
-    for (int i = 0; i < 16; i++) {
-        W[i] = block[i];
-    }
-    for (int i = 16; i < 64; i++) {
-        W[i] = sigma1(W[i-2]) + W[i-7] + sigma0(W[i-15]) + W[i-16];
+// Unrolled round macro - performs one SHA256 round
+#define SHA256_ROUND(a, b, c, d, e, f, g, h, k, w) \
+    { \
+        uint t1 = h + EP1(e) + CH(e, f, g) + k + w; \
+        uint t2 = EP0(a) + MAJ(a, b, c); \
+        h = g; g = f; f = e; e = d + t1; \
+        d = c; c = b; b = a; a = t1 + t2; \
     }
 
-    // Initialize working variables
-    a = state[0]; b = state[1]; c = state[2]; d = state[3];
-    e = state[4]; f = state[5]; g = state[6]; h = state[7];
+// Message schedule expansion macro
+#define W_EXPAND(w, i) (SIG1(w[(i-2)&15]) + w[(i-7)&15] + SIG0(w[(i-15)&15]) + w[(i-16)&15])
 
-    // 64 rounds
-    for (int i = 0; i < 64; i++) {
-        uint T1 = h + Sigma1(e) + Ch(e, f, g) + K[i] + W[i];
-        uint T2 = Sigma0(a) + Maj(a, b, c);
-        h = g; g = f; f = e; e = d + T1;
-        d = c; c = b; b = a; a = T1 + T2;
-    }
+// Optimized SHA-256 transform with full loop unrolling
+inline void sha256_transform_unrolled(uint* state, uint* W) {
+    uint a = state[0], b = state[1], c = state[2], d = state[3];
+    uint e = state[4], f = state[5], g = state[6], h = state[7];
 
-    // Add compressed chunk to hash value
+    // Rounds 0-15 (message schedule already loaded)
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x428a2f98u, W[0]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x71374491u, W[1]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0xb5c0fbcfu, W[2]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0xe9b5dba5u, W[3]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x3956c25bu, W[4]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x59f111f1u, W[5]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x923f82a4u, W[6]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0xab1c5ed5u, W[7]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0xd807aa98u, W[8]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x12835b01u, W[9]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x243185beu, W[10]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x550c7dc3u, W[11]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x72be5d74u, W[12]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x80deb1feu, W[13]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0x9bdc06a7u, W[14]);
+    SHA256_ROUND(a,b,c,d,e,f,g,h, 0xc19bf174u, W[15]);
+
+    // Rounds 16-63 with inline message schedule expansion
+    W[0] = W_EXPAND(W, 16); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xe49b69c1u, W[0]);
+    W[1] = W_EXPAND(W, 17); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xefbe4786u, W[1]);
+    W[2] = W_EXPAND(W, 18); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x0fc19dc6u, W[2]);
+    W[3] = W_EXPAND(W, 19); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x240ca1ccu, W[3]);
+    W[4] = W_EXPAND(W, 20); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x2de92c6fu, W[4]);
+    W[5] = W_EXPAND(W, 21); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x4a7484aau, W[5]);
+    W[6] = W_EXPAND(W, 22); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x5cb0a9dcu, W[6]);
+    W[7] = W_EXPAND(W, 23); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x76f988dau, W[7]);
+    W[8] = W_EXPAND(W, 24); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x983e5152u, W[8]);
+    W[9] = W_EXPAND(W, 25); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xa831c66du, W[9]);
+    W[10] = W_EXPAND(W, 26); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xb00327c8u, W[10]);
+    W[11] = W_EXPAND(W, 27); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xbf597fc7u, W[11]);
+    W[12] = W_EXPAND(W, 28); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xc6e00bf3u, W[12]);
+    W[13] = W_EXPAND(W, 29); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xd5a79147u, W[13]);
+    W[14] = W_EXPAND(W, 30); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x06ca6351u, W[14]);
+    W[15] = W_EXPAND(W, 31); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x14292967u, W[15]);
+
+    W[0] = W_EXPAND(W, 32); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x27b70a85u, W[0]);
+    W[1] = W_EXPAND(W, 33); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x2e1b2138u, W[1]);
+    W[2] = W_EXPAND(W, 34); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x4d2c6dfcu, W[2]);
+    W[3] = W_EXPAND(W, 35); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x53380d13u, W[3]);
+    W[4] = W_EXPAND(W, 36); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x650a7354u, W[4]);
+    W[5] = W_EXPAND(W, 37); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x766a0abbu, W[5]);
+    W[6] = W_EXPAND(W, 38); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x81c2c92eu, W[6]);
+    W[7] = W_EXPAND(W, 39); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x92722c85u, W[7]);
+    W[8] = W_EXPAND(W, 40); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xa2bfe8a1u, W[8]);
+    W[9] = W_EXPAND(W, 41); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xa81a664bu, W[9]);
+    W[10] = W_EXPAND(W, 42); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xc24b8b70u, W[10]);
+    W[11] = W_EXPAND(W, 43); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xc76c51a3u, W[11]);
+    W[12] = W_EXPAND(W, 44); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xd192e819u, W[12]);
+    W[13] = W_EXPAND(W, 45); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xd6990624u, W[13]);
+    W[14] = W_EXPAND(W, 46); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xf40e3585u, W[14]);
+    W[15] = W_EXPAND(W, 47); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x106aa070u, W[15]);
+
+    W[0] = W_EXPAND(W, 48); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x19a4c116u, W[0]);
+    W[1] = W_EXPAND(W, 49); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x1e376c08u, W[1]);
+    W[2] = W_EXPAND(W, 50); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x2748774cu, W[2]);
+    W[3] = W_EXPAND(W, 51); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x34b0bcb5u, W[3]);
+    W[4] = W_EXPAND(W, 52); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x391c0cb3u, W[4]);
+    W[5] = W_EXPAND(W, 53); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x4ed8aa4au, W[5]);
+    W[6] = W_EXPAND(W, 54); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x5b9cca4fu, W[6]);
+    W[7] = W_EXPAND(W, 55); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x682e6ff3u, W[7]);
+    W[8] = W_EXPAND(W, 56); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x748f82eeu, W[8]);
+    W[9] = W_EXPAND(W, 57); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x78a5636fu, W[9]);
+    W[10] = W_EXPAND(W, 58); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x84c87814u, W[10]);
+    W[11] = W_EXPAND(W, 59); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x8cc70208u, W[11]);
+    W[12] = W_EXPAND(W, 60); SHA256_ROUND(a,b,c,d,e,f,g,h, 0x90befffau, W[12]);
+    W[13] = W_EXPAND(W, 61); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xa4506cebu, W[13]);
+    W[14] = W_EXPAND(W, 62); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xbef9a3f7u, W[14]);
+    W[15] = W_EXPAND(W, 63); SHA256_ROUND(a,b,c,d,e,f,g,h, 0xc67178f2u, W[15]);
+
     state[0] += a; state[1] += b; state[2] += c; state[3] += d;
     state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
 
-// Compare hash to target (big-endian comparison)
-bool meets_target(const uchar* hash, __global const uchar* target) {
-    for (int i = 0; i < 32; i++) {
-        if (hash[i] < target[i]) return true;
-        if (hash[i] > target[i]) return false;
-    }
+// Fast target check - early exit on first mismatch (Bitcoin targets have leading zeros)
+inline bool check_target_fast(__global const uchar* target, uint h0, uint h1, uint h2, uint h3,
+                              uint h4, uint h5, uint h6, uint h7) {
+    // Check high words first (most significant bytes) - they're most likely to fail
+    // Convert state words to big-endian for comparison
+    uchar t;
+
+    // Check word 0 (bytes 0-3)
+    t = target[0]; if ((h0 >> 24) > t) return false; if ((h0 >> 24) < t) return true;
+    t = target[1]; if (((h0 >> 16) & 0xff) > t) return false; if (((h0 >> 16) & 0xff) < t) return true;
+    t = target[2]; if (((h0 >> 8) & 0xff) > t) return false; if (((h0 >> 8) & 0xff) < t) return true;
+    t = target[3]; if ((h0 & 0xff) > t) return false; if ((h0 & 0xff) < t) return true;
+
+    // Check word 1 (bytes 4-7)
+    t = target[4]; if ((h1 >> 24) > t) return false; if ((h1 >> 24) < t) return true;
+    t = target[5]; if (((h1 >> 16) & 0xff) > t) return false; if (((h1 >> 16) & 0xff) < t) return true;
+    t = target[6]; if (((h1 >> 8) & 0xff) > t) return false; if (((h1 >> 8) & 0xff) < t) return true;
+    t = target[7]; if ((h1 & 0xff) > t) return false; if ((h1 & 0xff) < t) return true;
+
+    // Check word 2 (bytes 8-11)
+    t = target[8]; if ((h2 >> 24) > t) return false; if ((h2 >> 24) < t) return true;
+    t = target[9]; if (((h2 >> 16) & 0xff) > t) return false; if (((h2 >> 16) & 0xff) < t) return true;
+    t = target[10]; if (((h2 >> 8) & 0xff) > t) return false; if (((h2 >> 8) & 0xff) < t) return true;
+    t = target[11]; if ((h2 & 0xff) > t) return false; if ((h2 & 0xff) < t) return true;
+
+    // Check word 3 (bytes 12-15)
+    t = target[12]; if ((h3 >> 24) > t) return false; if ((h3 >> 24) < t) return true;
+    t = target[13]; if (((h3 >> 16) & 0xff) > t) return false; if (((h3 >> 16) & 0xff) < t) return true;
+    t = target[14]; if (((h3 >> 8) & 0xff) > t) return false; if (((h3 >> 8) & 0xff) < t) return true;
+    t = target[15]; if ((h3 & 0xff) > t) return false; if ((h3 & 0xff) < t) return true;
+
+    // Check remaining words (16-31) - usually target is 0xff here so quick pass
+    t = target[16]; if ((h4 >> 24) > t) return false; if ((h4 >> 24) < t) return true;
+    t = target[17]; if (((h4 >> 16) & 0xff) > t) return false; if (((h4 >> 16) & 0xff) < t) return true;
+    t = target[18]; if (((h4 >> 8) & 0xff) > t) return false; if (((h4 >> 8) & 0xff) < t) return true;
+    t = target[19]; if ((h4 & 0xff) > t) return false; if ((h4 & 0xff) < t) return true;
+
+    t = target[20]; if ((h5 >> 24) > t) return false; if ((h5 >> 24) < t) return true;
+    t = target[21]; if (((h5 >> 16) & 0xff) > t) return false; if (((h5 >> 16) & 0xff) < t) return true;
+    t = target[22]; if (((h5 >> 8) & 0xff) > t) return false; if (((h5 >> 8) & 0xff) < t) return true;
+    t = target[23]; if ((h5 & 0xff) > t) return false; if ((h5 & 0xff) < t) return true;
+
+    t = target[24]; if ((h6 >> 24) > t) return false; if ((h6 >> 24) < t) return true;
+    t = target[25]; if (((h6 >> 16) & 0xff) > t) return false; if (((h6 >> 16) & 0xff) < t) return true;
+    t = target[26]; if (((h6 >> 8) & 0xff) > t) return false; if (((h6 >> 8) & 0xff) < t) return true;
+    t = target[27]; if ((h6 & 0xff) > t) return false; if ((h6 & 0xff) < t) return true;
+
+    t = target[28]; if ((h7 >> 24) > t) return false; if ((h7 >> 24) < t) return true;
+    t = target[29]; if (((h7 >> 16) & 0xff) > t) return false; if (((h7 >> 16) & 0xff) < t) return true;
+    t = target[30]; if (((h7 >> 8) & 0xff) > t) return false; if (((h7 >> 8) & 0xff) < t) return true;
+    t = target[31]; if ((h7 & 0xff) > t) return false;
+
     return true;
 }
 
-// Main mining kernel
-// Each work-item tests one nonce
+// Main mining kernel - optimized version
 __kernel void sha256d_mining(
     __global const uint* midstate,      // Pre-computed state after first 64 bytes
     __global const uchar* tail,         // Last 16 bytes of header (before nonce)
@@ -102,59 +194,69 @@ __kernel void sha256d_mining(
     uint gid = get_global_id(0);
     uint nonce = nonce_start + gid;
 
-    // Build the second 64-byte block (only 16 bytes of data + nonce + padding)
-    uint block[16];
+    // Load midstate into registers
+    uint s0 = midstate[0], s1 = midstate[1], s2 = midstate[2], s3 = midstate[3];
+    uint s4 = midstate[4], s5 = midstate[5], s6 = midstate[6], s7 = midstate[7];
 
-    // Load tail bytes as little-endian words
-    for (int i = 0; i < 4; i++) {
-        block[i] = ((uint)tail[i*4]) | ((uint)tail[i*4+1] << 8) |
-                   ((uint)tail[i*4+2] << 16) | ((uint)tail[i*4+3] << 24);
-    }
+    // Build message schedule for second block (16 bytes tail + nonce + padding)
+    uint W[16];
 
-    // Set nonce (little-endian)
-    block[4] = nonce;
+    // Load tail bytes as little-endian words (optimized)
+    W[0] = ((uint)tail[0]) | ((uint)tail[1] << 8) | ((uint)tail[2] << 16) | ((uint)tail[3] << 24);
+    W[1] = ((uint)tail[4]) | ((uint)tail[5] << 8) | ((uint)tail[6] << 16) | ((uint)tail[7] << 24);
+    W[2] = ((uint)tail[8]) | ((uint)tail[9] << 8) | ((uint)tail[10] << 16) | ((uint)tail[11] << 24);
+    W[3] = ((uint)tail[12]) | ((uint)tail[13] << 8) | ((uint)tail[14] << 16) | ((uint)tail[15] << 24);
 
-    // SHA-256 padding
-    block[5] = 0x80000000;  // Padding bit
-    for (int i = 6; i < 15; i++) block[i] = 0;
-    block[15] = 640;  // Message length: 80 bytes = 640 bits
+    // Nonce (little-endian)
+    W[4] = nonce;
 
-    // First SHA-256: continue from midstate
-    uint state[8];
-    for (int i = 0; i < 8; i++) state[i] = midstate[i];
-    sha256_transform(state, block);
+    // SHA-256 padding (80-byte message)
+    W[5] = 0x80000000u;
+    W[6] = 0; W[7] = 0; W[8] = 0; W[9] = 0; W[10] = 0; W[11] = 0; W[12] = 0; W[13] = 0; W[14] = 0;
+    W[15] = 640;  // 80 bytes = 640 bits
 
-    // Prepare second SHA-256 input (hash the first hash)
-    uint block2[16];
-    for (int i = 0; i < 8; i++) block2[i] = state[i];
-    block2[8] = 0x80000000;  // Padding
-    for (int i = 9; i < 15; i++) block2[i] = 0;
-    block2[15] = 256;  // 32 bytes = 256 bits
+    // First SHA-256 transform
+    uint state[8] = {s0, s1, s2, s3, s4, s5, s6, s7};
+    sha256_transform_unrolled(state, W);
 
-    // Second SHA-256: start from initial state
-    state[0] = 0x6a09e667; state[1] = 0xbb67ae85;
-    state[2] = 0x3c6ef372; state[3] = 0xa54ff53a;
-    state[4] = 0x510e527f; state[5] = 0x9b05688c;
-    state[6] = 0x1f83d9ab; state[7] = 0x5be0cd19;
-    sha256_transform(state, block2);
+    // Prepare second hash input (hash of first result)
+    W[0] = state[0]; W[1] = state[1]; W[2] = state[2]; W[3] = state[3];
+    W[4] = state[4]; W[5] = state[5]; W[6] = state[6]; W[7] = state[7];
+    W[8] = 0x80000000u;
+    W[9] = 0; W[10] = 0; W[11] = 0; W[12] = 0; W[13] = 0; W[14] = 0;
+    W[15] = 256;  // 32 bytes = 256 bits
 
-    // Convert state to big-endian bytes for target comparison
-    uchar hash[32];
-    for (int i = 0; i < 8; i++) {
-        hash[i*4]   = (state[i] >> 24) & 0xff;
-        hash[i*4+1] = (state[i] >> 16) & 0xff;
-        hash[i*4+2] = (state[i] >> 8) & 0xff;
-        hash[i*4+3] = state[i] & 0xff;
-    }
+    // Second SHA-256 from initial state
+    state[0] = 0x6a09e667u; state[1] = 0xbb67ae85u;
+    state[2] = 0x3c6ef372u; state[3] = 0xa54ff53au;
+    state[4] = 0x510e527fu; state[5] = 0x9b05688cu;
+    state[6] = 0x1f83d9abu; state[7] = 0x5be0cd19u;
+    sha256_transform_unrolled(state, W);
 
-    // Check if hash meets target
-    if (meets_target(hash, target)) {
+    // Fast target check with early exit
+    if (check_target_fast(target, state[0], state[1], state[2], state[3],
+                          state[4], state[5], state[6], state[7])) {
         uint idx = atomic_inc(result_count);
         if (idx < max_results) {
             result_nonces[idx] = nonce;
-            for (int i = 0; i < 32; i++) {
-                result_hashes[idx * 32 + i] = hash[i];
-            }
+            // Store hash in big-endian
+            __global uchar* hash_out = result_hashes + idx * 32;
+            hash_out[0] = (state[0] >> 24); hash_out[1] = (state[0] >> 16) & 0xff;
+            hash_out[2] = (state[0] >> 8) & 0xff; hash_out[3] = state[0] & 0xff;
+            hash_out[4] = (state[1] >> 24); hash_out[5] = (state[1] >> 16) & 0xff;
+            hash_out[6] = (state[1] >> 8) & 0xff; hash_out[7] = state[1] & 0xff;
+            hash_out[8] = (state[2] >> 24); hash_out[9] = (state[2] >> 16) & 0xff;
+            hash_out[10] = (state[2] >> 8) & 0xff; hash_out[11] = state[2] & 0xff;
+            hash_out[12] = (state[3] >> 24); hash_out[13] = (state[3] >> 16) & 0xff;
+            hash_out[14] = (state[3] >> 8) & 0xff; hash_out[15] = state[3] & 0xff;
+            hash_out[16] = (state[4] >> 24); hash_out[17] = (state[4] >> 16) & 0xff;
+            hash_out[18] = (state[4] >> 8) & 0xff; hash_out[19] = state[4] & 0xff;
+            hash_out[20] = (state[5] >> 24); hash_out[21] = (state[5] >> 16) & 0xff;
+            hash_out[22] = (state[5] >> 8) & 0xff; hash_out[23] = state[5] & 0xff;
+            hash_out[24] = (state[6] >> 24); hash_out[25] = (state[6] >> 16) & 0xff;
+            hash_out[26] = (state[6] >> 8) & 0xff; hash_out[27] = state[6] & 0xff;
+            hash_out[28] = (state[7] >> 24); hash_out[29] = (state[7] >> 16) & 0xff;
+            hash_out[30] = (state[7] >> 8) & 0xff; hash_out[31] = state[7] & 0xff;
         }
     }
 }
