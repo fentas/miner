@@ -116,7 +116,7 @@ fn default_true() -> bool {
 }
 
 fn default_gpu_intensity() -> u8 {
-    80
+    100  // Maximum intensity for best GPU performance
 }
 
 impl Default for MiningConfig {

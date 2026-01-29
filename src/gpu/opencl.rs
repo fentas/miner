@@ -401,8 +401,10 @@ impl OpenCLMiner {
             .build()
             .map_err(|e| GpuError::OpenCL(e.to_string()))?;
 
-        // Calculate work group size based on intensity
-        let work_group_size = std::cmp::min(wgs, 256);
+        // Use optimal work group size for GPU architecture
+        // RDNA2 and newer AMD GPUs work well with 256-1024 work group sizes
+        // Default to device max, capped at 1024 for broad compatibility
+        let work_group_size = std::cmp::min(wgs, 1024);
 
         Ok(Self {
             device,
@@ -430,10 +432,9 @@ impl OpenCLMiner {
 
         // Calculate work size for GPU saturation
         // Modern GPUs need tens of millions of work items to stay fully utilized
-        // Target: process the full batch (16M) in a single kernel launch at intensity 100%
-        // This minimizes kernel launch overhead and synchronization barriers
-        // Base: 2^24 (16M) at intensity 100%, scaling down for lower intensities
-        let base_work = 1usize << 24; // 16M base (matches GPU worker batch size)
+        // RDNA2 GPUs especially benefit from larger work sizes
+        // Base: 2^25 (32M) at intensity 100% - doubled for better GPU utilization
+        let base_work = 1usize << 25; // 32M base - optimized for modern GPUs
         let target_size = ((base_work as f64) * intensity_factor) as usize;
 
         // Ensure work size is a multiple of work_group_size and doesn't exceed nonce_count

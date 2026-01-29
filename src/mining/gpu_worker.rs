@@ -114,7 +114,7 @@ impl GpuCoordinator {
         thread::Builder::new()
             .name(format!("gpu-miner-{}", device.id))
             .spawn(move || {
-                const BATCH_SIZE: u32 = 1 << 24; // 16M nonces per batch
+                const BATCH_SIZE: u32 = 1 << 25; // 32M nonces per batch - doubled for better GPU utilization
                 let mut nonce: u32 = device.id * (u32::MAX / 16); // Offset by device ID
                 let mut last_job_id = String::new();
 
