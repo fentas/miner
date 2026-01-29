@@ -296,3 +296,142 @@ impl Default for StratumV2Client {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stratum_v2_client_new() {
+        let client = StratumV2Client::new();
+        assert!(!client.is_connected());
+        assert_eq!(client.get_difficulty(), 1.0);
+        assert!(client.get_extranonce_prefix().is_empty());
+    }
+
+    #[test]
+    fn test_stratum_v2_client_default() {
+        let client = StratumV2Client::default();
+        assert!(!client.is_connected());
+        assert_eq!(client.get_difficulty(), 1.0);
+    }
+
+    #[test]
+    fn test_set_difficulty() {
+        let mut client = StratumV2Client::new();
+        client.set_difficulty(16.0);
+        assert_eq!(client.get_difficulty(), 16.0);
+    }
+
+    #[test]
+    fn test_build_setup_connection() {
+        let client = StratumV2Client::new();
+        let msg = client.build_setup_connection();
+
+        // Should have protocol, version, flags, and vendor info
+        assert!(msg.len() > 10);
+
+        // Check protocol version (Mining Protocol = 0x0000)
+        assert_eq!(msg[0], 0);
+        assert_eq!(msg[1], 0);
+
+        // Check version numbers
+        assert_eq!(msg[2], 2); // min version
+        assert_eq!(msg[3], 0);
+        assert_eq!(msg[4], 2); // version
+        assert_eq!(msg[5], 0);
+    }
+
+    #[test]
+    fn test_build_open_channel() {
+        let client = StratumV2Client::new();
+        let msg = client.build_open_channel();
+
+        // Should have request ID (4), user identity len (1), hash rate (4), max target (32)
+        assert!(msg.len() >= 41);
+
+        // Request ID should be 1
+        assert_eq!(u32::from_le_bytes([msg[0], msg[1], msg[2], msg[3]]), 1);
+    }
+
+    #[test]
+    fn test_parse_setup_response() {
+        let mut client = StratumV2Client::new();
+        // Empty response should succeed (simplified implementation)
+        assert!(client.parse_setup_response(&[]).is_ok());
+    }
+
+    #[test]
+    fn test_parse_channel_response_valid() {
+        let mut client = StratumV2Client::new();
+
+        // Channel ID = 42, no extranonce prefix
+        let data = vec![42, 0, 0, 0];
+        let result = client.parse_channel_response(&data);
+
+        assert!(result.is_ok());
+        assert_eq!(client.channel_id, 42);
+    }
+
+    #[test]
+    fn test_parse_channel_response_with_extranonce() {
+        let mut client = StratumV2Client::new();
+
+        // Channel ID = 1, extranonce prefix length = 3, prefix = [0xAA, 0xBB, 0xCC]
+        let data = vec![1, 0, 0, 0, 3, 0xAA, 0xBB, 0xCC];
+        let result = client.parse_channel_response(&data);
+
+        assert!(result.is_ok());
+        assert_eq!(client.channel_id, 1);
+        assert_eq!(client.extranonce_prefix, vec![0xAA, 0xBB, 0xCC]);
+    }
+
+    #[test]
+    fn test_parse_channel_response_invalid() {
+        let mut client = StratumV2Client::new();
+
+        // Too short data
+        let data = vec![1, 0];
+        let result = client.parse_channel_response(&data);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_new_mining_job_valid() {
+        let client = StratumV2Client::new();
+
+        // Build a minimal valid job message (72+ bytes)
+        let mut data = vec![0u8; 76];
+        // Job ID = 123
+        data[0..4].copy_from_slice(&123u32.to_le_bytes());
+        // Version = 0x20000000
+        data[4..8].copy_from_slice(&0x20000000u32.to_le_bytes());
+        // prev_hash (32 bytes starting at offset 8)
+        data[8..40].copy_from_slice(&[0xAB; 32]);
+        // merkle root (32 bytes starting at offset 40)
+        data[40..72].copy_from_slice(&[0xCD; 32]);
+        // nbits = 0x1d00ffff
+        data[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
+
+        let result = client.parse_new_mining_job(&data);
+        assert!(result.is_ok());
+
+        let job = result.unwrap();
+        assert_eq!(job.id, "123");
+        assert_eq!(job.version, 0x20000000);
+        assert_eq!(job.nbits, 0x1d00ffff);
+        assert_eq!(job.prev_hash, [0xAB; 32]);
+    }
+
+    #[test]
+    fn test_parse_new_mining_job_too_short() {
+        let client = StratumV2Client::new();
+
+        // Data too short
+        let data = vec![0u8; 50];
+        let result = client.parse_new_mining_job(&data);
+
+        assert!(result.is_err());
+    }
+}

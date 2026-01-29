@@ -14,12 +14,14 @@ pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     let size = f.area();
 
     // Main layout: header, body, footer
+    // Footer height varies: 1 for shortcuts only, 4 for download+shortcuts
+    let footer_height = if state.is_downloading() || state.is_syncing() { 4 } else { 1 };
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),  // Compact header
+            Constraint::Length(2),  // Header (2 lines)
             Constraint::Min(10),    // Body
-            Constraint::Length(3),  // Footer with shortcuts
+            Constraint::Length(footer_height),  // Footer
         ])
         .split(size);
 
@@ -111,8 +113,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
         second_line,
     ];
 
-    let header = Paragraph::new(header_lines)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray)));
+    let header = Paragraph::new(header_lines);
     f.render_widget(header, area);
 }
 
@@ -327,40 +328,53 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
-    // Download progress bar (e.g., AssumeUTXO)
-    if state.is_downloading() {
-        let (bytes, total) = state.get_download_progress();
-        let name = state.get_download_name();
-        let percent = if total > 0 {
-            ((bytes as f64 / total as f64) * 100.0).min(100.0)
+    // If downloading or syncing, show progress bar + shortcuts
+    if state.is_downloading() || state.is_syncing() {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),  // Progress bar
+                Constraint::Length(1),  // Shortcuts
+            ])
+            .split(area);
+
+        // Draw progress bar
+        if state.is_downloading() {
+            let (bytes, total) = state.get_download_progress();
+            let name = state.get_download_name();
+            let percent = if total > 0 {
+                ((bytes as f64 / total as f64) * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+
+            let label = format!(
+                "{:.1}% ({:.1} GB / {:.1} GB)",
+                percent,
+                bytes as f64 / 1_000_000_000.0,
+                total as f64 / 1_000_000_000.0
+            );
+
+            let gauge = Gauge::default()
+                .block(Block::default().title(format!(" Downloading {} ", name)).borders(Borders::ALL))
+                .gauge_style(Style::default().fg(Color::Cyan))
+                .percent(percent as u16)
+                .label(label);
+            f.render_widget(gauge, chunks[0]);
         } else {
-            0.0
-        };
+            let progress = state.get_sync_progress();
+            let gauge = Gauge::default()
+                .block(Block::default().title(" Syncing Blockchain ").borders(Borders::ALL))
+                .gauge_style(Style::default().fg(Color::Yellow))
+                .percent((progress) as u16)
+                .label(format!("{:.2}%", progress));
+            f.render_widget(gauge, chunks[0]);
+        }
 
-        let label = format!(
-            "{:.1}% ({:.1} GB / {:.1} GB)",
-            percent,
-            bytes as f64 / 1_000_000_000.0,
-            total as f64 / 1_000_000_000.0
-        );
-
-        let gauge = Gauge::default()
-            .block(Block::default().title(format!(" Downloading {} ", name)).borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Color::Cyan))
-            .percent(percent as u16)
-            .label(label);
-        f.render_widget(gauge, area);
-    }
-    // Sync progress bar if syncing
-    else if state.is_syncing() {
-        let progress = state.get_sync_progress();
-        let gauge = Gauge::default()
-            .block(Block::default().title(" Syncing Blockchain ").borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Color::Yellow))
-            .percent((progress) as u16)
-            .label(format!("{:.2}%", progress));
-        f.render_widget(gauge, area);
+        // Draw shortcuts below
+        draw_shortcuts(f, chunks[1], state);
     } else {
+        // Just shortcuts
         draw_shortcuts(f, area, state);
     }
 }

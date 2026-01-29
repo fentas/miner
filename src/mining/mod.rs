@@ -167,3 +167,184 @@ impl Drop for Coordinator {
         self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stats_new() {
+        let stats = Stats::new();
+        assert_eq!(stats.get_hashes(), 0);
+        assert_eq!(stats.shares_accepted.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.shares_rejected.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.blocks_found.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_stats_default() {
+        let stats = Stats::default();
+        assert_eq!(stats.get_hashes(), 0);
+    }
+
+    #[test]
+    fn test_stats_add_hashes() {
+        let stats = Stats::new();
+        stats.add_hashes(100);
+        assert_eq!(stats.get_hashes(), 100);
+
+        stats.add_hashes(50);
+        assert_eq!(stats.get_hashes(), 150);
+    }
+
+    #[test]
+    fn test_stats_reset_hashes() {
+        let stats = Stats::new();
+        stats.add_hashes(200);
+        assert_eq!(stats.get_hashes(), 200);
+
+        let old_value = stats.reset_hashes();
+        assert_eq!(old_value, 200);
+        assert_eq!(stats.get_hashes(), 0);
+    }
+
+    #[test]
+    fn test_stats_accept_share() {
+        let stats = Stats::new();
+        stats.accept_share();
+        stats.accept_share();
+        assert_eq!(stats.shares_accepted.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn test_stats_reject_share() {
+        let stats = Stats::new();
+        stats.reject_share();
+        assert_eq!(stats.shares_rejected.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn test_stats_found_block() {
+        let stats = Stats::new();
+        stats.found_block();
+        stats.found_block();
+        stats.found_block();
+        assert_eq!(stats.blocks_found.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn test_stats_snapshot() {
+        let stats = Stats::new();
+        stats.add_hashes(1000);
+        stats.accept_share();
+        stats.accept_share();
+        stats.reject_share();
+        stats.found_block();
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.hashes, 1000);
+        assert_eq!(snapshot.shares_accepted, 2);
+        assert_eq!(snapshot.shares_rejected, 1);
+        assert_eq!(snapshot.blocks_found, 1);
+    }
+
+    #[test]
+    fn test_stats_snapshot_default() {
+        let snapshot = StatsSnapshot::default();
+        assert_eq!(snapshot.hashes, 0);
+        assert_eq!(snapshot.shares_accepted, 0);
+        assert_eq!(snapshot.shares_rejected, 0);
+        assert_eq!(snapshot.blocks_found, 0);
+    }
+
+    #[test]
+    fn test_stats_snapshot_clone() {
+        let snapshot = StatsSnapshot {
+            hashes: 100,
+            shares_accepted: 5,
+            shares_rejected: 1,
+            blocks_found: 0,
+        };
+        let cloned = snapshot.clone();
+        assert_eq!(cloned.hashes, 100);
+        assert_eq!(cloned.shares_accepted, 5);
+    }
+
+    #[test]
+    fn test_share_struct() {
+        let share = Share {
+            job_id: "test_job_123".to_string(),
+            nonce: 0xDEADBEEF,
+            hash: [0xAB; 32],
+            worker_id: 7,
+        };
+
+        assert_eq!(share.job_id, "test_job_123");
+        assert_eq!(share.nonce, 0xDEADBEEF);
+        assert_eq!(share.hash, [0xAB; 32]);
+        assert_eq!(share.worker_id, 7);
+    }
+
+    #[test]
+    fn test_share_clone() {
+        let share = Share {
+            job_id: "job".to_string(),
+            nonce: 42,
+            hash: [0; 32],
+            worker_id: 0,
+        };
+
+        let cloned = share.clone();
+        assert_eq!(cloned.job_id, share.job_id);
+        assert_eq!(cloned.nonce, share.nonce);
+    }
+
+    #[test]
+    fn test_coordinator_new() {
+        let coord = Coordinator::new(4);
+        assert_eq!(coord.worker_count(), 4);
+        assert!(!coord.is_running());
+    }
+
+    #[test]
+    fn test_coordinator_start_stop() {
+        let coord = Coordinator::new(2);
+        assert!(!coord.is_running());
+
+        coord.start();
+        assert!(coord.is_running());
+
+        coord.stop();
+        assert!(!coord.is_running());
+    }
+
+    #[test]
+    fn test_coordinator_stats() {
+        let coord = Coordinator::new(1);
+        let stats = coord.stats();
+        stats.add_hashes(500);
+        assert_eq!(stats.get_hashes(), 500);
+    }
+
+    #[test]
+    fn test_coordinator_try_recv_share_empty() {
+        let mut coord = Coordinator::new(1);
+        // No shares have been found, should return None
+        assert!(coord.try_recv_share().is_none());
+    }
+
+    #[test]
+    fn test_coordinator_update_job() {
+        let coord = Coordinator::new(1);
+        let job = Job::new("test_job".to_string());
+        // Should not panic
+        coord.update_job(job);
+    }
+
+    #[test]
+    fn test_coordinator_clear_job() {
+        let coord = Coordinator::new(1);
+        // Should not panic
+        coord.clear_job();
+    }
+}

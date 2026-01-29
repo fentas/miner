@@ -225,4 +225,127 @@ mod tests {
         let rpc = BitcoinRpc::new("192.168.1.100", 18332);
         assert_eq!(rpc.url, "http://192.168.1.100:18332");
     }
+
+    #[test]
+    fn test_bitcoin_rpc_ipv6() {
+        let rpc = BitcoinRpc::new("::1", 8332);
+        assert_eq!(rpc.url, "http://::1:8332");
+    }
+
+    #[test]
+    fn test_bitcoin_rpc_auth_chaining() {
+        let rpc = BitcoinRpc::new("localhost", 8332)
+            .with_auth("rpcuser", "rpcpass");
+        assert!(rpc.auth.is_some());
+    }
+
+    #[test]
+    fn test_rpc_request_serialization() {
+        let request = RpcRequest {
+            jsonrpc: "1.0",
+            id: 42,
+            method: "getblockchaininfo".to_string(),
+            params: json!([]),
+        };
+
+        let serialized = serde_json::to_string(&request).unwrap();
+        assert!(serialized.contains("\"jsonrpc\":\"1.0\""));
+        assert!(serialized.contains("\"id\":42"));
+        assert!(serialized.contains("\"method\":\"getblockchaininfo\""));
+    }
+
+    #[test]
+    fn test_rpc_response_deserialization_success() {
+        let json = r#"{"result": {"blocks": 100}, "error": null}"#;
+        let response: RpcResponse = serde_json::from_str(json).unwrap();
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn test_rpc_response_deserialization_error() {
+        let json = r#"{"result": null, "error": {"code": -28, "message": "Warming up"}}"#;
+        let response: RpcResponse = serde_json::from_str(json).unwrap();
+        assert!(response.result.is_none());
+        assert!(response.error.is_some());
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -28);
+        assert_eq!(err.message, "Warming up");
+    }
+
+    #[test]
+    fn test_rpc_error_deserialization() {
+        let json = r#"{"code": -32601, "message": "Method not found"}"#;
+        let error: RpcError = serde_json::from_str(json).unwrap();
+        assert_eq!(error.code, -32601);
+        assert_eq!(error.message, "Method not found");
+    }
+
+    #[test]
+    fn test_sync_status_from_json() {
+        // Test parsing of blockchain info JSON
+        let result = json!({
+            "initialblockdownload": false,
+            "verificationprogress": 0.999999,
+            "headers": 800000,
+            "blocks": 800000,
+            "bestblockhash": "0000000000000000000abc",
+            "difficulty": 55621444139429.57
+        });
+
+        let status = SyncStatus {
+            synced: result["initialblockdownload"].as_bool() == Some(false),
+            progress: result["verificationprogress"].as_f64().unwrap_or(0.0) * 100.0,
+            headers: result["headers"].as_u64().unwrap_or(0),
+            blocks: result["blocks"].as_u64().unwrap_or(0),
+            best_block_hash: result["bestblockhash"].as_str().unwrap_or("").to_string(),
+            difficulty: result["difficulty"].as_f64().unwrap_or(0.0),
+        };
+
+        assert!(status.synced);
+        assert!(status.progress > 99.0);
+        assert_eq!(status.headers, 800000);
+        assert_eq!(status.blocks, 800000);
+    }
+
+    #[test]
+    fn test_block_template_parsing() {
+        let result = json!({
+            "version": 0x20000000_u64,
+            "previousblockhash": "00000000000000000001abc",
+            "curtime": 1700000000_u64,
+            "bits": "1703a8b4",
+            "height": 800001_u64,
+            "coinbasevalue": 312500000_u64,
+            "transactions": [
+                {"data": "tx1hex"},
+                {"data": "tx2hex"}
+            ],
+            "target": "0000000000000000000abc"
+        });
+
+        let template = BlockTemplate {
+            version: result["version"].as_u64().unwrap_or(0x20000000) as u32,
+            prev_block_hash: result["previousblockhash"].as_str().unwrap_or("").to_string(),
+            merkle_root: String::new(),
+            timestamp: result["curtime"].as_u64().unwrap_or(0),
+            bits: result["bits"].as_str().unwrap_or("").to_string(),
+            height: result["height"].as_u64().unwrap_or(0),
+            coinbase_value: result["coinbasevalue"].as_u64().unwrap_or(0),
+            transactions: result["transactions"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|tx| tx["data"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            target: result["target"].as_str().unwrap_or("").to_string(),
+        };
+
+        assert_eq!(template.version, 0x20000000);
+        assert_eq!(template.height, 800001);
+        assert_eq!(template.coinbase_value, 312500000);
+        assert_eq!(template.transactions.len(), 2);
+    }
 }

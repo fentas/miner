@@ -227,3 +227,159 @@ pub async fn start_server(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_hashrate_unit_hash() {
+        assert_eq!(format_hashrate_unit(0.0), "0.00 H/s");
+        assert_eq!(format_hashrate_unit(100.0), "100.00 H/s");
+        assert_eq!(format_hashrate_unit(999.99), "999.99 H/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_unit_kilohash() {
+        assert_eq!(format_hashrate_unit(1_000.0), "1.00 KH/s");
+        assert_eq!(format_hashrate_unit(5_500.0), "5.50 KH/s");
+        assert_eq!(format_hashrate_unit(999_999.0), "1000.00 KH/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_unit_megahash() {
+        assert_eq!(format_hashrate_unit(1_000_000.0), "1.00 MH/s");
+        assert_eq!(format_hashrate_unit(2_500_000.0), "2.50 MH/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_unit_gigahash() {
+        assert_eq!(format_hashrate_unit(1e9), "1.00 GH/s");
+        assert_eq!(format_hashrate_unit(15.5e9), "15.50 GH/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_unit_terahash() {
+        assert_eq!(format_hashrate_unit(1e12), "1.00 TH/s");
+        assert_eq!(format_hashrate_unit(100e12), "100.00 TH/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_unit_petahash() {
+        assert_eq!(format_hashrate_unit(1e15), "1.00 PH/s");
+        assert_eq!(format_hashrate_unit(2.5e15), "2.50 PH/s");
+    }
+
+    #[test]
+    fn test_format_uptime_seconds() {
+        assert_eq!(format_uptime(0), "0s");
+        assert_eq!(format_uptime(30), "30s");
+        assert_eq!(format_uptime(59), "59s");
+    }
+
+    #[test]
+    fn test_format_uptime_minutes() {
+        assert_eq!(format_uptime(60), "1m 0s");
+        assert_eq!(format_uptime(90), "1m 30s");
+        assert_eq!(format_uptime(3599), "59m 59s");
+    }
+
+    #[test]
+    fn test_format_uptime_hours() {
+        assert_eq!(format_uptime(3600), "1h 0m 0s");
+        assert_eq!(format_uptime(7200), "2h 0m 0s");
+        assert_eq!(format_uptime(3661), "1h 1m 1s");
+        assert_eq!(format_uptime(86399), "23h 59m 59s");
+    }
+
+    #[test]
+    fn test_format_uptime_days() {
+        assert_eq!(format_uptime(86400), "1d 0h 0m 0s");
+        assert_eq!(format_uptime(172800), "2d 0h 0m 0s");
+        assert_eq!(format_uptime(90061), "1d 1h 1m 1s");
+    }
+
+    #[test]
+    fn test_web_state_new() {
+        let state = WebState::new("stratum+tcp://pool:3333".to_string(), 8);
+        assert_eq!(state.pool_address, "stratum+tcp://pool:3333");
+        assert_eq!(state.worker_count, 8);
+    }
+
+    #[test]
+    fn test_stats_update_clone() {
+        let update = StatsUpdate {
+            hashrate: 1000.0,
+            hashrate_formatted: "1.00 KH/s".to_string(),
+            hashes: 50000,
+            shares_accepted: 10,
+            shares_rejected: 1,
+            blocks_found: 0,
+            uptime_seconds: 3600,
+            uptime_formatted: "1h 0m 0s".to_string(),
+            mining_paused: false,
+        };
+
+        let cloned = update.clone();
+        assert_eq!(cloned.hashrate, 1000.0);
+        assert_eq!(cloned.shares_accepted, 10);
+        assert!(!cloned.mining_paused);
+    }
+
+    #[test]
+    fn test_stats_update_serialize() {
+        let update = StatsUpdate {
+            hashrate: 5000.0,
+            hashrate_formatted: "5.00 KH/s".to_string(),
+            hashes: 100000,
+            shares_accepted: 5,
+            shares_rejected: 0,
+            blocks_found: 0,
+            uptime_seconds: 600,
+            uptime_formatted: "10m 0s".to_string(),
+            mining_paused: true,
+        };
+
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("\"hashrate\":5000.0"));
+        assert!(json.contains("\"mining_paused\":true"));
+        assert!(json.contains("\"shares_accepted\":5"));
+    }
+
+    #[tokio::test]
+    async fn test_web_state_paused() {
+        let state = WebState::new("pool".to_string(), 4);
+
+        // Initially not paused
+        assert!(!state.is_paused().await);
+
+        // Pause mining
+        state.set_paused(true).await;
+        assert!(state.is_paused().await);
+
+        // Resume mining
+        state.set_paused(false).await;
+        assert!(!state.is_paused().await);
+    }
+
+    #[tokio::test]
+    async fn test_web_state_update_stats() {
+        let state = WebState::new("pool".to_string(), 2);
+
+        let stats = StatsSnapshot {
+            hashes: 1_000_000,
+            shares_accepted: 10,
+            shares_rejected: 1,
+            blocks_found: 0,
+        };
+
+        state.update_stats(stats.clone(), 50_000.0).await;
+
+        let stored_stats = state.stats.read().await;
+        assert_eq!(stored_stats.hashes, 1_000_000);
+        assert_eq!(stored_stats.shares_accepted, 10);
+
+        let stored_hashrate = *state.hashrate.read().await;
+        assert!((stored_hashrate - 50_000.0).abs() < 0.1);
+    }
+}

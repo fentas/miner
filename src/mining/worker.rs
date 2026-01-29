@@ -183,3 +183,136 @@ impl Worker {
         extranonce2
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worker_handle_id() {
+        // We can't easily test spawn without a full runtime setup,
+        // but we can test the WorkerHandle struct
+        let handle = std::thread::spawn(|| {});
+        let worker_handle = WorkerHandle {
+            id: 42,
+            handle,
+        };
+        assert_eq!(worker_handle.id(), 42);
+        // Join the thread to clean up
+        assert!(worker_handle.join().is_ok());
+    }
+
+    #[test]
+    fn test_generate_extranonce2_length() {
+        // Create a minimal worker for testing extranonce2 generation
+        let (_share_tx, _share_rx) = mpsc::channel(10);
+        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let stats = Arc::new(Stats::new());
+        let running = Arc::new(AtomicBool::new(false));
+
+        let worker = Worker {
+            id: 5,
+            stats,
+            running,
+            job_rx,
+            share_tx: _share_tx,
+            hasher: Hasher::new(),
+            extranonce1: vec![0u8; 4],
+            extranonce2_size: 8,
+        };
+
+        let extranonce2 = worker.generate_extranonce2();
+        assert_eq!(extranonce2.len(), 8);
+
+        // First 4 bytes should contain worker id (5)
+        let id_from_extranonce = u32::from_le_bytes([
+            extranonce2[0], extranonce2[1], extranonce2[2], extranonce2[3]
+        ]);
+        assert_eq!(id_from_extranonce, 5);
+    }
+
+    #[test]
+    fn test_generate_extranonce2_small_size() {
+        let (_share_tx, _share_rx) = mpsc::channel(10);
+        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let stats = Arc::new(Stats::new());
+        let running = Arc::new(AtomicBool::new(false));
+
+        let worker = Worker {
+            id: 3,
+            stats,
+            running,
+            job_rx,
+            share_tx: _share_tx,
+            hasher: Hasher::new(),
+            extranonce1: vec![0u8; 4],
+            extranonce2_size: 2,
+        };
+
+        let extranonce2 = worker.generate_extranonce2();
+        assert_eq!(extranonce2.len(), 2);
+    }
+
+    #[test]
+    fn test_set_extranonce() {
+        let (_share_tx, _share_rx) = mpsc::channel(10);
+        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let stats = Arc::new(Stats::new());
+        let running = Arc::new(AtomicBool::new(false));
+
+        let mut worker = Worker {
+            id: 0,
+            stats,
+            running,
+            job_rx,
+            share_tx: _share_tx,
+            hasher: Hasher::new(),
+            extranonce1: vec![],
+            extranonce2_size: 4,
+        };
+
+        let new_extranonce1 = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        worker.set_extranonce(new_extranonce1.clone(), 6);
+
+        assert_eq!(worker.extranonce1, new_extranonce1);
+        assert_eq!(worker.extranonce2_size, 6);
+    }
+
+    #[test]
+    fn test_worker_different_ids_different_extranonce() {
+        let (_share_tx1, _) = mpsc::channel(10);
+        let (_share_tx2, _) = mpsc::channel(10);
+        let (_, job_rx1) = watch::channel(None::<Job>);
+        let (_, job_rx2) = watch::channel(None::<Job>);
+        let stats = Arc::new(Stats::new());
+        let running = Arc::new(AtomicBool::new(false));
+
+        let worker1 = Worker {
+            id: 0,
+            stats: stats.clone(),
+            running: running.clone(),
+            job_rx: job_rx1,
+            share_tx: _share_tx1,
+            hasher: Hasher::new(),
+            extranonce1: vec![0u8; 4],
+            extranonce2_size: 4,
+        };
+
+        let worker2 = Worker {
+            id: 1,
+            stats,
+            running,
+            job_rx: job_rx2,
+            share_tx: _share_tx2,
+            hasher: Hasher::new(),
+            extranonce1: vec![0u8; 4],
+            extranonce2_size: 4,
+        };
+
+        let en1 = worker1.generate_extranonce2();
+        let en2 = worker2.generate_extranonce2();
+
+        // Different workers should have different extranonce2
+        assert_ne!(en1, en2);
+    }
+}

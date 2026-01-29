@@ -575,18 +575,27 @@ blockmaxweight=4000000
         // Subscribe to events for progress
         let mut events = engine.subscribe();
 
-        // Track progress
+        // Track progress - use known size estimate for initial display
         let mut last_downloaded: u64 = 0;
-        let mut total_size: u64 = 9_772_098_907; // Known size estimate
+        let mut total_size: u64 = 9_772_098_907; // Known size estimate (~9.1 GB)
+
+        // Send initial progress callback so UI shows something immediately
+        progress_callback(0, total_size);
 
         loop {
             match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
                 Ok(Ok(event)) => {
                     match event {
                         DownloadEvent::Progress { id, progress } if id == download_id => {
+                            // Update total size when we get metadata
                             if let Some(total) = progress.total_size {
-                                total_size = total;
+                                if total != total_size {
+                                    total_size = total;
+                                    // Update UI with new total
+                                    progress_callback(last_downloaded, total_size);
+                                }
                             }
+                            // Update progress when downloaded bytes change
                             if progress.completed_size != last_downloaded {
                                 last_downloaded = progress.completed_size;
                                 progress_callback(last_downloaded, total_size);
