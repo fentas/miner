@@ -45,6 +45,23 @@ impl LogTimeFilter {
             _ => None,
         }
     }
+
+    /// Returns the maximum age for logs (None for Tail/All which don't filter by time)
+    pub fn max_age(&self) -> Option<std::time::Duration> {
+        match self {
+            LogTimeFilter::Tail => None,  // Handled separately (last N)
+            LogTimeFilter::OneMin => Some(std::time::Duration::from_secs(60)),
+            LogTimeFilter::FiveMin => Some(std::time::Duration::from_secs(5 * 60)),
+            LogTimeFilter::FifteenMin => Some(std::time::Duration::from_secs(15 * 60)),
+            LogTimeFilter::ThirtyMin => Some(std::time::Duration::from_secs(30 * 60)),
+            LogTimeFilter::OneHour => Some(std::time::Duration::from_secs(60 * 60)),
+            LogTimeFilter::All => None,  // Show all
+        }
+    }
+
+    pub fn is_tail(&self) -> bool {
+        matches!(self, LogTimeFilter::Tail)
+    }
 }
 
 /// Log level for TUI display
@@ -75,6 +92,7 @@ pub struct LogEntry {
     pub level: LogLevel,
     pub message: String,
     pub timestamp: String,
+    pub created_at: Instant,
 }
 
 impl LogEntry {
@@ -84,6 +102,7 @@ impl LogEntry {
             level,
             message: message.into(),
             timestamp: now.format("%H:%M:%S").to_string(),
+            created_at: Instant::now(),
         }
     }
 
@@ -107,6 +126,7 @@ impl LogEntry {
     pub fn with_timestamp(level: LogLevel, message: impl Into<String>, timestamp: impl Into<String>) -> Self {
         Self {
             level,
+            created_at: Instant::now(),
             message: message.into(),
             timestamp: timestamp.into(),
         }

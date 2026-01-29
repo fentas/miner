@@ -7,8 +7,11 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{LogLevel, LogTimeFilter, TuiState};
+use std::time::Instant;
+use super::state::{LogLevel, TuiState};
 use crate::stats::format_hashrate;
+
+const DEFAULT_LOG_TAIL: usize = 100;
 
 // TUI rendering functions are excluded from coverage as they are
 // difficult to test meaningfully (visual output verification)
@@ -151,24 +154,23 @@ fn draw_command_input(f: &mut Frame, area: Rect, state: &TuiState) {
 
 #[cfg(not(tarpaulin_include))]
 fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
-    // Layout: header (compact) + logs panel + shortcut bar
+    // Layout: full header (with shortcuts) + logs panel + command input
     let cmd_height = if state.is_command_mode() { 1 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // Compact header
+            Constraint::Length(7),  // Full header with shortcuts
             Constraint::Min(5),     // Logs
-            Constraint::Length(2),  // Shortcuts
             Constraint::Length(cmd_height), // Command input
         ])
         .split(area);
 
-    // Draw compact header (info only, no shortcuts column)
-    draw_header_info(f, chunks[0], state);
+    // Draw full header with shortcuts (same as main view)
+    draw_header(f, chunks[0], state);
 
     // Draw logs panel (full width)
     let showing_bitcoin = state.is_showing_bitcoin_logs();
-    let logs = if showing_bitcoin {
+    let all_logs = if showing_bitcoin {
         state.get_bitcoin_logs()
     } else {
         state.get_logs()
@@ -176,7 +178,23 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
     let scroll = state.get_log_scroll();
     let filter = state.get_log_time_filter();
 
-    let log_items: Vec<ListItem> = logs
+    // Apply time filter
+    let now = Instant::now();
+    let filtered_logs: Vec<_> = if filter.is_tail() {
+        // Tail: show last N logs
+        let skip = all_logs.len().saturating_sub(DEFAULT_LOG_TAIL);
+        all_logs.into_iter().skip(skip).collect()
+    } else if let Some(max_age) = filter.max_age() {
+        // Time-based filter
+        all_logs.into_iter()
+            .filter(|entry| now.duration_since(entry.created_at) <= max_age)
+            .collect()
+    } else {
+        // All logs
+        all_logs
+    };
+
+    let log_items: Vec<ListItem> = filtered_logs
         .iter()
         .skip(scroll)
         .map(|entry| {
@@ -202,7 +220,7 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
         })
         .collect();
 
-    let log_count = logs.len();
+    let log_count = filtered_logs.len();
     let filter_str = filter.as_str();
     let title = if showing_bitcoin {
         format!(" Bitcoin Core Logs ({}) [{}] ", log_count, filter_str)
@@ -218,91 +236,10 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
     let logs_list = List::new(log_items).block(logs_block);
     f.render_widget(logs_list, chunks[1]);
 
-    // Draw k9s-style shortcut bar
-    draw_focused_shortcuts(f, chunks[2], state);
-
     // Command input
     if state.is_command_mode() {
-        draw_command_input(f, chunks[3], state);
+        draw_command_input(f, chunks[2], state);
     }
-}
-
-#[cfg(not(tarpaulin_include))]
-fn draw_focused_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
-    let cyan = Style::default().fg(Color::Cyan);
-    let magenta = Style::default().fg(Color::Magenta);
-    let yellow = Style::default().fg(Color::Yellow);
-    let blue = Style::default().fg(Color::Blue);
-    let action = Style::default().fg(Color::DarkGray);
-
-    let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
-    let current_filter = state.get_log_time_filter();
-
-    // Build two-row k9s-style shortcut display
-    // Row 1: Time filters (0-6)
-    let mut row1_spans: Vec<Span> = vec![];
-    let time_filters = [
-        ("0", "tail", LogTimeFilter::Tail),
-        ("1", "1m", LogTimeFilter::OneMin),
-        ("2", "5m", LogTimeFilter::FiveMin),
-        ("3", "15m", LogTimeFilter::FifteenMin),
-        ("4", "30m", LogTimeFilter::ThirtyMin),
-        ("5", "1h", LogTimeFilter::OneHour),
-        ("6", "all", LogTimeFilter::All),
-    ];
-
-    for (i, (key, label, filter)) in time_filters.iter().enumerate() {
-        if i > 0 {
-            row1_spans.push(Span::raw(" "));
-        }
-        let key_style = if i % 2 == 0 { cyan } else { magenta };
-        let is_active = current_filter == *filter;
-        row1_spans.push(Span::styled(format!("<{}>", key), if is_active { yellow } else { key_style }));
-        row1_spans.push(Span::styled(format!(" {}", label), if is_active { blue } else { action }));
-    }
-
-    // Row 2: Actions + status
-    let mut row2_spans: Vec<Span> = vec![];
-
-    // Actions
-    let shortcuts = [
-        ("<esc>", "Unfocus", true),
-        ("<Shift+c>", "Clear", false),
-        ("<s>", "AutoScroll", true),
-    ];
-
-    for (i, (key, action_text, is_cyan)) in shortcuts.iter().enumerate() {
-        if i > 0 {
-            row2_spans.push(Span::raw("  "));
-        }
-        let key_style = if *is_cyan { cyan } else { magenta };
-        row2_spans.push(Span::styled(*key, key_style));
-        row2_spans.push(Span::styled(format!(" {}", action_text), action));
-    }
-
-    if has_bitcoin {
-        row2_spans.push(Span::raw("  "));
-        row2_spans.push(Span::styled("<Shift+l>", cyan));
-        row2_spans.push(Span::styled(
-            if state.is_showing_bitcoin_logs() { " Miner" } else { " Core" },
-            action
-        ));
-    }
-
-    // Status indicators (right side)
-    row2_spans.push(Span::raw("    "));
-    row2_spans.push(Span::styled("Autoscroll:", yellow));
-    row2_spans.push(Span::styled(
-        if state.is_autoscroll() { "On" } else { "Off" },
-        if state.is_autoscroll() { blue } else { action }
-    ));
-
-    let lines = vec![
-        Line::from(row1_spans),
-        Line::from(row2_spans),
-    ];
-    let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, area);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -332,15 +269,10 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
         Color::Red
     };
 
-    let peer_count = state.get_peer_count();
     let status_text = if state.is_syncing() {
         format!("Syncing {:.1}%", state.get_sync_progress())
     } else if state.is_connected() {
-        if state.is_bitcoin_managed() && peer_count > 0 {
-            format!("Connected ({} peers)", peer_count)
-        } else {
-            "Connected".to_string()
-        }
+        "Connected".to_string()
     } else {
         "Disconnected".to_string()
     };
@@ -401,41 +333,124 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
 
 #[cfg(not(tarpaulin_include))]
 fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
+    // k9s-style: two separate bordered boxes for shortcuts
     let cyan = Style::default().fg(Color::Cyan);
     let magenta = Style::default().fg(Color::Magenta);
     let action_style = Style::default().fg(Color::DarkGray);
 
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("<?>", cyan),
-            Span::styled(" Help", action_style),
-            Span::raw("  "),
-            Span::styled("<:>", magenta),
-            Span::styled(" Command", action_style),
-        ]),
-        Line::from(vec![
-            Span::styled("<p>", cyan),
-            Span::styled(" Pause", action_style),
-            Span::raw("  "),
-            Span::styled("<l>", magenta),
-            Span::styled(" Logs", action_style),
-        ]),
-    ];
+    // Split into two boxes side by side
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    // Add Bitcoin Core logs toggle when Bitcoin Core is running (connected, syncing, or downloading)
-    if state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading() {
-        lines.push(Line::from(vec![
-            Span::styled("<Shift+l>", cyan),
-            if state.is_showing_bitcoin_logs() {
-                Span::styled(" Miner Logs", action_style)
-            } else {
-                Span::styled(" Core Logs", action_style)
-            },
-        ]));
+    if state.is_logs_focused() {
+        // Focused logs mode: Time filters box + Actions box
+        let filter = state.get_log_time_filter();
+        let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
+
+        // Time filters box (left)
+        let filter_lines = vec![
+            Line::from(vec![
+                Span::styled("<0>", if filter.as_str() == "tail" { Style::default().fg(Color::Yellow) } else { cyan }),
+                Span::styled(" tail ", action_style),
+                Span::styled("<1>", if filter.as_str() == "1m" { Style::default().fg(Color::Yellow) } else { magenta }),
+                Span::styled(" 1m", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<2>", if filter.as_str() == "5m" { Style::default().fg(Color::Yellow) } else { cyan }),
+                Span::styled(" 5m   ", action_style),
+                Span::styled("<3>", if filter.as_str() == "15m" { Style::default().fg(Color::Yellow) } else { magenta }),
+                Span::styled(" 15m", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<4>", if filter.as_str() == "30m" { Style::default().fg(Color::Yellow) } else { cyan }),
+                Span::styled(" 30m  ", action_style),
+                Span::styled("<5>", if filter.as_str() == "1h" { Style::default().fg(Color::Yellow) } else { magenta }),
+                Span::styled(" 1h", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<6>", if filter.as_str() == "all" { Style::default().fg(Color::Yellow) } else { cyan }),
+                Span::styled(" all", action_style),
+            ]),
+        ];
+        let filter_block = Block::default()
+            .title(" Filters ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let filter_para = Paragraph::new(filter_lines).block(filter_block);
+        f.render_widget(filter_para, chunks[0]);
+
+        // Actions box (right)
+        let mut action_lines = vec![
+            Line::from(vec![
+                Span::styled("<esc>", cyan),
+                Span::styled(" Unfocus", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<s>", magenta),
+                Span::styled(if state.is_autoscroll() { " Scroll:On" } else { " Scroll:Off" }, action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<C>", cyan),
+                Span::styled(" Clear", action_style),
+            ]),
+        ];
+        if has_bitcoin {
+            action_lines.push(Line::from(vec![
+                Span::styled("<L>", magenta),
+                Span::styled(if state.is_showing_bitcoin_logs() { " Miner" } else { " Core" }, action_style),
+            ]));
+        }
+        let action_block = Block::default()
+            .title(" Actions ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let action_para = Paragraph::new(action_lines).block(action_block);
+        f.render_widget(action_para, chunks[1]);
+    } else {
+        // Normal mode: Shortcuts box + empty or Bitcoin box
+        let shortcut_lines = vec![
+            Line::from(vec![
+                Span::styled("<?>", cyan),
+                Span::styled(" Help", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<:>", magenta),
+                Span::styled(" Command", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<p>", cyan),
+                Span::styled(" Pause", action_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<l>", magenta),
+                Span::styled(" Logs", action_style),
+            ]),
+        ];
+        let shortcut_block = Block::default()
+            .title(" Shortcuts ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let shortcut_para = Paragraph::new(shortcut_lines).block(shortcut_block);
+        f.render_widget(shortcut_para, chunks[0]);
+
+        // Bitcoin/Actions box (right)
+        if state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading() {
+            let bitcoin_lines = vec![
+                Line::from(vec![
+                    Span::styled("<L>", cyan),
+                    Span::styled(if state.is_showing_bitcoin_logs() { " Miner Logs" } else { " Core Logs" }, action_style),
+                ]),
+            ];
+            let bitcoin_block = Block::default()
+                .title(" Bitcoin ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray));
+            let bitcoin_para = Paragraph::new(bitcoin_lines).block(bitcoin_block);
+            f.render_widget(bitcoin_para, chunks[1]);
+        }
     }
-
-    let shortcuts = Paragraph::new(lines);
-    f.render_widget(shortcuts, area);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -568,12 +583,13 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let pool = state.get_pool_address();
     let block_height = state.get_block_height();
     let difficulty = state.get_difficulty();
+    let peer_count = state.get_peer_count();
 
     let conn_block = Block::default()
         .title(" Network ")
         .borders(Borders::ALL);
 
-    let conn_text = vec![
+    let mut conn_text = vec![
         Line::from(vec![
             Span::raw("Pool: "),
             Span::styled(
@@ -600,6 +616,17 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
             ),
         ]),
     ];
+
+    // Add peers if in Bitcoin Core mode
+    if state.is_bitcoin_managed() {
+        conn_text.push(Line::from(vec![
+            Span::raw("Peers: "),
+            Span::styled(
+                peer_count.to_string(),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
 
     let conn = Paragraph::new(conn_text).block(conn_block);
     f.render_widget(conn, chunks[3]);

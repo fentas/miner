@@ -52,6 +52,24 @@ struct Args {
     log_format: Option<String>,
 }
 
+/// Convert compact bits format to difficulty
+fn bits_to_difficulty(bits: u32) -> f64 {
+    let exp = (bits >> 24) as i32;
+    let mant = (bits & 0x007fffff) as f64;
+    if mant == 0.0 {
+        return 0.0;
+    }
+    // Target = mant * 256^(exp-3)
+    // Difficulty = diff1_target / target
+    // diff1_target = 0xFFFF * 256^26 (when exp=29, mant=0xFFFF for difficulty 1)
+    // Simplified: difficulty = 0xFFFF * 256^26 / (mant * 256^(exp-3))
+    //           = 0xFFFF * 256^(26 - exp + 3) / mant
+    //           = 0xFFFF * 256^(29 - exp) / mant
+    let diff1_mant: f64 = 0xFFFF as f64;
+    let pow_diff = (29 - exp) as f64;
+    (diff1_mant / mant) * (256.0_f64).powf(pow_diff)
+}
+
 // Main entry point is excluded from coverage as it requires
 // full program execution which is not suitable for unit testing
 #[tokio::main]
@@ -273,6 +291,7 @@ async fn run_solo_mode_with_tui(
         bitcoind.start()?;
 
         tui_state.log_info("Starting Bitcoin Core...");
+        tui_state.set_bitcoin_managed(true);
         tui_state.set_syncing(true, 0.0);
 
         // Start tailing Bitcoin Core debug.log in background
@@ -360,6 +379,7 @@ async fn run_solo_mode_with_tui(
         match rpc.get_connection_count().await {
             Ok(count) if count > 0 => {
                 tui_state.log_success(format!("Connected to {} peer(s)", count));
+                tui_state.set_peer_count(count);
                 break;
             }
             Ok(_) => {
@@ -375,7 +395,6 @@ async fn run_solo_mode_with_tui(
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
     let coordinator = Coordinator::new(thread_count);
-    coordinator.start();
 
     // Setup idle monitor
     let idle_monitor = if cfg.idle.enabled {
@@ -392,7 +411,67 @@ async fn run_solo_mode_with_tui(
     let stats_interval = Duration::from_millis(500);
     let mut last_stats = Instant::now();
 
-    tui_state.log_success("Mining started");
+    // Wait for first valid block template before starting mining
+    tui_state.log_info("Waiting for block template...");
+    loop {
+        match rpc.get_block_template(&cfg.pool.payout_address).await {
+            Ok(template) => {
+                tui_state.set_block_height(template.height as u64);
+
+                // Calculate and set difficulty from bits
+                if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                    let difficulty = bits_to_difficulty(bits);
+                    tui_state.set_difficulty(difficulty as u64);
+                }
+
+                let mut job = mining::Job::new(format!("solo-{}", template.height));
+                job.version = template.version;
+                job.ntime = template.timestamp as u32;
+
+                // Parse prev_block_hash
+                if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
+                    if hash_bytes.len() == 32 {
+                        let mut prev_hash = [0u8; 32];
+                        prev_hash.copy_from_slice(&hash_bytes);
+                        prev_hash.reverse();
+                        job.prev_hash = prev_hash;
+                    }
+                }
+
+                // Parse nbits
+                if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                    job.nbits = bits;
+                }
+
+                // Parse target
+                if let Ok(target_bytes) = hex::decode(&template.target) {
+                    if target_bytes.len() == 32 {
+                        let mut target = [0u8; 32];
+                        target.copy_from_slice(&target_bytes);
+                        job.target = target;
+                        job.network_target = Some(target);
+                    }
+                }
+
+                job.clean_jobs = true;
+                coordinator.update_job(job);
+                coordinator.start();
+                tui_state.log_success("Mining started");
+                break;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("-9") && !err_str.contains("-10") {
+                    tui_state.log_warn(format!("Waiting for template: {}", e));
+                }
+                // Update peer count while waiting
+                if let Ok(count) = rpc.get_connection_count().await {
+                    tui_state.set_peer_count(count);
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
 
     loop {
         // Check for TUI commands
@@ -426,19 +505,76 @@ async fn run_solo_mode_with_tui(
             }
         }
 
-        // Get block template
+        // Check peer count before attempting block template
         let rpc = bitcoind.rpc().unwrap();
-        match rpc.get_block_template(&cfg.pool.payout_address).await {
-            Ok(template) => {
-                tui_state.set_block_height(template.height as u64);
+        let peer_count = rpc.get_connection_count().await.unwrap_or(0);
+        tui_state.set_peer_count(peer_count);
 
-                let mut job = mining::Job::new(format!("solo-{}", template.height));
-                job.version = template.version;
-                job.ntime = template.timestamp as u32;
-                coordinator.update_job(job);
+        if peer_count == 0 {
+            // No peers - pause mining and wait
+            coordinator.stop();
+            // Only log once per disconnect
+            static LOGGED_NO_PEERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !LOGGED_NO_PEERS.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                tui_state.log_warn("No peers connected - waiting for network...");
             }
-            Err(e) => {
-                tui_state.log_warn(format!("Block template error: {}", e));
+        } else {
+            // Reset the no-peers log flag when we have peers
+            static LOGGED_NO_PEERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            LOGGED_NO_PEERS.store(false, std::sync::atomic::Ordering::Relaxed);
+
+            // Ensure mining is running (if not paused)
+            if !tui_state.is_paused() {
+                coordinator.start();
+            }
+
+            // Get block template
+            match rpc.get_block_template(&cfg.pool.payout_address).await {
+                Ok(template) => {
+                    tui_state.set_block_height(template.height as u64);
+
+                    // Calculate and set difficulty from bits
+                    if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                        let difficulty = bits_to_difficulty(bits);
+                        tui_state.set_difficulty(difficulty as u64);
+                    }
+
+                    let mut job = mining::Job::new(format!("solo-{}", template.height));
+                    job.version = template.version;
+                    job.ntime = template.timestamp as u32;
+
+                    // Parse prev_block_hash (hex string to bytes, reversed for little-endian)
+                    if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
+                        if hash_bytes.len() == 32 {
+                            let mut prev_hash = [0u8; 32];
+                            prev_hash.copy_from_slice(&hash_bytes);
+                            prev_hash.reverse(); // Bitcoin uses little-endian
+                            job.prev_hash = prev_hash;
+                        }
+                    }
+
+                    // Parse nbits (compact difficulty target)
+                    if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                        job.nbits = bits;
+                    }
+
+                    // Parse target (hex string to bytes)
+                    if let Ok(target_bytes) = hex::decode(&template.target) {
+                        if target_bytes.len() == 32 {
+                            let mut target = [0u8; 32];
+                            target.copy_from_slice(&target_bytes);
+                            job.target = target;
+                            job.network_target = Some(target);
+                        }
+                    }
+
+                    job.clean_jobs = true;
+                    coordinator.update_job(job);
+                }
+                Err(e) => {
+                    // Log all errors for debugging
+                    tui_state.log_warn(format!("Block template error: {}", e));
+                }
             }
         }
 
@@ -451,11 +587,6 @@ async fn run_solo_mode_with_tui(
             tui_state.set_hashrate(hashrate);
             tui_state.set_total_hashes(stats.hashes);
             tui_state.set_shares(stats.shares_accepted, stats.shares_rejected);
-
-            // Update peer count
-            if let Ok(count) = rpc.get_connection_count().await {
-                tui_state.set_peer_count(count);
-            }
 
             last_stats = Instant::now();
         }
@@ -1066,10 +1197,37 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         }
     }
 
-    // Start mining coordinator
+    // Wait for peer connections before starting to mine
+    println!(
+        "{} {}",
+        "⏳".bright_yellow(),
+        "Waiting for peer connections...".bright_white()
+    );
+    let rpc = bitcoind.rpc().unwrap();
+    loop {
+        match rpc.get_connection_count().await {
+            Ok(count) if count > 0 => {
+                println!(
+                    "{} {} {}",
+                    "✓".bright_green(),
+                    "Connected to".bright_white(),
+                    format!("{} peer(s)", count).bright_cyan()
+                );
+                break;
+            }
+            Ok(_) => {
+                // No peers yet, wait
+            }
+            Err(e) => {
+                warn!("Peer check failed: {}", e);
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
+    // Create mining coordinator (but don't start yet)
     let thread_count = cfg.effective_threads();
     let coordinator = Coordinator::new(thread_count);
-    coordinator.start();
 
     // Setup idle monitor if enabled
     let idle_monitor = setup_idle_monitor(&cfg);
@@ -1080,7 +1238,60 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     let stats_interval = Duration::from_secs(cfg.logging.stats_interval as u64);
     let mut last_stats = Instant::now();
 
-    print_mining_started();
+    // Wait for first valid block template before starting mining
+    println!(
+        "{} {}",
+        "⏳".bright_yellow(),
+        "Waiting for block template...".bright_white()
+    );
+    loop {
+        match rpc.get_block_template(&cfg.pool.payout_address).await {
+            Ok(template) => {
+                let mut job = mining::Job::new(format!("solo-{}", template.height));
+                job.version = template.version;
+                job.ntime = template.timestamp as u32;
+
+                // Parse prev_block_hash (hex string to bytes, reversed for little-endian)
+                if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
+                    if hash_bytes.len() == 32 {
+                        let mut prev_hash = [0u8; 32];
+                        prev_hash.copy_from_slice(&hash_bytes);
+                        prev_hash.reverse(); // Bitcoin uses little-endian
+                        job.prev_hash = prev_hash;
+                    }
+                }
+
+                // Parse nbits (compact difficulty target)
+                if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                    job.nbits = bits;
+                }
+
+                // Parse target (hex string to bytes)
+                if let Ok(target_bytes) = hex::decode(&template.target) {
+                    if target_bytes.len() == 32 {
+                        let mut target = [0u8; 32];
+                        target.copy_from_slice(&target_bytes);
+                        job.target = target;
+                        job.network_target = Some(target);
+                    }
+                }
+
+                job.clean_jobs = true;
+                coordinator.update_job(job);
+                coordinator.start();
+                print_mining_started();
+                break;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                // Only log non-transient errors
+                if !err_str.contains("-9") && !err_str.contains("-10") {
+                    warn!("Waiting for template: {}", e);
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
 
     // Main loop: get block templates and mine
     loop {
@@ -1093,8 +1304,16 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             }
         }
 
+        // Check peer count
+        let peer_count = rpc.get_connection_count().await.unwrap_or(0);
+        if peer_count == 0 {
+            coordinator.stop();
+            warn!("No peers connected - waiting for network...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        }
+
         // Get block template
-        let rpc = bitcoind.rpc().unwrap();
         let template = match rpc.get_block_template(&cfg.pool.payout_address).await {
             Ok(t) => t,
             Err(e) => {
@@ -1104,11 +1323,37 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             }
         };
 
-        // Create mining job from template
+        // Create mining job from template with all required fields
         let mut job = mining::Job::new(format!("solo-{}", template.height));
         job.version = template.version;
         job.ntime = template.timestamp as u32;
 
+        // Parse prev_block_hash
+        if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
+            if hash_bytes.len() == 32 {
+                let mut prev_hash = [0u8; 32];
+                prev_hash.copy_from_slice(&hash_bytes);
+                prev_hash.reverse();
+                job.prev_hash = prev_hash;
+            }
+        }
+
+        // Parse nbits
+        if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+            job.nbits = bits;
+        }
+
+        // Parse target
+        if let Ok(target_bytes) = hex::decode(&template.target) {
+            if target_bytes.len() == 32 {
+                let mut target = [0u8; 32];
+                target.copy_from_slice(&target_bytes);
+                job.target = target;
+                job.network_target = Some(target);
+            }
+        }
+
+        job.clean_jobs = true;
         coordinator.update_job(job);
 
         // Print stats periodically

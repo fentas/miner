@@ -1,7 +1,7 @@
 mod state;
 mod widgets;
 
-pub use state::{TuiState, LogEntry, LogLevel, LogTimeFilter};
+pub use state::{TuiState, LogEntry, LogLevel};
 pub use widgets::draw_ui;
 
 use std::io;
