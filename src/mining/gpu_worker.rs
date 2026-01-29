@@ -117,9 +117,6 @@ impl GpuCoordinator {
                 const BATCH_SIZE: u32 = 1 << 24; // 16M nonces per batch
                 let mut nonce: u32 = device.id * (u32::MAX / 16); // Offset by device ID
                 let mut last_job_id = String::new();
-                let mut batches_mined: u64 = 0;
-
-                eprintln!("[GPU {}] Worker thread started", device.id);
 
                 loop {
                     // Wait for running flag
@@ -143,7 +140,6 @@ impl GpuCoordinator {
 
                     // Reset nonce on new job
                     if job.job_id != last_job_id {
-                        eprintln!("[GPU {}] New job: {} (batches mined so far: {})", device.id, job.job_id, batches_mined);
                         last_job_id = job.job_id.clone();
                         nonce = device.id * (u32::MAX / 16);
 
@@ -159,21 +155,10 @@ impl GpuCoordinator {
 
                     // Mine a batch
                     let results = miner.mine(nonce, BATCH_SIZE);
-                    batches_mined += 1;
-
-                    // Log first few batches for debugging
-                    if batches_mined <= 3 {
-                        eprintln!("[GPU {}] Mined batch {}: {} nonces, {} results", device.id, batches_mined, BATCH_SIZE, results.len());
-                    }
 
                     // Update stats with actual hashes done
                     let hashes_this_batch = BATCH_SIZE as u64;
                     stats.add_gpu_hashes(hashes_this_batch);
-
-                    // Log total GPU hashes periodically
-                    if batches_mined % 10 == 0 {
-                        eprintln!("[GPU {}] Total GPU hashes: {}", device.id, stats.get_gpu_hashes());
-                    }
 
                     // Store current hashrate
                     hashrate.store(miner.hashrate().to_bits(), Ordering::Relaxed);

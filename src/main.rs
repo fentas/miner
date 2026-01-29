@@ -851,15 +851,6 @@ async fn run_solo_mode_with_tui(
 
             // Update GPU hashrate if enabled
             if gpu_coordinator.is_some() {
-                // Debug: log GPU hashes every 10 seconds
-                static mut LAST_GPU_LOG: Option<std::time::Instant> = None;
-                unsafe {
-                    let now = std::time::Instant::now();
-                    if LAST_GPU_LOG.map_or(true, |t| now.duration_since(t).as_secs() >= 10) {
-                        eprintln!("[DEBUG] GPU hashes: {}, CPU hashes: {}", stats.gpu_hashes, stats.hashes);
-                        LAST_GPU_LOG = Some(now);
-                    }
-                }
                 gpu_hashrate_calc.add_sample(stats.gpu_hashes);
                 let gpu_hashrate = gpu_hashrate_calc.hashrate();
                 tui_state.set_gpu_hashrate(gpu_hashrate);
