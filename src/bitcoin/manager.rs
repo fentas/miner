@@ -591,7 +591,7 @@ blockmaxweight=4000000
                             if let Some(total) = progress.total_size {
                                 if total != total_size {
                                     total_size = total;
-                                    // Update UI with new total
+                                    info!("Torrent metadata received: total size = {} bytes", total);
                                     progress_callback(last_downloaded, total_size);
                                 }
                             }
@@ -599,10 +599,16 @@ blockmaxweight=4000000
                             if progress.completed_size != last_downloaded {
                                 last_downloaded = progress.completed_size;
                                 progress_callback(last_downloaded, total_size);
+
+                                // Log when at 100%
+                                if total_size > 0 && last_downloaded >= total_size {
+                                    info!("Download at 100% ({}/{}), waiting for state change...", last_downloaded, total_size);
+                                }
                             }
                         }
                         // Torrent transitions to Seeding/Completed state when download finishes
                         DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
+                            info!("Torrent state changed to: {:?}", new_state);
                             match new_state {
                                 gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
                                     info!("AssumeUTXO snapshot download complete");
@@ -619,11 +625,15 @@ blockmaxweight=4000000
                                 error
                             )));
                         }
-                        _ => {}
+                        other => {
+                            // Log all other events for debugging
+                            info!("Torrent event: {:?}", other);
+                        }
                     }
                 }
                 Ok(Err(_)) => {
-                    // Channel closed, check if download completed
+                    // Channel closed
+                    info!("Event channel closed");
                     break;
                 }
                 Err(_) => {
