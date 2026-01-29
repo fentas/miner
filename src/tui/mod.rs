@@ -194,6 +194,13 @@ impl TuiRunner {
                         (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                             self.state.scroll_to_bottom();
                         }
+                        // Toggle hashrate display mode: h
+                        (KeyCode::Char('h'), KeyModifiers::NONE) => {
+                            if !self.state.is_logs_focused() {
+                                let mode = self.state.toggle_hashrate_display_mode();
+                                self.state.log_info(format!("Hashrate display: {}", mode.as_str()));
+                            }
+                        }
                         _ => {}
                     }
                 }

@@ -64,6 +64,56 @@ impl LogTimeFilter {
     }
 }
 
+/// Hashrate display mode
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum HashrateDisplayMode {
+    #[default]
+    Total,     // Show total (CPU + GPU combined)
+    CpuOnly,   // Show CPU hashrate only
+    GpuOnly,   // Show GPU hashrate only (combined all GPUs)
+    GpuDevice(u8), // Show specific GPU device (0, 1, 2, ...)
+}
+
+impl HashrateDisplayMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HashrateDisplayMode::Total => "Total",
+            HashrateDisplayMode::CpuOnly => "CPU",
+            HashrateDisplayMode::GpuOnly => "GPU",
+            HashrateDisplayMode::GpuDevice(_) => "GPU#",
+        }
+    }
+
+    /// Cycle to next mode
+    pub fn next(self, gpu_count: usize) -> Self {
+        match self {
+            HashrateDisplayMode::Total => HashrateDisplayMode::CpuOnly,
+            HashrateDisplayMode::CpuOnly => {
+                if gpu_count > 0 {
+                    HashrateDisplayMode::GpuOnly
+                } else {
+                    HashrateDisplayMode::Total
+                }
+            }
+            HashrateDisplayMode::GpuOnly => {
+                if gpu_count > 1 {
+                    HashrateDisplayMode::GpuDevice(0)
+                } else {
+                    HashrateDisplayMode::Total
+                }
+            }
+            HashrateDisplayMode::GpuDevice(idx) => {
+                let next_idx = idx + 1;
+                if (next_idx as usize) < gpu_count {
+                    HashrateDisplayMode::GpuDevice(next_idx)
+                } else {
+                    HashrateDisplayMode::Total
+                }
+            }
+        }
+    }
+}
+
 /// Log level for TUI display
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogLevel {
@@ -191,6 +241,9 @@ pub struct TuiState {
     logs_autoscroll: AtomicBool,
     peer_count: AtomicU64,
 
+    // Hashrate display mode
+    hashrate_display_mode: RwLock<HashrateDisplayMode>,
+
     // k9s-style features
     show_help: AtomicBool,
     command_mode: AtomicBool,
@@ -241,6 +294,7 @@ impl TuiState {
             command_mode: AtomicBool::new(false),
             command_buffer: RwLock::new(String::new()),
             log_time_filter: RwLock::new(LogTimeFilter::default()),
+            hashrate_display_mode: RwLock::new(HashrateDisplayMode::default()),
         }
     }
 
@@ -533,6 +587,23 @@ impl TuiState {
 
     pub fn get_gpu_hashrate(&self) -> f64 {
         f64::from_bits(self.gpu_hashrate.load(Ordering::Relaxed))
+    }
+
+    /// Get current hashrate display mode
+    pub fn get_hashrate_display_mode(&self) -> HashrateDisplayMode {
+        self.hashrate_display_mode.read().map(|m| *m).unwrap_or_default()
+    }
+
+    /// Toggle hashrate display mode (cycles: Total -> CPU -> GPU -> GPU#0 -> GPU#1 -> ... -> Total)
+    pub fn toggle_hashrate_display_mode(&self) -> HashrateDisplayMode {
+        let gpu_count = self.gpu_devices.read().map(|d| d.len()).unwrap_or(0);
+        let new_mode = if let Ok(mut mode) = self.hashrate_display_mode.write() {
+            *mode = mode.next(gpu_count);
+            *mode
+        } else {
+            HashrateDisplayMode::default()
+        };
+        new_mode
     }
 
     pub fn is_paused(&self) -> bool {

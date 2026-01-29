@@ -79,6 +79,9 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("<Shift+l>", cyan), Span::styled(" Toggle Core Logs", action),
         ]),
+        Line::from(vec![
+            Span::styled("<h>", cyan), Span::styled(" Toggle Hashrate View (Total/CPU/GPU)", action),
+        ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("NAVIGATION", header)]),
         Line::from(vec![
@@ -482,10 +485,24 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let cpu_hashrate = state.get_hashrate();
     let gpu_hashrate = state.get_gpu_hashrate();
     let total_hashrate = cpu_hashrate + gpu_hashrate;
-    let hr_str = format_hashrate(total_hashrate);
+    let display_mode = state.get_hashrate_display_mode();
 
+    // Determine which hashrate to show based on display mode
+    let (primary_hashrate, mode_label) = match display_mode {
+        crate::tui::state::HashrateDisplayMode::Total => (total_hashrate, "Total"),
+        crate::tui::state::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU"),
+        crate::tui::state::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU"),
+        crate::tui::state::HashrateDisplayMode::GpuDevice(_idx) => {
+            // For now, show total GPU hashrate with device label
+            // TODO: Per-device hashrate when available
+            (gpu_hashrate, "GPU")
+        }
+    };
+    let hr_str = format_hashrate(primary_hashrate);
+
+    let title = format!(" Hashrate [{}] (h) ", mode_label);
     let hashrate_block = Block::default()
-        .title(" Hashrate ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
