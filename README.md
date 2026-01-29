@@ -21,7 +21,7 @@
 
 ## Features
 
-- **TUI Dashboard** - Full-screen terminal UI with hashrate graph, stats, logs
+- **TUI Dashboard** - k9s-style terminal UI with hashrate graph, stats, logs, and shortcuts
 - **Multi-threaded CPU Mining** - Worker threads with optimized nonce distribution
 - **SIMD Optimizations** - SHA-NI, AVX2, and AVX512 hardware acceleration
 - **GPU Mining** - OpenCL and CUDA support for additional hashrate
@@ -259,6 +259,20 @@ proxy_port = 34255
 - Binary protocol (more efficient than JSON)
 - Job negotiation for custom block templates
 - Optional encryption
+
+&nbsp;
+
+## TUI Keyboard Shortcuts
+
+| Key             | Action                                 |
+| --------------- | -------------------------------------- |
+| `q`             | Quit                                   |
+| `p` / `Space`   | Pause/Resume mining                    |
+| `c`             | Clear logs                             |
+| `↑` / `k`       | Scroll logs up                         |
+| `↓` / `j`       | Scroll logs down                       |
+| `PgUp` / `PgDn` | Page scroll                            |
+| `l`             | Toggle Bitcoin Core logs (managed mode)|
 
 &nbsp;
 
