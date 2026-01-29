@@ -353,6 +353,25 @@ async fn run_solo_mode_with_tui(
         }
     }
 
+    // Wait for peer connections before starting to mine
+    tui_state.log_info("Waiting for peer connections...");
+    let rpc = bitcoind.rpc().unwrap();
+    loop {
+        match rpc.get_connection_count().await {
+            Ok(count) if count > 0 => {
+                tui_state.log_success(format!("Connected to {} peer(s)", count));
+                break;
+            }
+            Ok(_) => {
+                // No peers yet, wait
+            }
+            Err(e) => {
+                tui_state.log_warn(format!("Peer check failed: {}", e));
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
     let coordinator = Coordinator::new(thread_count);
@@ -432,6 +451,11 @@ async fn run_solo_mode_with_tui(
             tui_state.set_hashrate(hashrate);
             tui_state.set_total_hashes(stats.hashes);
             tui_state.set_shares(stats.shares_accepted, stats.shares_rejected);
+
+            // Update peer count
+            if let Ok(count) = rpc.get_connection_count().await {
+                tui_state.set_peer_count(count);
+            }
 
             last_stats = Instant::now();
         }

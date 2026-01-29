@@ -169,6 +169,7 @@ pub struct TuiState {
     show_bitcoin_logs: AtomicBool,
     logs_focused: AtomicBool,
     logs_autoscroll: AtomicBool,
+    peer_count: AtomicU64,
 
     // k9s-style features
     show_help: AtomicBool,
@@ -215,6 +216,7 @@ impl TuiState {
             show_bitcoin_logs: AtomicBool::new(false),
             logs_focused: AtomicBool::new(false),
             logs_autoscroll: AtomicBool::new(true),
+            peer_count: AtomicU64::new(0),
             show_help: AtomicBool::new(false),
             command_mode: AtomicBool::new(false),
             command_buffer: RwLock::new(String::new()),
@@ -351,6 +353,14 @@ impl TuiState {
 
     pub fn set_bitcoin_managed(&self, managed: bool) {
         self.bitcoin_managed.store(managed, Ordering::Relaxed);
+    }
+
+    pub fn set_peer_count(&self, count: u64) {
+        self.peer_count.store(count, Ordering::Relaxed);
+    }
+
+    pub fn get_peer_count(&self) -> u64 {
+        self.peer_count.load(Ordering::Relaxed)
     }
 
     pub fn toggle_bitcoin_logs(&self) -> bool {

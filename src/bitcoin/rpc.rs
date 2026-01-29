@@ -185,6 +185,17 @@ impl BitcoinRpc {
         Ok(())
     }
 
+    /// Get the number of connected peers
+    pub async fn get_connection_count(&self) -> Result<u64, BitcoinError> {
+        let result = self.call("getconnectioncount", json!([])).await?;
+        result.as_u64().ok_or_else(|| BitcoinError::RpcError("Invalid connection count".into()))
+    }
+
+    /// Get network info including peer count and warnings
+    pub async fn get_network_info(&self) -> Result<Value, BitcoinError> {
+        self.call("getnetworkinfo", json!([])).await
+    }
+
     /// Load UTXO snapshot for AssumeUTXO fast sync
     pub async fn load_utxo_snapshot(&self, path: &std::path::Path) -> Result<(), BitcoinError> {
         let path_str = path.to_string_lossy();

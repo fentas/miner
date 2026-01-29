@@ -332,10 +332,15 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
         Color::Red
     };
 
+    let peer_count = state.get_peer_count();
     let status_text = if state.is_syncing() {
         format!("Syncing {:.1}%", state.get_sync_progress())
     } else if state.is_connected() {
-        "Connected".to_string()
+        if state.is_bitcoin_managed() && peer_count > 0 {
+            format!("Connected ({} peers)", peer_count)
+        } else {
+            "Connected".to_string()
+        }
     } else {
         "Disconnected".to_string()
     };
