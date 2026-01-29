@@ -1089,6 +1089,7 @@ mod tests {
             level: LogLevel::Debug,
             message: "Custom debug".to_string(),
             timestamp: "12:00:00".to_string(),
+            created_at: std::time::Instant::now(),
         };
 
         state.log(custom_entry);

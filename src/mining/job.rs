@@ -23,6 +23,8 @@ pub struct Job {
     pub network_target: Option<[u8; 32]>,
     /// Clean jobs flag (abandon previous work)
     pub clean_jobs: bool,
+    /// Pre-computed merkle root (for solo mining, bypasses coinbase computation)
+    pub merkle_root_override: Option<[u8; 32]>,
 }
 
 impl Job {
@@ -40,6 +42,7 @@ impl Job {
             target: [0xff; 32],
             network_target: None,
             clean_jobs: false,
+            merkle_root_override: None,
         }
     }
 
@@ -53,8 +56,12 @@ impl Job {
         // Previous block hash (32 bytes)
         header[4..36].copy_from_slice(&self.prev_hash);
 
-        // Merkle root (32 bytes)
-        let merkle_root = self.compute_merkle_root(extranonce1, extranonce2);
+        // Merkle root (32 bytes) - use override if set (solo mining), otherwise compute
+        let merkle_root = if let Some(ref root) = self.merkle_root_override {
+            *root
+        } else {
+            self.compute_merkle_root(extranonce1, extranonce2)
+        };
         header[36..68].copy_from_slice(&merkle_root);
 
         // Timestamp (4 bytes, little-endian)

@@ -72,7 +72,12 @@ impl Worker {
     fn run(&mut self) {
         const BATCH_SIZE: u32 = 65536; // Hash batch before checking for new job
 
-        while self.running.load(Ordering::Relaxed) {
+        loop {
+            // Wait for running flag to be set (coordinator.start() called)
+            while !self.running.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
             // Wait for a job
             let job = match self.wait_for_job() {
                 Some(job) => job,
@@ -148,14 +153,15 @@ impl Worker {
                 return None;
             }
 
-            // Check current job
-            let job = self.job_rx.borrow().clone();
+            // Check current job using borrow_and_update to clear the "changed" flag
+            // This ensures has_changed() only returns true for actual new jobs
+            let job = self.job_rx.borrow_and_update().clone();
             if job.is_some() {
                 return job;
             }
 
-            // Wait for job update (with timeout to check running flag)
-            let _ = self.job_rx.changed();
+            // Small sleep to prevent busy-wait spinning
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 
