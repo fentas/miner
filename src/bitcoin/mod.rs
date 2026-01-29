@@ -1,5 +1,6 @@
 mod rpc;
 mod manager;
+mod metadata_fetcher;
 
 pub use rpc::BitcoinRpc;
 pub use manager::BitcoindManager;

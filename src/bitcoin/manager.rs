@@ -26,6 +26,7 @@ pub struct BitcoindManager {
     dbcache: u32,
     assumeutxo: bool,
     assumeutxo_magnet: Option<String>,
+    assumeutxo_torrent: Option<PathBuf>,
     rpc_user: String,
     rpc_password: String,
     rpc_port: u16,
@@ -70,6 +71,7 @@ impl BitcoindManager {
             dbcache,
             assumeutxo: false,
             assumeutxo_magnet: None,
+            assumeutxo_torrent: None,
             rpc_user: generate_random_string(16),
             rpc_password: generate_random_string(32),
             rpc_port: 8332,
@@ -125,6 +127,12 @@ impl BitcoindManager {
     /// Set custom magnet URI for AssumeUTXO snapshot
     pub fn with_assumeutxo_magnet(mut self, magnet: Option<String>) -> Self {
         self.assumeutxo_magnet = magnet;
+        self
+    }
+
+    /// Set torrent file path for AssumeUTXO snapshot (alternative to magnet)
+    pub fn with_assumeutxo_torrent(mut self, path: Option<PathBuf>) -> Self {
+        self.assumeutxo_torrent = path;
         self
     }
 
@@ -499,34 +507,14 @@ blockmaxweight=4000000
 
     /// Check if AssumeUTXO snapshot exists and download is complete
     /// Uses a .complete marker file to track successful torrent completion
+    /// Note: We don't use size-based detection as truncated files would pass but fail to load
     pub fn has_assumeutxo_snapshot(&self) -> bool {
         let path = self.assumeutxo_snapshot_path();
         let marker = self.data_dir.join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
 
         // Both the snapshot and the completion marker must exist
-        if path.exists() && marker.exists() {
-            return true;
-        }
-
-        // If file exists and is the expected size, create marker and consider complete
-        // This handles the case where we already have a complete file (e.g., manual download)
-        // Expected size is ~9.6GB (varies slightly by height)
-        const EXPECTED_MIN_SIZE: u64 = 9_600_000_000; // ~9.6 GB
-        if path.exists() {
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                let size = metadata.len();
-                if size >= EXPECTED_MIN_SIZE {
-                    info!("Found complete AssumeUTXO snapshot ({} bytes), creating marker", size);
-                    if let Err(e) = std::fs::write(&marker, "complete") {
-                        warn!("Failed to create marker file: {}", e);
-                    } else {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
+        // The marker is only created after torrent piece verification completes
+        path.exists() && marker.exists()
     }
 
     /// Get AssumeUTXO snapshot path
@@ -537,6 +525,7 @@ blockmaxweight=4000000
     /// Download AssumeUTXO snapshot via BitTorrent with progress callback
     /// Callback receives (bytes_downloaded, total_bytes)
     /// Uses torrent for trustless download - data is verified by infohash
+    /// If a torrent file path is configured, uses it directly (enables piece verification)
     pub async fn download_assumeutxo_with_progress<F>(
         &self,
         progress_callback: F,
@@ -544,15 +533,25 @@ blockmaxweight=4000000
     where
         F: Fn(u64, u64) + Send + Sync + 'static,
     {
+        // Prefer torrent file if configured (enables proper piece verification on resume)
+        if let Some(ref torrent_path) = self.assumeutxo_torrent {
+            if torrent_path.exists() {
+                info!("Using configured torrent file: {:?}", torrent_path);
+                return self.download_assumeutxo_torrent_with_progress(torrent_path, progress_callback).await;
+            } else {
+                warn!("Configured torrent file not found: {:?}", torrent_path);
+            }
+        }
+
         let magnet = self.assumeutxo_magnet.as_deref().unwrap_or(ASSUMEUTXO_MAGNET);
         self.download_assumeutxo_magnet_with_progress(magnet, progress_callback).await
     }
 
-    /// Download AssumeUTXO snapshot from custom magnet URI
-    /// Torrent will automatically resume partial downloads and verify integrity
-    pub async fn download_assumeutxo_magnet_with_progress<F>(
+    /// Download AssumeUTXO snapshot from a torrent file
+    /// This method provides proper piece verification for existing partial files
+    pub async fn download_assumeutxo_torrent_with_progress<F>(
         &self,
-        magnet: &str,
+        torrent_path: &std::path::Path,
         progress_callback: F,
     ) -> Result<PathBuf, BitcoinError>
     where
@@ -565,10 +564,18 @@ blockmaxweight=4000000
         // Ensure data directory exists
         std::fs::create_dir_all(&self.data_dir)?;
 
-        info!("Downloading AssumeUTXO snapshot (height {}) via BitTorrent...", ASSUMEUTXO_HEIGHT);
+        // Read torrent file
+        let torrent_data = std::fs::read(torrent_path)
+            .map_err(|e| BitcoinError::DownloadError(format!("Failed to read torrent file: {}", e)))?;
 
-        // Configure download engine with persistent session state
-        // database_path stores torrent session for proper resume across restarts
+        // Validate it's a real torrent file
+        if torrent_data.first() != Some(&b'd') {
+            return Err(BitcoinError::DownloadError("Invalid torrent file format".into()));
+        }
+
+        info!("Downloading AssumeUTXO snapshot (height {}) from torrent file...", ASSUMEUTXO_HEIGHT);
+
+        // Configure download engine
         let config = EngineConfig {
             download_dir: self.data_dir.clone(),
             database_path: Some(self.data_dir.join("gosh-dl.db")),
@@ -579,26 +586,166 @@ blockmaxweight=4000000
             .await
             .map_err(|e| BitcoinError::DownloadError(format!("Failed to create download engine: {}", e)))?;
 
-        // Extract info hash from magnet for matching existing downloads
-        let info_hash = magnet
-            .split("btih:")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .map(|s| s.to_lowercase());
+        // Start download with torrent file (enables piece verification)
+        let opts = DownloadOptions::default();
+        let download_id = engine.add_torrent(&torrent_data, opts)
+            .await
+            .map_err(|e| BitcoinError::DownloadError(format!("Failed to add torrent: {}", e)))?;
+
+        // Subscribe to events for progress
+        let mut events = engine.subscribe();
+
+        // Get current status
+        let status = engine.status(download_id);
+        let mut last_downloaded: u64 = status.as_ref().map(|s| s.progress.completed_size).unwrap_or(0);
+        let mut total_size: u64 = status.as_ref()
+            .and_then(|s| s.progress.total_size)
+            .unwrap_or(9_772_098_907);
+
+        progress_callback(last_downloaded, total_size);
+
+        let mut last_status_check = std::time::Instant::now();
+        loop {
+            // Check status periodically (every 1s) regardless of events
+            if last_status_check.elapsed() >= Duration::from_secs(1) {
+                last_status_check = std::time::Instant::now();
+                if let Some(status) = engine.status(download_id) {
+                    match status.state {
+                        gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
+                        }
+                        _ => {
+                            // Check if all bytes downloaded (gosh-dl may stay in Downloading state)
+                            if let Some(total) = status.progress.total_size {
+                                if status.progress.completed_size >= total && total > 0 {
+                                    info!("AssumeUTXO snapshot download complete (100% verified)");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            match tokio::time::timeout(Duration::from_millis(100), events.recv()).await {
+                Ok(Ok(event)) => {
+                    match event {
+                        DownloadEvent::Progress { id, progress } if id == download_id => {
+                            if let Some(total) = progress.total_size {
+                                if total != total_size {
+                                    total_size = total;
+                                }
+                            }
+                            if progress.completed_size != last_downloaded {
+                                last_downloaded = progress.completed_size;
+                                progress_callback(last_downloaded, total_size);
+                            }
+                        }
+                        DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
+                            match new_state {
+                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
+                                    info!("AssumeUTXO snapshot download complete");
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        DownloadEvent::Completed { id } if id == download_id => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
+                        }
+                        DownloadEvent::Failed { id, error, .. } if id == download_id => {
+                            return Err(BitcoinError::DownloadError(format!("Torrent download failed: {}", error)));
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Err(_)) => break,
+                Err(_) => {} // Timeout - continue loop, status check happens at start
+            }
+        }
+
+        if !snapshot_path.exists() {
+            return Err(BitcoinError::DownloadError("Download completed but file not found".into()));
+        }
+
+        // Create completion marker
+        let marker = self.data_dir.join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
+        if let Err(e) = std::fs::write(&marker, "complete") {
+            warn!("Failed to create completion marker: {}", e);
+        }
+
+        info!("AssumeUTXO snapshot downloaded and verified: {:?}", snapshot_path);
+        Ok(snapshot_path)
+    }
+
+    /// Download AssumeUTXO snapshot from custom magnet URI
+    /// Uses .torrent file for proper piece verification on resume
+    pub async fn download_assumeutxo_magnet_with_progress<F>(
+        &self,
+        magnet_uri: &str,
+        progress_callback: F,
+    ) -> Result<PathBuf, BitcoinError>
+    where
+        F: Fn(u64, u64) + Send + Sync + 'static,
+    {
+        use gosh_dl::{DownloadEngine, EngineConfig, DownloadEvent};
+        use gosh_dl::torrent::MagnetUri;
+
+        let snapshot_path = self.assumeutxo_snapshot_path();
+
+        // Ensure data directory exists
+        std::fs::create_dir_all(&self.data_dir)?;
+
+        // Parse magnet to extract info hash
+        let magnet = MagnetUri::parse(magnet_uri)
+            .map_err(|e| BitcoinError::DownloadError(format!("Invalid magnet URI: {}", e)))?;
+        let info_hash = magnet.info_hash_hex();
+
+        info!("Downloading AssumeUTXO snapshot (height {}) via BitTorrent...", ASSUMEUTXO_HEIGHT);
+        info!("Info hash: {}", info_hash);
+
+        // Configure download engine with persistent session state
+        let config = EngineConfig {
+            download_dir: self.data_dir.clone(),
+            database_path: Some(self.data_dir.join("gosh-dl.db")),
+            ..Default::default()
+        };
+
+        let engine = DownloadEngine::new(config)
+            .await
+            .map_err(|e| BitcoinError::DownloadError(format!("Failed to create download engine: {}", e)))?;
+
+        // Check if we have a cached .torrent file (for proper piece verification on resume)
+        let torrent_cache_path = self.data_dir.join(format!("{}.torrent", info_hash));
+        let torrent_data = if torrent_cache_path.exists() {
+            let data = std::fs::read(&torrent_cache_path)?;
+            // Validate it's a real torrent file (starts with 'd' for bencode dict)
+            if data.first() == Some(&b'd') {
+                info!("Using cached torrent file for piece verification");
+                Some(data)
+            } else {
+                warn!("Cached torrent file is invalid, removing");
+                let _ = std::fs::remove_file(&torrent_cache_path);
+                None
+            }
+        } else {
+            None
+        };
+
+        // Note: itorrents.org fallback removed - magnet links now verify existing files
+        // thanks to https://github.com/goshitsarch-eng/gosh-dl/pull/9
 
         // Check if a download already exists for this torrent
         let existing_download = engine.list().into_iter().find(|d| {
             if let Some(ref ih) = d.metadata.info_hash {
-                if let Some(ref target_ih) = info_hash {
-                    return ih.to_lowercase() == *target_ih;
-                }
+                return ih.to_lowercase() == info_hash.to_lowercase();
             }
-            // Fallback: match by name
-            d.metadata.name == format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT)
+            false
         });
 
         let download_id = if let Some(existing) = existing_download {
-            // Resume if not already downloading/seeding
             match existing.state {
                 gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
                     info!("Download already complete");
@@ -606,34 +753,19 @@ blockmaxweight=4000000
                     std::fs::write(&marker_path, "complete")?;
                     return Ok(self.assumeutxo_snapshot_path());
                 }
-                gosh_dl::DownloadState::Paused | gosh_dl::DownloadState::Queued => {
-                    match engine.resume(existing.id).await {
-                        Ok(_) => existing.id,
-                        Err(_) => {
-                            // Resume failed (no torrent handle after restart) - cancel and re-add
-                            let _ = engine.cancel(existing.id, false).await;
-                            let opts = DownloadOptions::default();
-                            engine.add_magnet(magnet, opts)
-                                .await
-                                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
-                        }
-                    }
+                gosh_dl::DownloadState::Downloading => {
+                    info!("Resuming existing download");
+                    existing.id
                 }
-                gosh_dl::DownloadState::Downloading => existing.id,
                 _ => {
-                    // Unknown or failed state - cancel and restart
+                    // Paused, Queued, Failed - cancel and restart with proper verification
+                    info!("Restarting download with piece verification");
                     let _ = engine.cancel(existing.id, false).await;
-                    let opts = DownloadOptions::default();
-                    engine.add_magnet(magnet, opts)
-                        .await
-                        .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
+                    self.start_torrent_download(&engine, torrent_data.as_deref(), magnet_uri).await?
                 }
             }
         } else {
-            let opts = DownloadOptions::default();
-            engine.add_magnet(magnet, opts)
-                .await
-                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
+            self.start_torrent_download(&engine, torrent_data.as_deref(), magnet_uri).await?
         };
 
         // Subscribe to events for progress
@@ -649,8 +781,31 @@ blockmaxweight=4000000
         // Send initial progress callback with current state
         progress_callback(last_downloaded, total_size);
 
+        let mut last_status_check = std::time::Instant::now();
         loop {
-            match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
+            // Check status periodically (every 1s) regardless of events
+            if last_status_check.elapsed() >= Duration::from_secs(1) {
+                last_status_check = std::time::Instant::now();
+                if let Some(status) = engine.status(download_id) {
+                    match status.state {
+                        gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
+                        }
+                        _ => {
+                            // Check if all bytes downloaded (gosh-dl may stay in Downloading state)
+                            if let Some(total) = status.progress.total_size {
+                                if status.progress.completed_size >= total && total > 0 {
+                                    info!("AssumeUTXO snapshot download complete (100% verified)");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            match tokio::time::timeout(Duration::from_millis(100), events.recv()).await {
                 Ok(Ok(event)) => {
                     match event {
                         DownloadEvent::Progress { id, progress } if id == download_id => {
@@ -677,6 +832,10 @@ blockmaxweight=4000000
                                 _ => {}
                             }
                         }
+                        DownloadEvent::Completed { id } if id == download_id => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
+                        }
                         DownloadEvent::Failed { id, error, .. } if id == download_id => {
                             return Err(BitcoinError::DownloadError(format!(
                                 "Torrent download failed: {}. You can download manually from: \
@@ -689,7 +848,7 @@ blockmaxweight=4000000
                     }
                 }
                 Ok(Err(_)) => break, // Channel closed
-                Err(_) => {} // Timeout - continue waiting
+                Err(_) => {} // Timeout - continue loop, status check happens at start
             }
         }
 
@@ -708,6 +867,32 @@ blockmaxweight=4000000
 
         info!("AssumeUTXO snapshot downloaded and verified: {:?}", snapshot_path);
         Ok(snapshot_path)
+    }
+
+    /// Helper to start torrent download with piece verification
+    /// Uses add_torrent() when .torrent file provided via config, otherwise add_magnet()
+    /// Both paths verify existing files and resume downloads properly
+    async fn start_torrent_download(
+        &self,
+        engine: &std::sync::Arc<gosh_dl::DownloadEngine>,
+        torrent_data: Option<&[u8]>,
+        magnet_uri: &str,
+    ) -> Result<gosh_dl::DownloadId, BitcoinError> {
+        use gosh_dl::DownloadOptions;
+
+        let opts = DownloadOptions::default();
+
+        if let Some(data) = torrent_data {
+            info!("Starting download with torrent file");
+            engine.add_torrent(data, opts)
+                .await
+                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add torrent: {}", e)))
+        } else {
+            info!("Starting download with magnet link");
+            engine.add_magnet(magnet_uri, opts)
+                .await
+                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))
+        }
     }
 
     /// Download AssumeUTXO snapshot if not already present (simple version)

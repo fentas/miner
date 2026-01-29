@@ -28,7 +28,9 @@ tokio-tungstenite = "0.28"
 reqwest = { version = "0.13", features = ["json", "stream"] }
 
 # Download engine (HTTP + BitTorrent)
-gosh-dl = "0.1"
+# Using fork with magnet resume fix until PR is merged
+# https://github.com/fentas/gosh-dl/commit/adb4d80
+gosh-dl = { git = "https://github.com/fentas/gosh-dl.git", branch = "main" }
 
 # Logging
 tracing = "0.1"
@@ -72,6 +74,9 @@ tempfile = "3.24"
 tokio-test = "0.4"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
 
 [profile.release]
 opt-level = 3
