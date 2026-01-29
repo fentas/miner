@@ -505,6 +505,16 @@ blockmaxweight=4000000
         self.assumeutxo
     }
 
+    /// Get data directory path
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
+    }
+
+    /// Get debug.log path
+    pub fn debug_log_path(&self) -> PathBuf {
+        self.data_dir.join("debug.log")
+    }
+
     /// Check if AssumeUTXO snapshot exists and download is complete
     /// Uses a .complete marker file to track successful torrent completion
     /// Note: We don't use size-based detection as truncated files would pass but fail to load

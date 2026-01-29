@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{LogLevel, TuiState};
+use super::state::{LogLevel, LogTimeFilter, TuiState};
 use crate::stats::format_hashrate;
 
 // TUI rendering functions are excluded from coverage as they are
@@ -16,21 +16,293 @@ use crate::stats::format_hashrate;
 pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     let size = f.area();
 
-    // Main layout: header, body, footer
+    // Help overlay takes priority
+    if state.is_help_visible() {
+        draw_help_overlay(f, size);
+        return;
+    }
+
+    // Check if logs are focused - show full screen logs view
+    if state.is_logs_focused() {
+        draw_focused_logs(f, size, state);
+        return;
+    }
+
+    // Main layout: header, body, footer, command
     // Footer only shown when downloading/syncing
     let footer_height = if state.is_downloading() || state.is_syncing() { 3 } else { 0 };
+    let cmd_height = if state.is_command_mode() { 1 } else { 0 };
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(7),  // Header (k9s style with info + shortcuts)
             Constraint::Min(10),    // Body
             Constraint::Length(footer_height),  // Footer (progress bar only)
+            Constraint::Length(cmd_height),  // Command input
         ])
         .split(size);
 
     draw_header(f, main_chunks[0], state);
     draw_body(f, main_chunks[1], state);
     draw_footer(f, main_chunks[2], state);
+
+    if state.is_command_mode() {
+        draw_command_input(f, main_chunks[3], state);
+    }
+}
+
+#[cfg(not(tarpaulin_include))]
+fn draw_help_overlay(f: &mut Frame, area: Rect) {
+    use ratatui::widgets::Clear;
+
+    let cyan = Style::default().fg(Color::Cyan);
+    let magenta = Style::default().fg(Color::Magenta);
+    let yellow = Style::default().fg(Color::Yellow);
+    let action = Style::default().fg(Color::DarkGray);
+    let header = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+
+    let help_lines = vec![
+        Line::from(vec![Span::styled("GENERAL", header)]),
+        Line::from(vec![
+            Span::styled("<?>", cyan), Span::styled(" Help", action),
+            Span::raw("           "),
+            Span::styled("<:>", magenta), Span::styled(" Command Mode", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<p>", cyan), Span::styled(" Pause", action),
+            Span::raw("          "),
+            Span::styled("<l>", magenta), Span::styled(" Logs", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<Shift+l>", cyan), Span::styled(" Toggle Core Logs", action),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("NAVIGATION", header)]),
+        Line::from(vec![
+            Span::styled("<j>", cyan), Span::styled(" Down", action),
+            Span::raw("           "),
+            Span::styled("<k>", magenta), Span::styled(" Up", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<g>", cyan), Span::styled(" Top", action),
+            Span::raw("            "),
+            Span::styled("<G>", magenta), Span::styled(" Bottom", action),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("LOGS (focused)", header)]),
+        Line::from(vec![
+            Span::styled("<0>", cyan), Span::styled(" tail", action),
+            Span::raw("   "),
+            Span::styled("<1>", magenta), Span::styled(" 1m", action),
+            Span::raw("   "),
+            Span::styled("<2>", cyan), Span::styled(" 5m", action),
+            Span::raw("   "),
+            Span::styled("<3>", magenta), Span::styled(" 15m", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<4>", cyan), Span::styled(" 30m", action),
+            Span::raw("   "),
+            Span::styled("<5>", magenta), Span::styled(" 1h", action),
+            Span::raw("   "),
+            Span::styled("<6>", cyan), Span::styled(" all", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<s>", yellow), Span::styled(" AutoScroll", action),
+            Span::raw("   "),
+            Span::styled("<Shift+c>", yellow), Span::styled(" Clear", action),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("COMMANDS", header)]),
+        Line::from(vec![
+            Span::styled(":q", cyan), Span::styled(" Quit", action),
+            Span::raw("          "),
+            Span::styled(":clear", magenta), Span::styled(" Clear Logs", action),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![Span::styled("Press any key to close", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))]),
+    ];
+
+    let help_width = 50;
+    let help_height = help_lines.len() as u16 + 2;
+    let help_x = area.width.saturating_sub(help_width) / 2;
+    let help_y = area.height.saturating_sub(help_height) / 2;
+    let help_area = Rect::new(help_x, help_y, help_width.min(area.width), help_height.min(area.height));
+
+    f.render_widget(Clear, help_area);
+    let help_block = Block::default()
+        .title(" Help ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    let help_paragraph = Paragraph::new(help_lines).block(help_block);
+    f.render_widget(help_paragraph, help_area);
+}
+
+#[cfg(not(tarpaulin_include))]
+fn draw_command_input(f: &mut Frame, area: Rect, state: &TuiState) {
+    let cmd = state.get_command();
+    let line = Line::from(vec![
+        Span::styled(":", Style::default().fg(Color::Yellow)),
+        Span::raw(&cmd),
+        Span::styled("_", Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK)),
+    ]);
+    let paragraph = Paragraph::new(line);
+    f.render_widget(paragraph, area);
+}
+
+#[cfg(not(tarpaulin_include))]
+fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
+    // Layout: header (compact) + logs panel + shortcut bar
+    let cmd_height = if state.is_command_mode() { 1 } else { 0 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),  // Compact header
+            Constraint::Min(5),     // Logs
+            Constraint::Length(2),  // Shortcuts
+            Constraint::Length(cmd_height), // Command input
+        ])
+        .split(area);
+
+    // Draw compact header (info only, no shortcuts column)
+    draw_header_info(f, chunks[0], state);
+
+    // Draw logs panel (full width)
+    let showing_bitcoin = state.is_showing_bitcoin_logs();
+    let logs = if showing_bitcoin {
+        state.get_bitcoin_logs()
+    } else {
+        state.get_logs()
+    };
+    let scroll = state.get_log_scroll();
+    let filter = state.get_log_time_filter();
+
+    let log_items: Vec<ListItem> = logs
+        .iter()
+        .skip(scroll)
+        .map(|entry| {
+            let (level_color, level_str) = match entry.level {
+                LogLevel::Info => (Color::Blue, "INFO"),
+                LogLevel::Warn => (Color::Yellow, "WARN"),
+                LogLevel::Error => (Color::Red, "ERR "),
+                LogLevel::Success => (Color::Green, " OK "),
+                LogLevel::Debug => (Color::Gray, "DBG "),
+            };
+
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{} ", entry.timestamp),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("[{}] ", level_str),
+                    Style::default().fg(level_color),
+                ),
+                Span::raw(&entry.message),
+            ]))
+        })
+        .collect();
+
+    let log_count = logs.len();
+    let filter_str = filter.as_str();
+    let title = if showing_bitcoin {
+        format!(" Bitcoin Core Logs ({}) [{}] ", log_count, filter_str)
+    } else {
+        format!(" Logs ({}) [{}] ", log_count, filter_str)
+    };
+
+    let logs_block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White));
+
+    let logs_list = List::new(log_items).block(logs_block);
+    f.render_widget(logs_list, chunks[1]);
+
+    // Draw k9s-style shortcut bar
+    draw_focused_shortcuts(f, chunks[2], state);
+
+    // Command input
+    if state.is_command_mode() {
+        draw_command_input(f, chunks[3], state);
+    }
+}
+
+#[cfg(not(tarpaulin_include))]
+fn draw_focused_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
+    let cyan = Style::default().fg(Color::Cyan);
+    let magenta = Style::default().fg(Color::Magenta);
+    let yellow = Style::default().fg(Color::Yellow);
+    let blue = Style::default().fg(Color::Blue);
+    let action = Style::default().fg(Color::DarkGray);
+
+    let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
+    let current_filter = state.get_log_time_filter();
+
+    // Build two-row k9s-style shortcut display
+    // Row 1: Time filters (0-6)
+    let mut row1_spans: Vec<Span> = vec![];
+    let time_filters = [
+        ("0", "tail", LogTimeFilter::Tail),
+        ("1", "1m", LogTimeFilter::OneMin),
+        ("2", "5m", LogTimeFilter::FiveMin),
+        ("3", "15m", LogTimeFilter::FifteenMin),
+        ("4", "30m", LogTimeFilter::ThirtyMin),
+        ("5", "1h", LogTimeFilter::OneHour),
+        ("6", "all", LogTimeFilter::All),
+    ];
+
+    for (i, (key, label, filter)) in time_filters.iter().enumerate() {
+        if i > 0 {
+            row1_spans.push(Span::raw(" "));
+        }
+        let key_style = if i % 2 == 0 { cyan } else { magenta };
+        let is_active = current_filter == *filter;
+        row1_spans.push(Span::styled(format!("<{}>", key), if is_active { yellow } else { key_style }));
+        row1_spans.push(Span::styled(format!(" {}", label), if is_active { blue } else { action }));
+    }
+
+    // Row 2: Actions + status
+    let mut row2_spans: Vec<Span> = vec![];
+
+    // Actions
+    let shortcuts = [
+        ("<esc>", "Unfocus", true),
+        ("<Shift+c>", "Clear", false),
+        ("<s>", "AutoScroll", true),
+    ];
+
+    for (i, (key, action_text, is_cyan)) in shortcuts.iter().enumerate() {
+        if i > 0 {
+            row2_spans.push(Span::raw("  "));
+        }
+        let key_style = if *is_cyan { cyan } else { magenta };
+        row2_spans.push(Span::styled(*key, key_style));
+        row2_spans.push(Span::styled(format!(" {}", action_text), action));
+    }
+
+    if has_bitcoin {
+        row2_spans.push(Span::raw("  "));
+        row2_spans.push(Span::styled("<Shift+l>", cyan));
+        row2_spans.push(Span::styled(
+            if state.is_showing_bitcoin_logs() { " Miner" } else { " Core" },
+            action
+        ));
+    }
+
+    // Status indicators (right side)
+    row2_spans.push(Span::raw("    "));
+    row2_spans.push(Span::styled("Autoscroll:", yellow));
+    row2_spans.push(Span::styled(
+        if state.is_autoscroll() { "On" } else { "Off" },
+        if state.is_autoscroll() { blue } else { action }
+    ));
+
+    let lines = vec![
+        Line::from(row1_spans),
+        Line::from(row2_spans),
+    ];
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, area);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -99,19 +371,13 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled(&mode, value_style),
         ]),
         Line::from(vec![
-            Span::styled("Workers:   ", label_style),
-            Span::styled(workers.to_string(), value_style),
-        ]),
-        Line::from(vec![
             Span::styled("Status:    ", label_style),
             Span::styled(status_text, Style::default().fg(status_color)),
         ]),
         Line::from(vec![
-            Span::styled("SIMD:      ", label_style),
-            Span::styled(&simd, value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("GPU:       ", label_style),
+            Span::styled("Compute:   ", label_style),
+            Span::styled(format!("{} CPU ({})", workers, simd), value_style),
+            Span::styled(" + ", label_style),
             Span::styled(&gpu_text, Style::default().fg(gpu_color)),
         ]),
     ];
@@ -130,36 +396,31 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
 
 #[cfg(not(tarpaulin_include))]
 fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
-    let key_style = Style::default().fg(Color::Cyan);
+    let cyan = Style::default().fg(Color::Cyan);
+    let magenta = Style::default().fg(Color::Magenta);
     let action_style = Style::default().fg(Color::DarkGray);
 
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("<q>", key_style),
-            Span::styled(" Quit", action_style),
+            Span::styled("<?>", cyan),
+            Span::styled(" Help", action_style),
+            Span::raw("  "),
+            Span::styled("<:>", magenta),
+            Span::styled(" Command", action_style),
         ]),
         Line::from(vec![
-            Span::styled("<p>", key_style),
-            Span::styled(" Pause/Resume", action_style),
-        ]),
-        Line::from(vec![
-            Span::styled("<c>", key_style),
-            Span::styled(" Clear Logs", action_style),
-        ]),
-        Line::from(vec![
-            Span::styled("<↑/↓>", key_style),
-            Span::styled(" Scroll", action_style),
-        ]),
-        Line::from(vec![
-            Span::styled("<PgUp/PgDn>", key_style),
-            Span::styled(" Page Scroll", action_style),
+            Span::styled("<p>", cyan),
+            Span::styled(" Pause", action_style),
+            Span::raw("  "),
+            Span::styled("<l>", magenta),
+            Span::styled(" Logs", action_style),
         ]),
     ];
 
     // Add Bitcoin Core logs toggle when Bitcoin Core is running (connected, syncing, or downloading)
     if state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading() {
         lines.push(Line::from(vec![
-            Span::styled("<Shift+l>", key_style),
+            Span::styled("<Shift+l>", cyan),
             if state.is_showing_bitcoin_logs() {
                 Span::styled(" Miner Logs", action_style)
             } else {
@@ -175,9 +436,10 @@ fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
 #[cfg(not(tarpaulin_include))]
 fn draw_body(f: &mut Frame, area: Rect, state: &TuiState) {
     // Split body into left (stats) and right (logs)
+    // Left side: fixed width of 38 chars for stats panel
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Length(38), Constraint::Min(30)])
         .split(area);
 
     draw_stats_panel(f, chunks[0], state);
@@ -340,7 +602,12 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
 
 #[cfg(not(tarpaulin_include))]
 fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
-    let logs = state.get_logs();
+    let showing_bitcoin = state.is_showing_bitcoin_logs();
+    let logs = if showing_bitcoin {
+        state.get_bitcoin_logs()
+    } else {
+        state.get_logs()
+    };
     let scroll = state.get_log_scroll();
 
     let log_items: Vec<ListItem> = logs
@@ -370,7 +637,13 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
         .collect();
 
     let log_count = logs.len();
-    let title = if log_count > 0 {
+    let title = if showing_bitcoin {
+        if log_count > 0 {
+            format!(" Bitcoin Core Logs ({}) ", log_count)
+        } else {
+            " Bitcoin Core Logs ".to_string()
+        }
+    } else if log_count > 0 {
         format!(" Logs ({}) ", log_count)
     } else {
         " Logs ".to_string()

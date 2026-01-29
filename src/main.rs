@@ -275,6 +275,13 @@ async fn run_solo_mode_with_tui(
         tui_state.log_info("Starting Bitcoin Core...");
         tui_state.set_syncing(true, 0.0);
 
+        // Start tailing Bitcoin Core debug.log in background
+        let debug_log_path = bitcoind.debug_log_path();
+        let tui_for_logs = tui_state.clone();
+        tokio::spawn(async move {
+            tail_bitcoin_log(debug_log_path, tui_for_logs).await;
+        });
+
         // Load AssumeUTXO if enabled (after Bitcoin Core starts)
         if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
             tui_state.log_info("Waiting for headers sync before loading AssumeUTXO...");
@@ -717,6 +724,76 @@ fn print_mode(mode: &str, detail: &str) {
         mode.bright_green().bold(),
         format!("({})", detail).dimmed()
     );
+}
+
+/// Tail Bitcoin Core debug.log and send entries to TUI
+async fn tail_bitcoin_log(path: std::path::PathBuf, tui: Arc<TuiState>) {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    use tui::{LogEntry, LogLevel};
+
+    // Wait for file to exist
+    while !path.exists() {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Start from ~50KB back to show recent history
+    let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let mut position = file_size.saturating_sub(50 * 1024);
+
+    // If starting mid-file, skip to next newline to avoid partial line
+    if position > 0 {
+        if let Ok(file) = std::fs::File::open(&path) {
+            let mut reader = BufReader::new(file);
+            if reader.seek(SeekFrom::Start(position)).is_ok() {
+                let mut discard = String::new();
+                if reader.read_line(&mut discard).is_ok() {
+                    position = reader.stream_position().unwrap_or(position);
+                }
+            }
+        }
+    }
+
+    loop {
+        if let Ok(file) = std::fs::File::open(&path) {
+            let mut reader = BufReader::new(file);
+            if reader.seek(SeekFrom::Start(position)).is_ok() {
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => break, // EOF
+                        Ok(_) => {
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                // Parse Bitcoin Core format: "2026-01-29T17:54:45Z [category] message"
+                                let (timestamp, msg) = if line.len() > 21 && line.chars().nth(10) == Some('T') {
+                                    // Extract time part (HH:MM:SS) from ISO timestamp
+                                    let time = &line[11..19];
+                                    (time, &line[21..])
+                                } else {
+                                    ("??:??:??", line)
+                                };
+
+                                // Parse log level from Bitcoin Core format
+                                let level = if line.contains("error") || line.contains("Error") {
+                                    LogLevel::Error
+                                } else if line.contains("warning") || line.contains("Warning") {
+                                    LogLevel::Warn
+                                } else {
+                                    LogLevel::Info
+                                };
+
+                                let entry = LogEntry::with_timestamp(level, msg, timestamp);
+                                tui.log_bitcoin(entry);
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                position = reader.stream_position().unwrap_or(position);
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Run in true solo mode (no pool, direct to Bitcoin network)

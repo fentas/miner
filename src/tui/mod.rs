@@ -1,14 +1,14 @@
 mod state;
 mod widgets;
 
-pub use state::TuiState;
+pub use state::{TuiState, LogEntry, LogLevel, LogTimeFilter};
 pub use widgets::draw_ui;
 
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -73,28 +73,106 @@ impl TuiRunner {
             // Handle input with timeout
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
+                    // Only handle key press events, not repeats or releases
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+
+                    // Command mode input handling
+                    if self.state.is_command_mode() {
+                        match key.code {
+                            KeyCode::Esc => {
+                                self.state.exit_command_mode();
+                            }
+                            KeyCode::Enter => {
+                                let cmd = self.state.get_command();
+                                self.state.exit_command_mode();
+                                // Execute command
+                                match cmd.as_str() {
+                                    "q" | "quit" => {
+                                        let _ = self.cmd_tx.send(TuiCommand::Quit);
+                                        return Ok(());
+                                    }
+                                    "clear" => {
+                                        let _ = self.cmd_tx.send(TuiCommand::ClearLogs);
+                                        self.state.clear_logs();
+                                    }
+                                    _ => {} // Unknown command - ignore
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                self.state.command_pop();
+                            }
+                            KeyCode::Char(c) => {
+                                self.state.command_push(c);
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // Help overlay - any key dismisses it
+                    if self.state.is_help_visible() {
+                        self.state.hide_help();
+                        continue;
+                    }
+
                     match (key.code, key.modifiers) {
-                        // Quit: q, Ctrl+C, Escape
-                        (KeyCode::Char('q'), _)
-                        | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                        | (KeyCode::Esc, _) => {
+                        // Quit: Ctrl+C only
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                             let _ = self.cmd_tx.send(TuiCommand::Quit);
                             return Ok(());
                         }
-                        // Pause: p or space
-                        (KeyCode::Char('p'), _) | (KeyCode::Char(' '), _) => {
-                            let _ = self.cmd_tx.send(TuiCommand::TogglePause);
+                        // Escape: unfocus logs or do nothing
+                        (KeyCode::Esc, _) => {
+                            if self.state.is_logs_focused() {
+                                self.state.toggle_logs_focus();
+                            }
                         }
-                        // Clear logs: c
-                        (KeyCode::Char('c'), KeyModifiers::NONE) => {
-                            let _ = self.cmd_tx.send(TuiCommand::ClearLogs);
-                            self.state.clear_logs();
+                        // Help: ?
+                        (KeyCode::Char('?'), _) => {
+                            self.state.toggle_help();
+                        }
+                        // Command mode: :
+                        (KeyCode::Char(':'), _) => {
+                            self.state.enter_command_mode();
+                        }
+                        // Pause: p or space (only when logs not focused)
+                        (KeyCode::Char('p'), _) | (KeyCode::Char(' '), _) => {
+                            if !self.state.is_logs_focused() {
+                                let _ = self.cmd_tx.send(TuiCommand::TogglePause);
+                            }
+                        }
+                        // Focus/unfocus logs: l
+                        (KeyCode::Char('l'), KeyModifiers::NONE) => {
+                            self.state.toggle_logs_focus();
+                        }
+                        // Clear logs: Shift+C (only in focused mode)
+                        (KeyCode::Char('C'), KeyModifiers::SHIFT) => {
+                            if self.state.is_logs_focused() {
+                                let _ = self.cmd_tx.send(TuiCommand::ClearLogs);
+                                self.state.clear_logs();
+                            }
                         }
                         // Toggle Bitcoin Core logs: Shift+L (when Bitcoin Core is running)
                         (KeyCode::Char('L'), KeyModifiers::SHIFT) | (KeyCode::Char('L'), KeyModifiers::NONE) => {
                             if self.state.is_bitcoin_managed() || self.state.is_connected() || self.state.is_syncing() || self.state.is_downloading() {
                                 self.state.toggle_bitcoin_logs();
                                 let _ = self.cmd_tx.send(TuiCommand::ToggleBitcoinLogs);
+                            }
+                        }
+                        // Toggle autoscroll: s (in focused mode)
+                        (KeyCode::Char('s'), KeyModifiers::NONE) => {
+                            if self.state.is_logs_focused() {
+                                self.state.toggle_autoscroll();
+                            }
+                        }
+                        // Time filters: 0-6 (in focused mode)
+                        (KeyCode::Char(c @ '0'..='6'), KeyModifiers::NONE) => {
+                            if self.state.is_logs_focused() {
+                                if let Some(filter) = state::LogTimeFilter::from_key(c) {
+                                    self.state.set_log_time_filter(filter);
+                                }
                             }
                         }
                         // Scroll logs: up/down, j/k, Page Up/Down
@@ -110,10 +188,10 @@ impl TuiRunner {
                         (KeyCode::PageDown, _) => {
                             self.state.scroll_down(10);
                         }
-                        (KeyCode::Home, _) => {
+                        (KeyCode::Home, _) | (KeyCode::Char('g'), _) => {
                             self.state.scroll_to_top();
                         }
-                        (KeyCode::End, _) => {
+                        (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                             self.state.scroll_to_bottom();
                         }
                         _ => {}

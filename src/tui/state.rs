@@ -5,6 +5,47 @@ use std::time::Instant;
 
 const MAX_LOGS: usize = 1000;
 const MAX_HASHRATE_HISTORY: usize = 120; // 2 minutes at 1 sample/sec
+const DEFAULT_LOG_TAIL: usize = 100; // Default tail count for display
+
+/// Time filter for logs (k9s style: 0=tail, 1=1m, 2=5m, 3=15m, 4=30m, 5=1h, 6=all)
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum LogTimeFilter {
+    #[default]
+    Tail,      // 0 - Show last N logs (default 100)
+    OneMin,    // 1 - Last 1 minute
+    FiveMin,   // 2 - Last 5 minutes
+    FifteenMin,// 3 - Last 15 minutes
+    ThirtyMin, // 4 - Last 30 minutes
+    OneHour,   // 5 - Last 1 hour
+    All,       // 6 - All logs (up to MAX_LOGS)
+}
+
+impl LogTimeFilter {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogTimeFilter::Tail => "tail",
+            LogTimeFilter::OneMin => "1m",
+            LogTimeFilter::FiveMin => "5m",
+            LogTimeFilter::FifteenMin => "15m",
+            LogTimeFilter::ThirtyMin => "30m",
+            LogTimeFilter::OneHour => "1h",
+            LogTimeFilter::All => "all",
+        }
+    }
+
+    pub fn from_key(key: char) -> Option<Self> {
+        match key {
+            '0' => Some(LogTimeFilter::Tail),
+            '1' => Some(LogTimeFilter::OneMin),
+            '2' => Some(LogTimeFilter::FiveMin),
+            '3' => Some(LogTimeFilter::FifteenMin),
+            '4' => Some(LogTimeFilter::ThirtyMin),
+            '5' => Some(LogTimeFilter::OneHour),
+            '6' => Some(LogTimeFilter::All),
+            _ => None,
+        }
+    }
+}
 
 /// Log level for TUI display
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +102,15 @@ impl LogEntry {
     pub fn success(message: impl Into<String>) -> Self {
         Self::new(LogLevel::Success, message)
     }
+
+    /// Create a log entry with a custom timestamp
+    pub fn with_timestamp(level: LogLevel, message: impl Into<String>, timestamp: impl Into<String>) -> Self {
+        Self {
+            level,
+            message: message.into(),
+            timestamp: timestamp.into(),
+        }
+    }
 }
 
 /// Shared state between mining threads and TUI
@@ -108,6 +158,7 @@ pub struct TuiState {
 
     // Logs
     logs: RwLock<VecDeque<LogEntry>>,
+    bitcoin_logs: RwLock<VecDeque<LogEntry>>,
     log_scroll: AtomicUsize,
 
     // Control
@@ -116,6 +167,14 @@ pub struct TuiState {
     // Bitcoin Core managed mode
     bitcoin_managed: AtomicBool,
     show_bitcoin_logs: AtomicBool,
+    logs_focused: AtomicBool,
+    logs_autoscroll: AtomicBool,
+
+    // k9s-style features
+    show_help: AtomicBool,
+    command_mode: AtomicBool,
+    command_buffer: RwLock<String>,
+    log_time_filter: RwLock<LogTimeFilter>,
 }
 
 impl TuiState {
@@ -149,10 +208,17 @@ impl TuiState {
             last_share_time: RwLock::new(None),
             last_block_time: RwLock::new(None),
             logs: RwLock::new(VecDeque::with_capacity(MAX_LOGS)),
+            bitcoin_logs: RwLock::new(VecDeque::with_capacity(MAX_LOGS)),
             log_scroll: AtomicUsize::new(0),
             should_quit: AtomicBool::new(false),
             bitcoin_managed: AtomicBool::new(false),
             show_bitcoin_logs: AtomicBool::new(false),
+            logs_focused: AtomicBool::new(false),
+            logs_autoscroll: AtomicBool::new(true),
+            show_help: AtomicBool::new(false),
+            command_mode: AtomicBool::new(false),
+            command_buffer: RwLock::new(String::new()),
+            log_time_filter: RwLock::new(LogTimeFilter::default()),
         }
     }
 
@@ -290,6 +356,84 @@ impl TuiState {
     pub fn toggle_bitcoin_logs(&self) -> bool {
         let prev = self.show_bitcoin_logs.fetch_xor(true, Ordering::Relaxed);
         !prev
+    }
+
+    pub fn toggle_logs_focus(&self) -> bool {
+        let prev = self.logs_focused.fetch_xor(true, Ordering::Relaxed);
+        !prev
+    }
+
+    pub fn is_logs_focused(&self) -> bool {
+        self.logs_focused.load(Ordering::Relaxed)
+    }
+
+    pub fn toggle_autoscroll(&self) -> bool {
+        let prev = self.logs_autoscroll.fetch_xor(true, Ordering::Relaxed);
+        !prev
+    }
+
+    pub fn is_autoscroll(&self) -> bool {
+        self.logs_autoscroll.load(Ordering::Relaxed)
+    }
+
+    // Help toggle
+    pub fn toggle_help(&self) -> bool {
+        let prev = self.show_help.fetch_xor(true, Ordering::Relaxed);
+        !prev
+    }
+
+    pub fn is_help_visible(&self) -> bool {
+        self.show_help.load(Ordering::Relaxed)
+    }
+
+    pub fn hide_help(&self) {
+        self.show_help.store(false, Ordering::Relaxed);
+    }
+
+    // Command mode
+    pub fn enter_command_mode(&self) {
+        self.command_mode.store(true, Ordering::Relaxed);
+        if let Ok(mut buf) = self.command_buffer.write() {
+            buf.clear();
+        }
+    }
+
+    pub fn exit_command_mode(&self) {
+        self.command_mode.store(false, Ordering::Relaxed);
+        if let Ok(mut buf) = self.command_buffer.write() {
+            buf.clear();
+        }
+    }
+
+    pub fn is_command_mode(&self) -> bool {
+        self.command_mode.load(Ordering::Relaxed)
+    }
+
+    pub fn command_push(&self, c: char) {
+        if let Ok(mut buf) = self.command_buffer.write() {
+            buf.push(c);
+        }
+    }
+
+    pub fn command_pop(&self) {
+        if let Ok(mut buf) = self.command_buffer.write() {
+            buf.pop();
+        }
+    }
+
+    pub fn get_command(&self) -> String {
+        self.command_buffer.read().map(|b| b.clone()).unwrap_or_default()
+    }
+
+    // Time filter
+    pub fn set_log_time_filter(&self, filter: LogTimeFilter) {
+        if let Ok(mut f) = self.log_time_filter.write() {
+            *f = filter;
+        }
+    }
+
+    pub fn get_log_time_filter(&self) -> LogTimeFilter {
+        self.log_time_filter.read().map(|f| *f).unwrap_or_default()
     }
 
     // Getters
@@ -454,7 +598,24 @@ impl TuiState {
         if let Ok(mut logs) = self.logs.write() {
             logs.clear();
         }
+        if let Ok(mut logs) = self.bitcoin_logs.write() {
+            logs.clear();
+        }
         self.log_scroll.store(0, Ordering::Relaxed);
+    }
+
+    // Bitcoin Core logs
+    pub fn log_bitcoin(&self, entry: LogEntry) {
+        if let Ok(mut logs) = self.bitcoin_logs.write() {
+            if logs.len() >= MAX_LOGS {
+                logs.pop_front();
+            }
+            logs.push_back(entry);
+        }
+    }
+
+    pub fn get_bitcoin_logs(&self) -> Vec<LogEntry> {
+        self.bitcoin_logs.read().map(|l| l.iter().cloned().collect()).unwrap_or_default()
     }
 
     // Scroll
