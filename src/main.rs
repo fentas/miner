@@ -52,7 +52,10 @@ struct Args {
     log_format: Option<String>,
 }
 
+// Main entry point is excluded from coverage as it requires
+// full program execution which is not suitable for unit testing
 #[tokio::main]
+#[cfg(not(tarpaulin_include))]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 

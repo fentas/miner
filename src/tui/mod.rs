@@ -40,6 +40,7 @@ impl TuiRunner {
     }
 
     /// Run the TUI event loop (blocking)
+    #[cfg(not(tarpaulin_include))]
     pub fn run(&self) -> io::Result<()> {
         // Setup terminal
         enable_raw_mode()?;
@@ -61,6 +62,7 @@ impl TuiRunner {
         result
     }
 
+    #[cfg(not(tarpaulin_include))]
     fn run_loop(&self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         loop {
             // Draw UI

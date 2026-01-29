@@ -339,7 +339,19 @@ mod tests {
     #[test]
     fn test_simd_detection() {
         let level = SimdLevel::detect();
-        println!("Detected SIMD level: {:?}", level);
+        // Should return a valid level
+        assert!(matches!(
+            level,
+            SimdLevel::Generic | SimdLevel::ShaNi | SimdLevel::Avx2 | SimdLevel::Avx512
+        ));
+    }
+
+    #[test]
+    fn test_simd_level_name() {
+        assert_eq!(SimdLevel::Generic.name(), "generic");
+        assert_eq!(SimdLevel::ShaNi.name(), "SHA-NI");
+        assert_eq!(SimdLevel::Avx2.name(), "AVX2");
+        assert_eq!(SimdLevel::Avx512.name(), "AVX512");
     }
 
     #[test]
@@ -353,9 +365,240 @@ mod tests {
     }
 
     #[test]
+    fn test_sha256d_hello() {
+        // SHA256d of "hello"
+        let hash = sha256d_generic(b"hello");
+        // SHA256d should produce 32 bytes
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_sha256d_block_size() {
+        // Test data exactly 64 bytes (one block)
+        let data = [0xAB; 64];
+        let hash = sha256d_generic(&data);
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_sha256d_multiple_blocks() {
+        // Test data larger than one block
+        let data = [0xCD; 128];
+        let hash = sha256d_generic(&data);
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
     fn test_midstate() {
         let header = [0u8; 64];
         let midstate = Midstate::from_header_prefix(&header);
         assert_ne!(midstate.state, H_INIT);
+    }
+
+    #[test]
+    fn test_midstate_clone() {
+        let header = [0xAB; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let cloned = midstate.clone();
+        assert_eq!(midstate.state, cloned.state);
+    }
+
+    #[test]
+    fn test_sha256d_midstate_generic() {
+        let header = [0u8; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let tail = [0u8; 16];
+        let hash = sha256d_midstate_generic(&midstate, &tail, 0);
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_sha256d_midstate_different_nonces() {
+        let header = [0u8; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let tail = [0u8; 16];
+
+        let hash1 = sha256d_midstate_generic(&midstate, &tail, 0);
+        let hash2 = sha256d_midstate_generic(&midstate, &tail, 1);
+
+        // Different nonces should produce different hashes
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_transform_generic_modifies_state() {
+        let mut state = H_INIT;
+        let block = [0u8; 64];
+        transform_generic(&mut state, &block);
+        assert_ne!(state, H_INIT);
+    }
+
+    #[test]
+    fn test_transform_generic_deterministic() {
+        let mut state1 = H_INIT;
+        let mut state2 = H_INIT;
+        let block = [0xAB; 64];
+
+        transform_generic(&mut state1, &block);
+        transform_generic(&mut state2, &block);
+
+        assert_eq!(state1, state2);
+    }
+
+    #[test]
+    fn test_sha256_pad_short() {
+        let data = b"test";
+        let padded = sha256_pad(data);
+
+        // Should be padded to 64 bytes (one block)
+        assert_eq!(padded.len() % 64, 0);
+        assert_eq!(padded.len(), 64);
+
+        // Should start with original data
+        assert_eq!(&padded[..4], data);
+
+        // Should have 0x80 after data
+        assert_eq!(padded[4], 0x80);
+    }
+
+    #[test]
+    fn test_sha256_pad_55_bytes() {
+        // Exactly 55 bytes - should fit in one block with padding
+        let data = [0xAB; 55];
+        let padded = sha256_pad(&data);
+        assert_eq!(padded.len(), 64);
+    }
+
+    #[test]
+    fn test_sha256_pad_56_bytes() {
+        // 56 bytes - needs two blocks
+        let data = [0xAB; 56];
+        let padded = sha256_pad(&data);
+        assert_eq!(padded.len(), 128);
+    }
+
+    #[test]
+    fn test_sha256_pad_length_encoding() {
+        let data = b"test"; // 4 bytes = 32 bits = 0x20
+        let padded = sha256_pad(data);
+
+        // Last 8 bytes should be length in bits (big-endian)
+        let len_bytes = &padded[padded.len() - 8..];
+        let length = u64::from_be_bytes(len_bytes.try_into().unwrap());
+        assert_eq!(length, 32); // 4 bytes * 8 = 32 bits
+    }
+
+    #[test]
+    fn test_state_to_bytes() {
+        let state = [
+            0x12345678, 0x9ABCDEF0, 0x11111111, 0x22222222,
+            0x33333333, 0x44444444, 0x55555555, 0x66666666,
+        ];
+        let bytes = state_to_bytes(&state);
+
+        // First word should be big-endian
+        assert_eq!(bytes[0], 0x12);
+        assert_eq!(bytes[1], 0x34);
+        assert_eq!(bytes[2], 0x56);
+        assert_eq!(bytes[3], 0x78);
+    }
+
+    #[test]
+    fn test_meets_target_easy() {
+        let target = [0xFF; 32]; // Very easy target
+        let hash = [0x00; 32];
+        assert!(meets_target(&hash, &target));
+    }
+
+    #[test]
+    fn test_meets_target_hard() {
+        let target = [0x00; 32]; // Impossible target
+        let hash = [0x01; 32];
+        assert!(!meets_target(&hash, &target));
+    }
+
+    #[test]
+    fn test_meets_target_equal() {
+        let target = [0x11; 32];
+        let hash = [0x11; 32];
+        assert!(meets_target(&hash, &target)); // Equal meets target
+    }
+
+    #[test]
+    fn test_meets_target_boundary() {
+        let mut target = [0xFF; 32];
+        target[0] = 0x00;
+        target[1] = 0x01;
+
+        let mut good_hash = [0x00; 32];
+        good_hash[1] = 0x00;  // Less than target[1]
+        assert!(meets_target(&good_hash, &target));
+
+        let mut bad_hash = [0x00; 32];
+        bad_hash[1] = 0x02;  // Greater than target[1]
+        assert!(!meets_target(&bad_hash, &target));
+    }
+
+    #[test]
+    fn test_mine_generic_no_match() {
+        let header = [0u8; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let tail = [0u8; 16];
+        let target = [0x00; 32]; // Impossible target
+
+        let result = mine_generic(&midstate, &tail, 0, 100, &target);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_mine_generic_easy_target() {
+        let header = [0u8; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let tail = [0u8; 16];
+        let target = [0xFF; 32]; // Very easy target
+
+        let result = mine_generic(&midstate, &tail, 0, 10, &target);
+        assert!(result.is_some());
+
+        let (nonce, hash) = result.unwrap();
+        assert!(nonce < 10);
+        assert!(meets_target(&hash, &target));
+    }
+
+    #[test]
+    fn test_mine_with_midstate() {
+        let header = [0u8; 64];
+        let midstate = Midstate::from_header_prefix(&header);
+        let tail = [0u8; 16];
+        let target = [0xFF; 32]; // Easy target
+
+        let result = mine_with_midstate(&midstate, &tail, 0, 10, &target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_h_init_values() {
+        // Verify SHA-256 initial values
+        assert_eq!(H_INIT[0], 0x6a09e667);
+        assert_eq!(H_INIT[7], 0x5be0cd19);
+    }
+
+    #[test]
+    fn test_k_values() {
+        // Verify some SHA-256 round constants
+        assert_eq!(K[0], 0x428a2f98);
+        assert_eq!(K[63], 0xc67178f2);
+        assert_eq!(K.len(), 64);
+    }
+
+    #[test]
+    fn test_different_midstates() {
+        let header1 = [0x00; 64];
+        let header2 = [0xFF; 64];
+
+        let midstate1 = Midstate::from_header_prefix(&header1);
+        let midstate2 = Midstate::from_header_prefix(&header2);
+
+        assert_ne!(midstate1.state, midstate2.state);
     }
 }

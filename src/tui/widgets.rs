@@ -10,6 +10,9 @@ use ratatui::{
 use super::state::{LogLevel, TuiState};
 use crate::stats::format_hashrate;
 
+// TUI rendering functions are excluded from coverage as they are
+// difficult to test meaningfully (visual output verification)
+#[cfg(not(tarpaulin_include))]
 pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     let size = f.area();
 
@@ -30,6 +33,7 @@ pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     draw_footer(f, main_chunks[2], state);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
     // Split header into left (info) and right (shortcuts)
     let chunks = Layout::default()
@@ -41,6 +45,7 @@ fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
     draw_header_shortcuts(f, chunks[1], state);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
     let mode = state.get_mode();
     let simd = state.get_simd_level();
@@ -123,6 +128,7 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
     f.render_widget(info, area);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
     let key_style = Style::default().fg(Color::Cyan);
     let action_style = Style::default().fg(Color::DarkGray);
@@ -166,6 +172,7 @@ fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
     f.render_widget(shortcuts, area);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_body(f: &mut Frame, area: Rect, state: &TuiState) {
     // Split body into left (stats) and right (logs)
     let chunks = Layout::default()
@@ -177,6 +184,7 @@ fn draw_body(f: &mut Frame, area: Rect, state: &TuiState) {
     draw_logs_panel(f, chunks[1], state);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -330,6 +338,7 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     f.render_widget(conn, chunks[3]);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let logs = state.get_logs();
     let scroll = state.get_log_scroll();
@@ -376,6 +385,7 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     f.render_widget(logs_list, area);
 }
 
+#[cfg(not(tarpaulin_include))]
 fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
     // Show download/sync progress bar if active
     if state.is_downloading() {
