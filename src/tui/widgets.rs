@@ -488,14 +488,14 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let display_mode = state.get_hashrate_display_mode();
 
     // Determine which hashrate to show based on display mode
-    let (primary_hashrate, mode_label) = match display_mode {
-        crate::tui::state::HashrateDisplayMode::Total => (total_hashrate, "Total"),
-        crate::tui::state::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU"),
-        crate::tui::state::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU"),
-        crate::tui::state::HashrateDisplayMode::GpuDevice(_idx) => {
-            // For now, show total GPU hashrate with device label
-            // TODO: Per-device hashrate when available
-            (gpu_hashrate, "GPU")
+    let (primary_hashrate, mode_label): (f64, String) = match display_mode {
+        crate::tui::state::HashrateDisplayMode::Total => (total_hashrate, "Total".to_string()),
+        crate::tui::state::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU".to_string()),
+        crate::tui::state::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU".to_string()),
+        crate::tui::state::HashrateDisplayMode::GpuDevice(idx) => {
+            // Show per-device hashrate
+            let device_rate = state.get_gpu_device_hashrate(idx as u32);
+            (device_rate, format!("GPU#{}", idx))
         }
     };
     let hr_str = format_hashrate(primary_hashrate);

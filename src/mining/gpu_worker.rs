@@ -14,11 +14,18 @@ use crate::gpu::{GpuManager, GpuMiner, GpuDevice};
 pub struct GpuWorkerHandle {
     pub device: GpuDevice,
     handle: JoinHandle<()>,
+    /// Per-device hashrate (stored as f64 bits)
+    hashrate: Arc<AtomicU64>,
 }
 
 impl GpuWorkerHandle {
     pub fn join(self) -> thread::Result<()> {
         self.handle.join()
+    }
+
+    /// Get this device's hashrate
+    pub fn hashrate(&self) -> f64 {
+        f64::from_bits(self.hashrate.load(Ordering::Relaxed))
     }
 }
 
@@ -29,7 +36,6 @@ pub struct GpuCoordinator {
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
     job_tx: watch::Sender<Option<GpuJob>>,
-    gpu_hashrate: Arc<AtomicU64>,
 }
 
 /// GPU-specific job with pre-computed midstate
@@ -52,7 +58,6 @@ impl GpuCoordinator {
     pub fn new(device_ids: &[u32], intensity: u8, stats: Arc<Stats>) -> Self {
         let running = Arc::new(AtomicBool::new(false));
         let (job_tx, _job_rx) = watch::channel(None);
-        let gpu_hashrate = Arc::new(AtomicU64::new(0));
 
         let gpu_manager = GpuManager::new();
         let available_devices = gpu_manager.devices();
@@ -74,17 +79,20 @@ impl GpuCoordinator {
             match gpu_manager.create_miner(device.id, intensity) {
                 Ok(miner) => {
                     let device_clone = device.clone();
+                    // Create per-device hashrate tracker
+                    let device_hashrate = Arc::new(AtomicU64::new(0));
                     let handle = Self::spawn_worker(
                         miner,
                         device_clone.clone(),
                         Arc::clone(&stats),
                         Arc::clone(&running),
                         job_tx.subscribe(),
-                        Arc::clone(&gpu_hashrate),
+                        Arc::clone(&device_hashrate),
                     );
                     workers.push(GpuWorkerHandle {
                         device: device_clone,
                         handle,
+                        hashrate: device_hashrate,
                     });
                 }
                 Err(e) => {
@@ -98,7 +106,6 @@ impl GpuCoordinator {
             stats,
             running,
             job_tx,
-            gpu_hashrate,
         }
     }
 
@@ -239,9 +246,23 @@ impl GpuCoordinator {
         self.workers.len()
     }
 
-    /// Get combined GPU hashrate
+    /// Get combined GPU hashrate (sum of all devices)
     pub fn hashrate(&self) -> f64 {
-        f64::from_bits(self.gpu_hashrate.load(Ordering::Relaxed))
+        self.workers.iter().map(|w| w.hashrate()).sum()
+    }
+
+    /// Get per-device hashrates
+    pub fn device_hashrates(&self) -> Vec<(u32, f64)> {
+        self.workers.iter()
+            .map(|w| (w.device.id, w.hashrate()))
+            .collect()
+    }
+
+    /// Get hashrate for a specific device
+    pub fn device_hashrate(&self, device_id: u32) -> Option<f64> {
+        self.workers.iter()
+            .find(|w| w.device.id == device_id)
+            .map(|w| w.hashrate())
     }
 
     /// Get stats reference

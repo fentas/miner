@@ -850,10 +850,12 @@ async fn run_solo_mode_with_tui(
             tui_state.set_shares(stats.shares_accepted, stats.shares_rejected);
 
             // Update GPU hashrate if enabled
-            if gpu_coordinator.is_some() {
+            if let Some(ref gpu_coord) = gpu_coordinator {
                 gpu_hashrate_calc.add_sample(stats.gpu_hashes);
                 let gpu_hashrate = gpu_hashrate_calc.hashrate();
                 tui_state.set_gpu_hashrate(gpu_hashrate);
+                // Set per-device hashrates
+                tui_state.set_gpu_device_hashrates(gpu_coord.device_hashrates());
             }
 
             last_stats = Instant::now();

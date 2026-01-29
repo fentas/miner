@@ -208,6 +208,8 @@ pub struct TuiState {
     gpu_available: AtomicBool,   // GPU actually detected and usable
     gpu_devices: RwLock<Vec<String>>,
     gpu_hashrate: AtomicU64,
+    /// Per-device hashrates: Vec<(device_id, hashrate_bits)>
+    gpu_device_hashrates: RwLock<Vec<(u32, u64)>>,
 
     // Status
     pub paused: AtomicBool,
@@ -270,6 +272,7 @@ impl TuiState {
             gpu_available: AtomicBool::new(false),
             gpu_devices: RwLock::new(Vec::new()),
             gpu_hashrate: AtomicU64::new(0),
+            gpu_device_hashrates: RwLock::new(Vec::new()),
             paused: AtomicBool::new(false),
             connected: AtomicBool::new(false),
             syncing: AtomicBool::new(false),
@@ -389,6 +392,15 @@ impl TuiState {
 
     pub fn set_gpu_hashrate(&self, rate: f64) {
         self.gpu_hashrate.store(rate.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Set per-device GPU hashrates
+    pub fn set_gpu_device_hashrates(&self, hashrates: Vec<(u32, f64)>) {
+        if let Ok(mut h) = self.gpu_device_hashrates.write() {
+            *h = hashrates.into_iter()
+                .map(|(id, rate)| (id, rate.to_bits()))
+                .collect();
+        }
     }
 
     pub fn set_connected(&self, connected: bool) {
@@ -587,6 +599,14 @@ impl TuiState {
 
     pub fn get_gpu_hashrate(&self) -> f64 {
         f64::from_bits(self.gpu_hashrate.load(Ordering::Relaxed))
+    }
+
+    /// Get hashrate for a specific GPU device
+    pub fn get_gpu_device_hashrate(&self, device_id: u32) -> f64 {
+        self.gpu_device_hashrates.read()
+            .ok()
+            .and_then(|h| h.iter().find(|(id, _)| *id == device_id).map(|(_, bits)| f64::from_bits(*bits)))
+            .unwrap_or(0.0)
     }
 
     /// Get current hashrate display mode
