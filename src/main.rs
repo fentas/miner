@@ -253,6 +253,7 @@ async fn run_solo_mode_with_tui(
         }
 
         // Download AssumeUTXO snapshot if enabled and not already present
+        tracing::info!("AssumeUTXO check: enabled={}", cfg.bitcoind.assumeutxo);
         if cfg.bitcoind.assumeutxo && !bitcoind.has_assumeutxo_snapshot() {
             tui_state.log_info("AssumeUTXO enabled - downloading UTXO snapshot...");
             tui_state.set_downloading(true, "AssumeUTXO");
@@ -713,6 +714,19 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             bitcoind.download_and_install().await?;
         }
 
+        // Download AssumeUTXO snapshot if enabled and not already present
+        if cfg.bitcoind.assumeutxo && !bitcoind.has_assumeutxo_snapshot() {
+            info!("AssumeUTXO enabled - downloading UTXO snapshot via BitTorrent...");
+            bitcoind.download_assumeutxo_with_progress(|bytes, total| {
+                let percent = if total > 0 { (bytes as f64 / total as f64) * 100.0 } else { 0.0 };
+                print!("\r⏳ Downloading AssumeUTXO snapshot: {:.1}%", percent);
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+            }).await?;
+            println!("\n✓ AssumeUTXO snapshot downloaded");
+        } else if cfg.bitcoind.assumeutxo {
+            info!("AssumeUTXO snapshot already present");
+        }
+
         bitcoind.write_config()?;
         bitcoind.start()?;
 
@@ -722,6 +736,15 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             "⏳".bright_yellow(),
             "Starting Bitcoin Core...".bright_white()
         );
+
+        // Load AssumeUTXO if enabled (after Bitcoin Core starts)
+        if cfg.bitcoind.assumeutxo && bitcoind.has_assumeutxo_snapshot() {
+            info!("Waiting for headers sync before loading AssumeUTXO...");
+            match bitcoind.load_assumeutxo().await {
+                Ok(_) => println!("{} {}", "✓".bright_green(), "AssumeUTXO snapshot loaded - fast sync enabled".bright_white()),
+                Err(e) => warn!("AssumeUTXO load failed: {}", e),
+            }
+        }
 
         let start = std::time::Instant::now();
         let mut last_message = String::new();

@@ -508,9 +508,24 @@ blockmaxweight=4000000
             return true;
         }
 
-        if path.exists() && !marker.exists() {
-            info!("AssumeUTXO snapshot exists but download may be incomplete - will verify via torrent");
+        // If file exists and is the expected size, create marker and consider complete
+        // This handles the case where we already have a complete file (e.g., manual download)
+        // Expected size is ~9.6GB (varies slightly by height)
+        const EXPECTED_MIN_SIZE: u64 = 9_600_000_000; // ~9.6 GB
+        if path.exists() {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let size = metadata.len();
+                if size >= EXPECTED_MIN_SIZE {
+                    info!("Found complete AssumeUTXO snapshot ({} bytes), creating marker", size);
+                    if let Err(e) = std::fs::write(&marker, "complete") {
+                        warn!("Failed to create marker file: {}", e);
+                    } else {
+                        return true;
+                    }
+                }
+            }
         }
+
         false
     }
 
@@ -551,8 +566,6 @@ blockmaxweight=4000000
         std::fs::create_dir_all(&self.data_dir)?;
 
         info!("Downloading AssumeUTXO snapshot (height {}) via BitTorrent...", ASSUMEUTXO_HEIGHT);
-        info!("Magnet: {}", magnet);
-        info!("This is a ~9GB file - torrent provides trustless verification via infohash");
 
         // Configure download engine with persistent session state
         // database_path stores torrent session for proper resume across restarts
@@ -566,21 +579,75 @@ blockmaxweight=4000000
             .await
             .map_err(|e| BitcoinError::DownloadError(format!("Failed to create download engine: {}", e)))?;
 
-        // Add magnet link
-        let opts = DownloadOptions::default();
-        let download_id = engine.add_magnet(magnet, opts)
-            .await
-            .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?;
+        // Extract info hash from magnet for matching existing downloads
+        let info_hash = magnet
+            .split("btih:")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .map(|s| s.to_lowercase());
+
+        // Check if a download already exists for this torrent
+        let existing_download = engine.list().into_iter().find(|d| {
+            if let Some(ref ih) = d.metadata.info_hash {
+                if let Some(ref target_ih) = info_hash {
+                    return ih.to_lowercase() == *target_ih;
+                }
+            }
+            // Fallback: match by name
+            d.metadata.name == format!("utxo-{}.dat", ASSUMEUTXO_HEIGHT)
+        });
+
+        let download_id = if let Some(existing) = existing_download {
+            // Resume if not already downloading/seeding
+            match existing.state {
+                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
+                    info!("Download already complete");
+                    let marker_path = self.data_dir.join(format!("utxo-{}.dat.complete", ASSUMEUTXO_HEIGHT));
+                    std::fs::write(&marker_path, "complete")?;
+                    return Ok(self.assumeutxo_snapshot_path());
+                }
+                gosh_dl::DownloadState::Paused | gosh_dl::DownloadState::Queued => {
+                    match engine.resume(existing.id).await {
+                        Ok(_) => existing.id,
+                        Err(_) => {
+                            // Resume failed (no torrent handle after restart) - cancel and re-add
+                            let _ = engine.cancel(existing.id, false).await;
+                            let opts = DownloadOptions::default();
+                            engine.add_magnet(magnet, opts)
+                                .await
+                                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
+                        }
+                    }
+                }
+                gosh_dl::DownloadState::Downloading => existing.id,
+                _ => {
+                    // Unknown or failed state - cancel and restart
+                    let _ = engine.cancel(existing.id, false).await;
+                    let opts = DownloadOptions::default();
+                    engine.add_magnet(magnet, opts)
+                        .await
+                        .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
+                }
+            }
+        } else {
+            let opts = DownloadOptions::default();
+            engine.add_magnet(magnet, opts)
+                .await
+                .map_err(|e| BitcoinError::DownloadError(format!("Failed to add magnet: {}", e)))?
+        };
 
         // Subscribe to events for progress
         let mut events = engine.subscribe();
 
-        // Track progress - use known size estimate for initial display
-        let mut last_downloaded: u64 = 0;
-        let mut total_size: u64 = 9_772_098_907; // Known size estimate (~9.1 GB)
+        // Get current status to initialize progress tracking
+        let status = engine.status(download_id);
+        let mut last_downloaded: u64 = status.as_ref().map(|s| s.progress.completed_size).unwrap_or(0);
+        let mut total_size: u64 = status.as_ref()
+            .and_then(|s| s.progress.total_size)
+            .unwrap_or(9_772_098_907); // Fallback to known size estimate (~9.1 GB)
 
-        // Send initial progress callback so UI shows something immediately
-        progress_callback(0, total_size);
+        // Send initial progress callback with current state
+        progress_callback(last_downloaded, total_size);
 
         loop {
             match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
@@ -591,7 +658,6 @@ blockmaxweight=4000000
                             if let Some(total) = progress.total_size {
                                 if total != total_size {
                                     total_size = total;
-                                    info!("Torrent metadata received: total size = {} bytes", total);
                                     progress_callback(last_downloaded, total_size);
                                 }
                             }
@@ -599,16 +665,10 @@ blockmaxweight=4000000
                             if progress.completed_size != last_downloaded {
                                 last_downloaded = progress.completed_size;
                                 progress_callback(last_downloaded, total_size);
-
-                                // Log when at 100%
-                                if total_size > 0 && last_downloaded >= total_size {
-                                    info!("Download at 100% ({}/{}), waiting for state change...", last_downloaded, total_size);
-                                }
                             }
                         }
                         // Torrent transitions to Seeding/Completed state when download finishes
                         DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
-                            info!("Torrent state changed to: {:?}", new_state);
                             match new_state {
                                 gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
                                     info!("AssumeUTXO snapshot download complete");
@@ -625,20 +685,11 @@ blockmaxweight=4000000
                                 error
                             )));
                         }
-                        other => {
-                            // Log all other events for debugging
-                            info!("Torrent event: {:?}", other);
-                        }
+                        _ => {} // Ignore other events
                     }
                 }
-                Ok(Err(_)) => {
-                    // Channel closed
-                    info!("Event channel closed");
-                    break;
-                }
-                Err(_) => {
-                    // Timeout - continue waiting
-                }
+                Ok(Err(_)) => break, // Channel closed
+                Err(_) => {} // Timeout - continue waiting
             }
         }
 
