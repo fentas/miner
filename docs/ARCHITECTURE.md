@@ -643,7 +643,7 @@ cargo test -- --nocapture
 
 ### Test Coverage
 
-Total: 398+ tests
+Total: 406+ tests
 
 | Module | Tests |
 |--------|-------|

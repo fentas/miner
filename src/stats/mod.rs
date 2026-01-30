@@ -1,3 +1,11 @@
+//! Statistics and Hashrate Calculation
+//!
+//! Provides utilities for tracking mining performance:
+//! - `HashrateCalculator` - sliding window hashrate calculation
+//! - `format_hashrate` - human-readable hashrate formatting
+//! - `format_duration` - human-readable duration formatting
+//! - `expected_time_to_find` - expected time to find a block
+
 use std::time::{Duration, Instant};
 
 /// Hashrate calculator with sliding window

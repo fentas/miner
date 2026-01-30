@@ -149,6 +149,7 @@ impl MockRpcServer {
         }
     }
 
+    #[allow(dead_code)] // Useful for debugging
     fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }

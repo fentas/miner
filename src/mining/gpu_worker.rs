@@ -151,6 +151,7 @@ impl GpuCoordinator {
     }
 
     /// Spawn a GPU worker thread
+    #[allow(clippy::too_many_arguments)] // Parameters are all necessary for worker configuration
     fn spawn_worker(
         mut miner: Box<dyn GpuMiner>,
         device: GpuDevice,

@@ -29,34 +29,50 @@ impl Stats {
         Self::default()
     }
 
+    /// Add CPU hashes to the counter (hot path)
+    #[inline]
     pub fn add_hashes(&self, count: u64) {
         self.hashes.fetch_add(count, Ordering::Relaxed);
     }
 
+    /// Add GPU hashes to the counter (hot path)
+    #[inline]
     pub fn add_gpu_hashes(&self, count: u64) {
         self.gpu_hashes.fetch_add(count, Ordering::Relaxed);
     }
 
+    /// Get total GPU hashes
+    #[inline]
     pub fn get_gpu_hashes(&self) -> u64 {
         self.gpu_hashes.load(Ordering::Relaxed)
     }
 
+    /// Record accepted share
+    #[inline]
     pub fn accept_share(&self) {
         self.shares_accepted.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record rejected share
+    #[inline]
     pub fn reject_share(&self) {
         self.shares_rejected.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record found block
+    #[inline]
     pub fn found_block(&self) {
         self.blocks_found.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Get total CPU hashes
+    #[inline]
     pub fn get_hashes(&self) -> u64 {
         self.hashes.load(Ordering::Relaxed)
     }
 
+    /// Reset hash counter and return previous value
+    #[inline]
     pub fn reset_hashes(&self) -> u64 {
         self.hashes.swap(0, Ordering::Relaxed)
     }

@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use std::time::Instant;
-use super::state::{LogLevel, LogTimeFilter, TuiState};
+use super::state::{LogLevel, TuiState};
 use crate::stats::format_hashrate;
 
 const DEFAULT_LOG_TAIL: usize = 100;

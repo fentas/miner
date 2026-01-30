@@ -434,4 +434,49 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_difficulty_range() {
+        let mut client = StratumV2Client::new();
+
+        // Test various difficulty values
+        client.set_difficulty(0.0);
+        assert_eq!(client.get_difficulty(), 0.0);
+
+        client.set_difficulty(1e15);
+        assert_eq!(client.get_difficulty(), 1e15);
+    }
+
+    #[test]
+    fn test_parse_channel_response_truncated_extranonce() {
+        let mut client = StratumV2Client::new();
+
+        // Channel ID = 1, extranonce length = 5, but only 2 bytes of data
+        let data = vec![1, 0, 0, 0, 5, 0xAA, 0xBB];
+        let result = client.parse_channel_response(&data);
+
+        // Should succeed but not set extranonce (graceful handling)
+        assert!(result.is_ok());
+        assert!(client.extranonce_prefix.is_empty()); // Not enough data to parse
+    }
+
+    #[test]
+    fn test_parse_new_mining_job_boundary() {
+        let client = StratumV2Client::new();
+
+        // Exactly minimum valid size (76 bytes)
+        let mut data = vec![0u8; 76];
+        data[0..4].copy_from_slice(&1u32.to_le_bytes());
+        data[4..8].copy_from_slice(&0x20000000u32.to_le_bytes());
+        data[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
+
+        let result = client.parse_new_mining_job(&data);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extranonce_prefix_empty() {
+        let client = StratumV2Client::new();
+        assert!(client.get_extranonce_prefix().is_empty());
+    }
 }

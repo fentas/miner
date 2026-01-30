@@ -121,7 +121,7 @@ impl StratumV1Client {
                 }
                 // extranonce2_size is at index 2 (must be 1-8 bytes)
                 if let Some(en2_size) = arr.get(2).and_then(|v| v.as_u64()) {
-                    if en2_size < 1 || en2_size > 8 {
+                    if !(1..=8).contains(&en2_size) {
                         return Err(StratumError::ProtocolError(
                             format!("Invalid extranonce2_size: expected 1-8, got {}", en2_size),
                         ));

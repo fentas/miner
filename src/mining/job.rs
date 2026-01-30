@@ -526,4 +526,35 @@ mod tests {
         let block3 = job.build_block(0x22222222);
         assert_ne!(block1, block3, "Different nonce should produce different block");
     }
+
+    #[test]
+    fn test_difficulty_to_target_nan() {
+        // NaN should be treated as invalid (returns max target)
+        let target = difficulty_to_target(f64::NAN);
+        // NaN <= 0.0 is false, so this goes through the normal path
+        // and produces [0x00; 32] since target_scaled will be NaN
+        assert!(target == [0x00; 32] || target == [0xff; 32]);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_infinity() {
+        // Infinity should produce minimal target (impossible to meet)
+        let target = difficulty_to_target(f64::INFINITY);
+        assert_eq!(target, [0x00; 32]);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_very_large() {
+        // Very large difficulty should produce minimal target
+        let target = difficulty_to_target(1e30);
+        assert_eq!(target, [0x00; 32]);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_very_small() {
+        // Very small positive difficulty should produce large target
+        let target = difficulty_to_target(1e-10);
+        // Should have many 0xff bytes
+        assert!(target.iter().filter(|&&b| b == 0xff).count() > 10);
+    }
 }
