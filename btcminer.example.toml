@@ -221,3 +221,12 @@ gpu = true
 #   gpu = true
 #   gpu_inverse = true  # GPU runs when active, stops when idle
 #   pause_on_active = true
+
+# ============================================
+# DESKTOP OVERLAY (requires --features overlay)
+# ============================================
+
+[overlay]
+# Auto-open overlay window on startup
+# The overlay is a transparent floating window showing hashrate and controls
+auto_open = false
