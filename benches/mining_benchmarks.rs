@@ -1,5 +1,10 @@
 //! Mining benchmarks using criterion
 //!
+//! IMPORTANT: These benchmarks use HARD targets [0x00; 32] to measure real hashrate.
+//! Easy targets [0xFF; 32] cause early exit after 1 hash, inflating results by 256,000x!
+//!
+//! Expected performance with SHA-NI: ~10 MH/s per thread
+//!
 //! Run with: cargo bench
 //! Run specific: cargo bench -- hasher
 //! Run with HTML reports: cargo bench (reports in target/criterion/)
@@ -19,7 +24,8 @@ use btcminer::mining::{Hasher, Midstate, SimdLevel};
 fn bench_hasher_batch_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("hasher_batch_size");
     let header = [0u8; 76];
-    let target = [0xFF; 32]; // Easy target - won't find solution
+    // Hard target - processes all nonces for accurate throughput measurement
+    let target = [0x00; 32];
 
     for batch_exp in [16u8, 17, 18, 19, 20] {
         let batch_size = 1u32 << batch_exp;
@@ -73,7 +79,7 @@ fn bench_hasher_new(c: &mut Criterion) {
 fn bench_single_hash(c: &mut Criterion) {
     let mut hasher = Hasher::new();
     let header = [0u8; 76];
-    let target = [0xFF; 32];
+    let target = [0x00; 32]; // Hard target for realistic measurement
 
     c.bench_function("single_hash_batch", |b| {
         let mut nonce = 0u32;
@@ -94,7 +100,7 @@ fn bench_single_hash(c: &mut Criterion) {
 fn bench_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("throughput");
     let header = [0u8; 76];
-    let target = [0xFF; 32];
+    let target = [0x00; 32]; // Hard target for realistic measurement
     let batch_size = 262144u32; // 2^18
 
     group.throughput(Throughput::Elements(batch_size as u64));
@@ -147,7 +153,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                         let handle = thread::spawn(move || {
                             let mut hasher = Hasher::new();
                             let header = [0u8; 76];
-                            let target = [0xFF; 32];
+                            let target = [0x00; 32]; // Hard target for realistic measurement
                             let mut nonce = 0u32;
 
                             while run.load(Ordering::Relaxed) {
