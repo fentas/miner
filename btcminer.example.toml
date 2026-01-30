@@ -44,7 +44,12 @@ enable_gpu = false
 # gpu_devices = [0, 1]
 
 # GPU intensity (1-100, default 100)
-# Higher = more GPU utilization, may affect system responsiveness
+# Controls GPU utilization by adding sleep between batches
+# 100 = 100% utilization (no sleep)
+# 50  = ~50% utilization
+# 10  = ~10% utilization (recommended for background mining)
+# 5   = ~5% utilization (minimal impact)
+# Lower values save power but reduce hashrate proportionally
 gpu_intensity = 10
 
 # GPU work group size (0 = auto, 64-1024)

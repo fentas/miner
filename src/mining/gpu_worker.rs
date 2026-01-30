@@ -122,6 +122,7 @@ impl GpuCoordinator {
                         job_tx.subscribe(),
                         Arc::clone(&device_hashrate),
                         batch_size,
+                        tuning.intensity,
                     );
                     workers.push(GpuWorkerHandle {
                         device: device_clone,
@@ -152,7 +153,22 @@ impl GpuCoordinator {
         mut job_rx: watch::Receiver<Option<GpuJob>>,
         hashrate: Arc<AtomicU64>,
         batch_size: u32,
+        intensity: u8,
     ) -> JoinHandle<()> {
+        // Calculate sleep time between batches based on intensity
+        // intensity 100 = no sleep (100% utilization)
+        // intensity 50 = 10ms sleep (~50% utilization)
+        // intensity 10 = 90ms sleep (~10% utilization)
+        // intensity 1 = 990ms sleep (~1% utilization)
+        let sleep_ms = if intensity >= 100 {
+            0
+        } else {
+            // Sleep duration inversely proportional to intensity
+            // At intensity=10, sleep 90ms for every ~10ms of work = ~10% utilization
+            ((100 - intensity as u64) * 10) / intensity.max(1) as u64
+        };
+        let sleep_duration = std::time::Duration::from_millis(sleep_ms);
+
         thread::Builder::new()
             .name(format!("gpu-miner-{}", device.id))
             .spawn(move || {
@@ -220,6 +236,12 @@ impl GpuCoordinator {
 
                     // Advance nonce
                     nonce = nonce.wrapping_add(batch_size);
+
+                    // Sleep between batches to control GPU utilization
+                    // This is the key to reducing GPU load percentage
+                    if sleep_ms > 0 {
+                        std::thread::sleep(sleep_duration);
+                    }
                 }
             })
             .expect("Failed to spawn GPU worker thread")
