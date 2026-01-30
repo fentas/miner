@@ -183,8 +183,8 @@ impl GpuCoordinator {
                 let mut last_job_id = String::new();
 
                 loop {
-                    // Wait for running flag
-                    while !running.load(Ordering::Relaxed) {
+                    // Wait for running flag (Acquire pairs with Release in start())
+                    while !running.load(Ordering::Acquire) {
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
 

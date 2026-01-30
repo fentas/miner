@@ -77,7 +77,8 @@ impl Worker {
 
         loop {
             // Wait for running flag to be set (coordinator.start() called)
-            while !self.running.load(Ordering::Relaxed) {
+            // Use Acquire to synchronize with Release in coordinator.start()
+            while !self.running.load(Ordering::Acquire) {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
 
@@ -101,7 +102,7 @@ impl Worker {
 
             loop {
                 // Check if still running and job hasn't changed
-                if !self.running.load(Ordering::Relaxed) {
+                if !self.running.load(Ordering::Acquire) {
                     break;
                 }
 
@@ -153,7 +154,7 @@ impl Worker {
     fn wait_for_job(&mut self) -> Option<Job> {
         loop {
             // Check if we should stop
-            if !self.running.load(Ordering::Relaxed) {
+            if !self.running.load(Ordering::Acquire) {
                 return None;
             }
 

@@ -381,19 +381,11 @@ impl Default for IdleConfig {
 }
 
 /// Overlay window configuration (requires --features overlay)
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct OverlayConfig {
     /// Auto-open overlay on startup
     #[serde(default)]
     pub auto_open: bool,
-}
-
-impl Default for OverlayConfig {
-    fn default() -> Self {
-        Self {
-            auto_open: false,
-        }
-    }
 }
 
 /// Main configuration structure
