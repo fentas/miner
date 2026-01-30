@@ -46,18 +46,32 @@ async fn test_api_stats_endpoint() {
     assert!(json.get("hashrate_unit").is_some());
     assert!(json.get("hashrate_formatted").is_some()); // Overlay compatibility
     assert!(json.get("hashes").is_some());
+    assert!(json.get("total_hashes").is_some()); // Web dashboard alias
     assert!(json.get("shares_accepted").is_some());
     assert!(json.get("shares_rejected").is_some());
     assert!(json.get("blocks_found").is_some());
     assert!(json.get("uptime_seconds").is_some());
+    assert!(json.get("uptime").is_some()); // Web dashboard alias
     assert!(json.get("uptime_formatted").is_some());
     assert!(json.get("mining_paused").is_some());
+    assert!(json.get("state").is_some()); // Miner state
+    assert!(json.get("threads").is_some()); // Worker count
 
     // Verify hashrate_unit and hashrate_formatted are the same
     assert_eq!(
         json["hashrate_unit"].as_str(),
         json["hashrate_formatted"].as_str()
     );
+
+    // Verify hashes and total_hashes are the same
+    assert_eq!(json["hashes"], json["total_hashes"]);
+
+    // Verify uptime_seconds and uptime are the same
+    assert_eq!(json["uptime_seconds"], json["uptime"]);
+
+    // Verify state is a valid value
+    let state = json["state"].as_str().unwrap();
+    assert!(["running", "paused", "stopped"].contains(&state));
 }
 
 /// Test GET /api/info endpoint
@@ -185,12 +199,16 @@ fn test_stats_update_serialization() {
         hashrate: 1_500_000.0,
         hashrate_formatted: "1.50 MH/s".to_string(),
         hashes: 50_000_000,
+        total_hashes: 50_000_000,
         shares_accepted: 10,
         shares_rejected: 2,
         blocks_found: 0,
         uptime_seconds: 3600,
+        uptime: 3600,
         uptime_formatted: "1h 0m 0s".to_string(),
         mining_paused: false,
+        state: "running".to_string(),
+        threads: 8,
     };
 
     let json = serde_json::to_string(&update).unwrap();
@@ -199,12 +217,16 @@ fn test_stats_update_serialization() {
     assert!(json.contains("\"hashrate\":1500000"));
     assert!(json.contains("\"hashrate_formatted\":\"1.50 MH/s\""));
     assert!(json.contains("\"hashes\":50000000"));
+    assert!(json.contains("\"total_hashes\":50000000"));
     assert!(json.contains("\"shares_accepted\":10"));
     assert!(json.contains("\"shares_rejected\":2"));
     assert!(json.contains("\"blocks_found\":0"));
     assert!(json.contains("\"uptime_seconds\":3600"));
+    assert!(json.contains("\"uptime\":3600"));
     assert!(json.contains("\"uptime_formatted\":\"1h 0m 0s\""));
     assert!(json.contains("\"mining_paused\":false"));
+    assert!(json.contains("\"state\":\"running\""));
+    assert!(json.contains("\"threads\":8"));
 }
 
 /// Test StatsUpdate clone
@@ -214,12 +236,16 @@ fn test_stats_update_clone() {
         hashrate: 1000.0,
         hashrate_formatted: "1.00 KH/s".to_string(),
         hashes: 100000,
+        total_hashes: 100000,
         shares_accepted: 5,
         shares_rejected: 0,
         blocks_found: 1,
         uptime_seconds: 600,
+        uptime: 600,
         uptime_formatted: "10m 0s".to_string(),
         mining_paused: true,
+        state: "paused".to_string(),
+        threads: 4,
     };
 
     let cloned = update.clone();
@@ -328,12 +354,16 @@ fn test_hashrate_formatting() {
             hashrate,
             hashrate_formatted: btcminer::stats::format_hashrate(hashrate),
             hashes: 0,
+            total_hashes: 0,
             shares_accepted: 0,
             shares_rejected: 0,
             blocks_found: 0,
             uptime_seconds: 0,
+            uptime: 0,
             uptime_formatted: String::new(),
             mining_paused: false,
+            state: "stopped".to_string(),
+            threads: 0,
         };
 
         assert_eq!(update.hashrate_formatted, expected_suffix,
@@ -358,4 +388,152 @@ fn test_uptime_formatting() {
         let formatted = btcminer::web::format_uptime(seconds);
         assert_eq!(formatted, expected, "Uptime {} seconds should format to {}", seconds, expected);
     }
+}
+
+/// Test GET /api/idle endpoint
+#[tokio::test]
+async fn test_api_idle_status() {
+    let state = create_test_state();
+    let app = create_router(state.clone(), "web", None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/idle")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify response structure
+    assert!(json.get("enabled").is_some());
+    assert!(json.get("timeout").is_some());
+    assert!(json.get("is_idle").is_some());
+    assert!(json.get("idle_time").is_some());
+    assert!(json.get("mining_due_to_idle").is_some());
+}
+
+/// Test POST /api/idle/enable endpoint
+#[tokio::test]
+async fn test_api_idle_enable() {
+    let state = create_test_state();
+    let app = create_router(state.clone(), "web", None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/idle/enable?timeout=600")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["success"].as_bool().unwrap(), true);
+    assert_eq!(json["enabled"].as_bool().unwrap(), true);
+    assert_eq!(json["timeout"].as_u64().unwrap(), 600);
+}
+
+/// Test POST /api/idle/disable endpoint
+#[tokio::test]
+async fn test_api_idle_disable() {
+    let state = create_test_state();
+
+    // Enable first
+    state.set_idle_enabled(true, Some(900)).await;
+
+    let app = create_router(state.clone(), "web", None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/idle/disable")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["success"].as_bool().unwrap(), true);
+    assert_eq!(json["enabled"].as_bool().unwrap(), false);
+}
+
+/// Test GET /api/logs endpoint
+#[tokio::test]
+async fn test_api_logs() {
+    let state = create_test_state();
+
+    // Add some logs
+    state.add_log("Test log 1".to_string(), "info").await;
+    state.add_log("Test log 2".to_string(), "success").await;
+
+    let app = create_router(state.clone(), "web", None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    let logs = json["logs"].as_array().unwrap();
+    assert_eq!(logs.len(), 2);
+    assert_eq!(logs[0]["message"].as_str().unwrap(), "Test log 1");
+    assert_eq!(logs[1]["level"].as_str().unwrap(), "success");
+}
+
+/// Test GET /api/openapi.json endpoint
+#[tokio::test]
+async fn test_api_openapi() {
+    let state = create_test_state();
+    let app = create_router(state.clone(), "web", None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify OpenAPI structure
+    assert_eq!(json["openapi"].as_str().unwrap(), "3.0.3");
+    assert!(json.get("info").is_some());
+    assert!(json.get("paths").is_some());
+    assert!(json.get("components").is_some());
+    assert!(json["paths"].get("/api/stats").is_some());
+    assert!(json["paths"].get("/api/idle").is_some());
 }

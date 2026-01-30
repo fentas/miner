@@ -60,6 +60,16 @@ async fn basic_auth_middleware(
         .expect("static response should always build")
 }
 
+/// Idle mining state
+#[derive(Clone, Default, serde::Serialize)]
+pub struct IdleState {
+    pub enabled: bool,
+    pub timeout: u64,  // seconds
+    pub is_idle: bool,
+    pub idle_time: u64,  // current idle time in seconds
+    pub mining_due_to_idle: bool,
+}
+
 /// Shared state for the web server
 pub struct WebState {
     pub stats: RwLock<StatsSnapshot>,
@@ -69,6 +79,16 @@ pub struct WebState {
     pub start_time: std::time::Instant,
     pub mining_paused: RwLock<bool>,
     pub stats_tx: broadcast::Sender<StatsUpdate>,
+    pub idle_state: RwLock<IdleState>,
+    pub logs: RwLock<Vec<LogEntry>>,
+}
+
+/// Log entry for web dashboard
+#[derive(Clone, serde::Serialize)]
+pub struct LogEntry {
+    pub timestamp: u64,
+    pub message: String,
+    pub level: String,  // "info", "success", "warning", "error"
 }
 
 /// Stats update for WebSocket broadcast
@@ -77,12 +97,16 @@ pub struct StatsUpdate {
     pub hashrate: f64,
     pub hashrate_formatted: String,
     pub hashes: u64,
+    pub total_hashes: u64,  // Alias for web dashboard
     pub shares_accepted: u64,
     pub shares_rejected: u64,
     pub blocks_found: u64,
     pub uptime_seconds: u64,
+    pub uptime: u64,  // Alias for web dashboard
     pub uptime_formatted: String,
     pub mining_paused: bool,
+    pub state: String,
+    pub threads: usize,
 }
 
 impl WebState {
@@ -96,6 +120,54 @@ impl WebState {
             start_time: std::time::Instant::now(),
             mining_paused: RwLock::new(false),
             stats_tx,
+            idle_state: RwLock::new(IdleState::default()),
+            logs: RwLock::new(Vec::new()),
+        }
+    }
+
+    /// Initialize idle state from config
+    pub fn with_idle_config(self, enabled: bool, timeout: u64) -> Self {
+        // Use blocking write since this is during initialization
+        let mut idle = self.idle_state.blocking_write();
+        idle.enabled = enabled;
+        idle.timeout = timeout;
+        drop(idle);
+        self
+    }
+
+    /// Add a log entry
+    pub async fn add_log(&self, message: String, level: &str) {
+        let entry = LogEntry {
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            message,
+            level: level.to_string(),
+        };
+
+        let mut logs = self.logs.write().await;
+        logs.push(entry);
+        // Keep only last 500 entries
+        if logs.len() > 500 {
+            logs.remove(0);
+        }
+    }
+
+    /// Update idle state
+    pub async fn update_idle(&self, is_idle: bool, idle_time: u64, mining_due_to_idle: bool) {
+        let mut state = self.idle_state.write().await;
+        state.is_idle = is_idle;
+        state.idle_time = idle_time;
+        state.mining_due_to_idle = mining_due_to_idle;
+    }
+
+    /// Set idle enabled
+    pub async fn set_idle_enabled(&self, enabled: bool, timeout: Option<u64>) {
+        let mut state = self.idle_state.write().await;
+        state.enabled = enabled;
+        if let Some(t) = timeout {
+            state.timeout = t;
         }
     }
 
@@ -106,16 +178,29 @@ impl WebState {
         let uptime = self.start_time.elapsed().as_secs();
         let paused = *self.mining_paused.read().await;
 
+        // Determine miner state
+        let state = if paused {
+            "paused"
+        } else if hashrate > 0.0 {
+            "running"
+        } else {
+            "stopped"
+        };
+
         let update = StatsUpdate {
             hashrate,
             hashrate_formatted: format_hashrate_unit(hashrate),
             hashes: stats.hashes,
+            total_hashes: stats.hashes,
             shares_accepted: stats.shares_accepted,
             shares_rejected: stats.shares_rejected,
             blocks_found: stats.blocks_found,
             uptime_seconds: uptime,
+            uptime,
             uptime_formatted: format_uptime(uptime),
             mining_paused: paused,
+            state: state.to_string(),
+            threads: self.worker_count,
         };
 
         // Broadcast to all WebSocket clients (ignore errors if no receivers)
@@ -134,10 +219,21 @@ impl WebState {
 /// Create the web server router
 pub fn create_router(state: Arc<WebState>, static_dir: &str, auth: Option<BasicAuthConfig>) -> Router {
     let router = Router::new()
+        // Stats and info
         .route("/api/stats", get(api_stats))
         .route("/api/info", get(api_info))
+        .route("/api/logs", get(api_logs))
+        // Mining control
         .route("/api/control/pause", get(api_pause))
         .route("/api/control/resume", get(api_resume))
+        // Idle mining
+        .route("/api/idle", get(api_idle_status))
+        .route("/api/idle/enable", axum::routing::post(api_idle_enable))
+        .route("/api/idle/disable", axum::routing::post(api_idle_disable))
+        .route("/api/idle/timeout", axum::routing::post(api_idle_timeout))
+        // OpenAPI spec
+        .route("/api/openapi.json", get(api_openapi))
+        // WebSocket
         .route("/ws", get(ws_handler))
         .fallback_service(ServeDir::new(static_dir))
         .with_state(state);
@@ -197,18 +293,31 @@ async fn api_stats(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     let uptime = state.start_time.elapsed().as_secs();
     let paused = *state.mining_paused.read().await;
 
+    // Determine miner state
+    let miner_state = if paused {
+        "paused"
+    } else if hashrate > 0.0 {
+        "running"
+    } else {
+        "stopped"
+    };
+
     let hashrate_str = format_hashrate_unit(hashrate);
     Json(serde_json::json!({
         "hashrate": hashrate,
         "hashrate_unit": hashrate_str,
         "hashrate_formatted": hashrate_str,  // Alias for overlay compatibility
         "hashes": stats.hashes,
+        "total_hashes": stats.hashes,  // Alias for web dashboard
         "shares_accepted": stats.shares_accepted,
         "shares_rejected": stats.shares_rejected,
         "blocks_found": stats.blocks_found,
         "uptime_seconds": uptime,
+        "uptime": uptime,  // Alias for web dashboard (in seconds)
         "uptime_formatted": format_uptime(uptime),
         "mining_paused": paused,
+        "state": miner_state,
+        "threads": state.worker_count,
     }))
 }
 
@@ -231,6 +340,171 @@ async fn api_pause(State(state): State<Arc<WebState>>) -> impl IntoResponse {
 async fn api_resume(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     state.set_paused(false).await;
     Json(serde_json::json!({ "status": "resumed" }))
+}
+
+/// API endpoint for logs
+async fn api_logs(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let logs = state.logs.read().await;
+    Json(serde_json::json!({ "logs": *logs }))
+}
+
+/// API endpoint for idle mining status
+async fn api_idle_status(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let idle = state.idle_state.read().await.clone();
+    Json(serde_json::json!({
+        "enabled": idle.enabled,
+        "timeout": idle.timeout,
+        "is_idle": idle.is_idle,
+        "idle_time": idle.idle_time,
+        "mining_due_to_idle": idle.mining_due_to_idle,
+    }))
+}
+
+/// API endpoint to enable idle mining
+async fn api_idle_enable(
+    State(state): State<Arc<WebState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let timeout = params.get("timeout")
+        .and_then(|t| t.parse::<u64>().ok())
+        .unwrap_or(900);
+    state.set_idle_enabled(true, Some(timeout)).await;
+    Json(serde_json::json!({ "success": true, "enabled": true, "timeout": timeout }))
+}
+
+/// API endpoint to disable idle mining
+async fn api_idle_disable(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    state.set_idle_enabled(false, None).await;
+    Json(serde_json::json!({ "success": true, "enabled": false }))
+}
+
+/// API endpoint to update idle timeout
+async fn api_idle_timeout(
+    State(state): State<Arc<WebState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let timeout = params.get("timeout")
+        .and_then(|t| t.parse::<u64>().ok())
+        .unwrap_or(900);
+    let mut idle = state.idle_state.write().await;
+    idle.timeout = timeout;
+    Json(serde_json::json!({ "success": true, "timeout": timeout }))
+}
+
+/// OpenAPI specification
+async fn api_openapi() -> impl IntoResponse {
+    let spec = serde_json::json!({
+        "openapi": "3.0.3",
+        "info": {
+            "title": "BTC Miner API",
+            "description": "REST API for BTC Miner - High-performance Bitcoin solo miner",
+            "version": env!("CARGO_PKG_VERSION"),
+            "license": { "name": "MIT" }
+        },
+        "servers": [{ "url": "/" }],
+        "paths": {
+            "/api/stats": {
+                "get": {
+                    "summary": "Get mining statistics",
+                    "tags": ["Stats"],
+                    "responses": {
+                        "200": {
+                            "description": "Mining statistics",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Stats" } } }
+                        }
+                    }
+                }
+            },
+            "/api/info": {
+                "get": {
+                    "summary": "Get miner information",
+                    "tags": ["Info"],
+                    "responses": { "200": { "description": "Miner info" } }
+                }
+            },
+            "/api/logs": {
+                "get": {
+                    "summary": "Get recent log entries",
+                    "tags": ["Logs"],
+                    "responses": { "200": { "description": "Log entries" } }
+                }
+            },
+            "/api/control/pause": {
+                "get": {
+                    "summary": "Pause mining",
+                    "tags": ["Control"],
+                    "responses": { "200": { "description": "Mining paused" } }
+                }
+            },
+            "/api/control/resume": {
+                "get": {
+                    "summary": "Resume mining",
+                    "tags": ["Control"],
+                    "responses": { "200": { "description": "Mining resumed" } }
+                }
+            },
+            "/api/idle": {
+                "get": {
+                    "summary": "Get idle mining status",
+                    "tags": ["Idle"],
+                    "responses": { "200": { "description": "Idle mining status" } }
+                }
+            },
+            "/api/idle/enable": {
+                "post": {
+                    "summary": "Enable idle mining",
+                    "tags": ["Idle"],
+                    "parameters": [{
+                        "name": "timeout",
+                        "in": "query",
+                        "description": "Idle timeout in seconds",
+                        "schema": { "type": "integer", "default": 900 }
+                    }],
+                    "responses": { "200": { "description": "Idle mining enabled" } }
+                }
+            },
+            "/api/idle/disable": {
+                "post": {
+                    "summary": "Disable idle mining",
+                    "tags": ["Idle"],
+                    "responses": { "200": { "description": "Idle mining disabled" } }
+                }
+            },
+            "/api/idle/timeout": {
+                "post": {
+                    "summary": "Update idle timeout",
+                    "tags": ["Idle"],
+                    "parameters": [{
+                        "name": "timeout",
+                        "in": "query",
+                        "description": "Idle timeout in seconds",
+                        "schema": { "type": "integer" }
+                    }],
+                    "responses": { "200": { "description": "Timeout updated" } }
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Stats": {
+                    "type": "object",
+                    "properties": {
+                        "hashrate": { "type": "number", "description": "Current hashrate in H/s" },
+                        "hashrate_formatted": { "type": "string", "description": "Human-readable hashrate" },
+                        "hashes": { "type": "integer", "description": "Total hashes computed" },
+                        "shares_accepted": { "type": "integer" },
+                        "shares_rejected": { "type": "integer" },
+                        "blocks_found": { "type": "integer" },
+                        "uptime_seconds": { "type": "integer" },
+                        "mining_paused": { "type": "boolean" },
+                        "state": { "type": "string", "enum": ["running", "paused", "stopped"] },
+                        "threads": { "type": "integer" }
+                    }
+                }
+            }
+        }
+    });
+    Json(spec)
 }
 
 /// Format hashrate with appropriate unit
@@ -368,18 +642,24 @@ mod tests {
             hashrate: 1000.0,
             hashrate_formatted: "1.00 KH/s".to_string(),
             hashes: 50000,
+            total_hashes: 50000,
             shares_accepted: 10,
             shares_rejected: 1,
             blocks_found: 0,
             uptime_seconds: 3600,
+            uptime: 3600,
             uptime_formatted: "1h 0m 0s".to_string(),
             mining_paused: false,
+            state: "running".to_string(),
+            threads: 8,
         };
 
         let cloned = update.clone();
         assert_eq!(cloned.hashrate, 1000.0);
         assert_eq!(cloned.shares_accepted, 10);
         assert!(!cloned.mining_paused);
+        assert_eq!(cloned.state, "running");
+        assert_eq!(cloned.threads, 8);
     }
 
     #[test]
@@ -388,18 +668,24 @@ mod tests {
             hashrate: 5000.0,
             hashrate_formatted: "5.00 KH/s".to_string(),
             hashes: 100000,
+            total_hashes: 100000,
             shares_accepted: 5,
             shares_rejected: 0,
             blocks_found: 0,
             uptime_seconds: 600,
+            uptime: 600,
             uptime_formatted: "10m 0s".to_string(),
             mining_paused: true,
+            state: "paused".to_string(),
+            threads: 4,
         };
 
         let json = serde_json::to_string(&update).unwrap();
         assert!(json.contains("\"hashrate\":5000.0"));
         assert!(json.contains("\"mining_paused\":true"));
         assert!(json.contains("\"shares_accepted\":5"));
+        assert!(json.contains("\"state\":\"paused\""));
+        assert!(json.contains("\"threads\":4"));
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@
 //!
 //! The port can also be read from btcminer.toml if present.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -14,9 +15,15 @@ use std::time::{Duration, Instant};
 const DEFAULT_PORT: u16 = 8080;
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Web API configuration
+struct ApiConfig {
+    port: u16,
+    auth: Option<(String, String)>, // (username, password)
+}
+
 fn main() -> eframe::Result<()> {
-    let port = get_api_port();
-    let api_base = format!("http://127.0.0.1:{}", port);
+    let config = get_api_config();
+    let api_base = format!("http://127.0.0.1:{}", config.port);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -31,8 +38,15 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "btcminer-overlay",
         options,
-        Box::new(move |cc| Ok(Box::new(OverlayApp::new(cc, api_base.clone())))),
+        Box::new(move |cc| Ok(Box::new(OverlayApp::new(cc, api_base.clone(), config.auth.clone())))),
     )
+}
+
+/// Get API config from CLI args, environment, config file, or defaults
+fn get_api_config() -> ApiConfig {
+    let port = get_api_port();
+    let auth = read_auth_from_config();
+    ApiConfig { port, auth }
 }
 
 /// Get API port from CLI args, environment, config file, or default
@@ -95,6 +109,55 @@ fn read_port_from_config() -> Option<u16> {
     None
 }
 
+/// Try to read web auth credentials from btcminer.toml config file
+fn read_auth_from_config() -> Option<(String, String)> {
+    let paths = [
+        std::path::PathBuf::from("btcminer.toml"),
+        std::env::current_exe()
+            .ok()?
+            .parent()?
+            .join("btcminer.toml"),
+    ];
+
+    for path in &paths {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let mut auth_enabled = false;
+                let mut auth_user = None;
+                let mut auth_password = None;
+
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with("auth_enabled") && line.contains("true") {
+                        auth_enabled = true;
+                    } else if line.starts_with("auth_user") && line.contains('=') {
+                        if let Some(value) = line.split('=').nth(1) {
+                            let v = value.trim().trim_matches('"');
+                            if !v.is_empty() {
+                                auth_user = Some(v.to_string());
+                            }
+                        }
+                    } else if line.starts_with("auth_password") && line.contains('=') {
+                        if let Some(value) = line.split('=').nth(1) {
+                            let v = value.trim().trim_matches('"');
+                            if !v.is_empty() {
+                                auth_password = Some(v.to_string());
+                            }
+                        }
+                    }
+                }
+
+                if auth_enabled {
+                    if let (Some(user), Some(pass)) = (auth_user, auth_password) {
+                        return Some((user, pass));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 #[derive(Default, Clone)]
 struct MinerStats {
     hashrate: f64,
@@ -111,16 +174,18 @@ struct OverlayApp {
     dragging: bool,
     drag_start: egui::Pos2,
     api_base: String,
+    auth: Option<(String, String)>,
 }
 
 impl OverlayApp {
-    fn new(_cc: &eframe::CreationContext<'_>, api_base: String) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>, api_base: String, auth: Option<(String, String)>) -> Self {
         Self {
             stats: Arc::new(Mutex::new(MinerStats::default())),
             last_fetch: Instant::now() - POLL_INTERVAL,
             dragging: false,
             drag_start: egui::Pos2::ZERO,
             api_base,
+            auth,
         }
     }
 
@@ -132,10 +197,16 @@ impl OverlayApp {
 
         let stats = Arc::clone(&self.stats);
         let url = format!("{}/api/stats", self.api_base);
+        let auth = self.auth.clone();
 
         // Non-blocking fetch using a thread
         std::thread::spawn(move || {
-            if let Ok(response) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
+            let mut request = ureq::get(&url).timeout(Duration::from_secs(2));
+            if let Some((user, pass)) = &auth {
+                let credentials = BASE64.encode(format!("{}:{}", user, pass));
+                request = request.set("Authorization", &format!("Basic {}", credentials));
+            }
+            if let Ok(response) = request.call() {
                 if let Ok(json) = response.into_json::<serde_json::Value>() {
                     let mut s = stats.lock().unwrap();
                     s.hashrate = json["hashrate"].as_f64().unwrap_or(0.0);
@@ -155,10 +226,21 @@ impl OverlayApp {
     }
 
     fn toggle_pause(&self) {
-        let url = format!("{}/api/control", self.api_base);
+        let stats = self.stats.lock().unwrap();
+        let is_paused = stats.mining_paused;
+        drop(stats);
+
+        let action = if is_paused { "resume" } else { "pause" };
+        let url = format!("{}/api/control/{}", self.api_base, action);
+        let auth = self.auth.clone();
+
         std::thread::spawn(move || {
-            let _ = ureq::post(&url)
-                .send_json(serde_json::json!({"action": "toggle"}));
+            let mut request = ureq::get(&url).timeout(Duration::from_secs(2));
+            if let Some((user, pass)) = &auth {
+                let credentials = BASE64.encode(format!("{}:{}", user, pass));
+                request = request.set("Authorization", &format!("Basic {}", credentials));
+            }
+            let _ = request.call();
         });
     }
 }
@@ -265,7 +347,7 @@ impl eframe::App for OverlayApp {
                             ui.add_space(8.0);
                             // Shares count
                             ui.label(
-                                egui::RichText::new(format!("✓{}", stats.shares_accepted))
+                                egui::RichText::new(format!("[{}]", stats.shares_accepted))
                                     .color(egui::Color32::from_rgb(100, 200, 100))
                                     .size(11.0),
                             );

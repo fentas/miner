@@ -716,7 +716,7 @@ async fn run_solo_mode_with_tui(
     };
 
     // Start web server if enabled
-    if cfg.web.port > 0 {
+    let web_state = if cfg.web.port > 0 {
         let pool_address = "Bitcoin Network (direct)".to_string();
         let thread_count = cfg.effective_threads();
         let state = Arc::new(web::WebState::new(pool_address, thread_count));
@@ -742,9 +742,10 @@ async fn run_solo_mode_with_tui(
         tui_state.log_info(format!("Web dashboard at {}", web_url));
         tui_state.set_web_url(&web_url);
 
-        // Keep state alive (we don't update it in solo mode currently)
-        drop(state);
-    }
+        Some(state)
+    } else {
+        None
+    };
 
     let mut hashrate_calc = HashrateCalculator::new(60);
     let stats_interval = Duration::from_millis(500);
@@ -1081,12 +1082,20 @@ async fn run_solo_mode_with_tui(
             tui_state.set_shares(stats.shares_accepted, stats.shares_rejected);
 
             // Update GPU hashrate if enabled
-            if let Some(ref gpu_coord) = gpu_coordinator {
+            let gpu_hashrate = if let Some(ref gpu_coord) = gpu_coordinator {
                 gpu_hashrate_calc.add_sample(stats.gpu_hashes);
-                let gpu_hashrate = gpu_hashrate_calc.hashrate();
-                tui_state.set_gpu_hashrate(gpu_hashrate);
-                // Set per-device hashrates
+                let rate = gpu_hashrate_calc.hashrate();
+                tui_state.set_gpu_hashrate(rate);
                 tui_state.set_gpu_device_hashrates(gpu_coord.device_hashrates());
+                rate
+            } else {
+                0.0
+            };
+
+            // Update web state with combined hashrate
+            if let Some(ref state) = web_state {
+                let total_hashrate = cpu_hashrate + gpu_hashrate;
+                state.update_stats(stats, total_hashrate).await;
             }
 
             last_stats = Instant::now();
