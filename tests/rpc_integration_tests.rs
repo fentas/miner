@@ -8,7 +8,7 @@
 
 use serde_json::json;
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use wiremock::matchers::method;
+use wiremock::matchers::{method, body_string_contains};
 
 use btcminer::bitcoin::BitcoinRpc;
 
@@ -307,4 +307,229 @@ async fn test_mock_invalid_json() {
     let err = result.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("json") ||
             err.to_string().to_lowercase().contains("invalid"));
+}
+
+/// Test getblocktemplate response parsing
+#[tokio::test]
+async fn test_mock_getblocktemplate() {
+    let mock_server = MockServer::start().await;
+
+    // First call: getblockchaininfo (to check sync status)
+    Mock::given(method("POST"))
+        .and(body_string_contains("getblockchaininfo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": {
+                "chain": "main",
+                "blocks": 850000,
+                "headers": 850000,
+                "bestblockhash": "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+                "difficulty": 83148355189239.77,
+                "verificationprogress": 0.9999999,
+                "initialblockdownload": false
+            },
+            "error": null,
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Second call: getblocktemplate
+    Mock::given(method("POST"))
+        .and(body_string_contains("getblocktemplate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": {
+                "version": 536870912,
+                "previousblockhash": "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+                "transactions": [
+                    {
+                        "data": "0100000001abcd",
+                        "txid": "abc123",
+                        "hash": "abc123",
+                        "fee": 5000,
+                        "sigops": 1,
+                        "weight": 400
+                    }
+                ],
+                "coinbaseaux": {},
+                "coinbasevalue": 312500000,
+                "target": "00000000ffff0000000000000000000000000000000000000000000000000000",
+                "mintime": 1706400000,
+                "mutable": ["time", "transactions", "prevblock"],
+                "noncerange": "00000000ffffffff",
+                "sigoplimit": 80000,
+                "sizelimit": 4000000,
+                "weightlimit": 4000000,
+                "curtime": 1706400100,
+                "bits": "1d00ffff",
+                "height": 850001
+            },
+            "error": null,
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let result = rpc.get_block_template("bc1qtest").await;
+    assert!(result.is_ok(), "Expected success but got: {:?}", result.err());
+
+    let template = result.unwrap();
+    assert_eq!(template.height, 850001);
+    assert_eq!(template.version, 536870912);
+    assert_eq!(template.coinbase_value, 312500000);
+    assert_eq!(template.bits, "1d00ffff");
+    assert!(!template.transactions.is_empty());
+}
+
+/// Test getblocktemplate during warmup (returns error)
+#[tokio::test]
+async fn test_mock_getblocktemplate_warmup() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": null,
+            "error": {
+                "code": -28,
+                "message": "Loading block index..."
+            },
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let result = rpc.get_block_template("bc1qtest").await;
+    assert!(result.is_err());
+}
+
+/// Test getblocktemplate with no peers (IBD error)
+#[tokio::test]
+async fn test_mock_getblocktemplate_no_peers() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": null,
+            "error": {
+                "code": -10,
+                "message": "Bitcoin is not connected!"
+            },
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let result = rpc.get_block_template("bc1qtest").await;
+    assert!(result.is_err());
+}
+
+/// Test getblocktemplate during IBD (downloading blocks)
+#[tokio::test]
+async fn test_mock_getblocktemplate_ibd() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": null,
+            "error": {
+                "code": -9,
+                "message": "Bitcoin is downloading blocks..."
+            },
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let result = rpc.get_block_template("bc1qtest").await;
+    assert!(result.is_err());
+}
+
+/// Test getconnectioncount response
+#[tokio::test]
+async fn test_mock_getconnectioncount() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": 8,
+            "error": null,
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let result = rpc.get_connection_count().await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 8);
+}
+
+/// Test submitblock with stale error
+#[tokio::test]
+async fn test_mock_submitblock_stale() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": "inconclusive",
+            "error": null,
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    let block_hex = hex::encode([0u8; 100]);
+    let result = rpc.submit_block(&block_hex).await;
+
+    // "inconclusive" is not null, so it's treated as an error/rejection
+    assert!(result.is_err());
+}
+
+/// Test multiple sequential RPC calls
+#[tokio::test]
+async fn test_mock_sequential_rpc_calls() {
+    let mock_server = MockServer::start().await;
+
+    // Mount multiple mocks - wiremock will respond to each in sequence
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+            "error": null,
+            "id": 1
+        })))
+        .expect(3) // Expect 3 calls
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let parts: Vec<&str> = uri.trim_start_matches("http://").split(':').collect();
+    let rpc = BitcoinRpc::new(parts[0], parts[1].parse().unwrap());
+
+    // Make multiple calls
+    for _ in 0..3 {
+        let result = rpc.ping().await;
+        assert!(result.is_ok());
+    }
 }

@@ -940,4 +940,83 @@ mod tests {
         assert_eq!(config.mining.gpu_workgroup_size, 64);
         assert_eq!(config.mining.gpu_batch_exp, 20);
     }
+
+    #[test]
+    fn test_config_with_bitcoind_assumeutxo_magnet() {
+        let toml_content = r#"
+            [pool]
+            preset = "none"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            enabled = true
+            managed = true
+            assumeutxo = true
+            assumeutxo_magnet = "magnet:?xt=urn:btih:custom_hash"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.bitcoind.assumeutxo);
+        assert_eq!(config.bitcoind.assumeutxo_magnet, Some("magnet:?xt=urn:btih:custom_hash".to_string()));
+    }
+
+    #[test]
+    fn test_config_with_custom_pool_address() {
+        let toml_content = r#"
+            [pool]
+            preset = "custom"
+            address = "custom.pool.com:3333"
+            payout_address = "bc1qtest"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.pool.preset, PoolPreset::Custom);
+        assert_eq!(config.pool.address, Some("custom.pool.com:3333".to_string()));
+        // Validation should pass with custom address
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_with_logging_file() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [logging]
+            file = "miner.log"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.logging.file, Some("miner.log".to_string()));
+    }
+
+    #[test]
+    fn test_config_with_rpc_credentials() {
+        let toml_content = r#"
+            [pool]
+            preset = "none"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            enabled = true
+            rpc_user = "myuser"
+            rpc_password = "mypassword"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.bitcoind.rpc_user, Some("myuser".to_string()));
+        assert_eq!(config.bitcoind.rpc_password, Some("mypassword".to_string()));
+    }
+
+    #[test]
+    fn test_config_with_custom_datadir() {
+        let toml_content = r#"
+            [pool]
+            preset = "none"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            enabled = true
+            datadir = "/custom/bitcoin/path"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.bitcoind.datadir, Some("/custom/bitcoin/path".to_string()));
+    }
 }

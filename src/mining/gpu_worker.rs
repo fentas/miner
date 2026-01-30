@@ -106,7 +106,13 @@ impl GpuCoordinator {
 
         // Clamp batch_exp to valid range (20-28)
         let batch_exp = tuning.batch_exp.clamp(20, 28);
-        let batch_size: u32 = 1 << batch_exp;
+        // Scale batch size down with intensity to achieve proper utilization control
+        // At intensity 100: full batch (32M at exp=25)
+        // At intensity 5: batch = 32M * 0.05 = 1.6M
+        // This ensures sleep duration is proportional to work duration
+        let base_batch_size: u32 = 1 << batch_exp;
+        let intensity_factor = (tuning.intensity as f64 / 100.0).max(0.01);
+        let batch_size: u32 = ((base_batch_size as f64 * intensity_factor) as u32).max(1 << 18); // Min 256K
 
         for device in devices_to_use {
             match gpu_manager.create_miner(device.id, tuning.intensity) {

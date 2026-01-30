@@ -18,3 +18,4 @@ pub mod stats;
 pub mod gpu;
 pub mod idle;
 pub mod tui;
+pub mod profiling;

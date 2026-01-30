@@ -442,4 +442,83 @@ mod tests {
         );
         assert!(valid);
     }
+
+    #[test]
+    fn test_environment_clone() {
+        let env = Environment::WSL2;
+        let cloned = env;
+        assert_eq!(env, cloned);
+    }
+
+    #[test]
+    fn test_environment_copy() {
+        let env = Environment::NativeLinux;
+        let copied = env;
+        assert_eq!(env, copied);
+    }
+
+    #[test]
+    fn test_environment_debug() {
+        let env = Environment::NativeWindows;
+        let debug_str = format!("{:?}", env);
+        assert_eq!(debug_str, "NativeWindows");
+    }
+
+    #[test]
+    fn test_idle_monitor_double_stop() {
+        let mut monitor = IdleMonitor::new();
+        // Should not panic when stopping twice
+        monitor.stop();
+        monitor.stop();
+        assert!(!monitor.is_idle());
+    }
+
+    #[test]
+    fn test_get_idle_time_for_each_env() {
+        // Test all environment variants
+        assert!(get_idle_time(Environment::Unknown).is_none());
+        assert!(get_idle_time(Environment::Headless).is_none());
+        // Native environments may or may not return a value depending on system
+    }
+
+    #[test]
+    fn test_idle_monitor_running_flag() {
+        let mut monitor = IdleMonitor::new();
+        // Before start, running should be false
+        assert!(!monitor.running.load(Ordering::Relaxed));
+
+        // After setting timeout to 0, start should be a no-op
+        monitor.set_timeout(0);
+        monitor.start();
+        assert!(!monitor.running.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_idle_monitor_currently_idle_atomic() {
+        let monitor = IdleMonitor::new();
+        // Verify currently_idle is accessible and defaults to false
+        assert!(!monitor.currently_idle.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_idle_callback_type() {
+        // Test that callback type works correctly
+        let mut monitor = IdleMonitor::new();
+        let was_called = Arc::new(AtomicBool::new(false));
+        let was_called_clone = Arc::clone(&was_called);
+
+        monitor.set_callback(move |idle| {
+            was_called_clone.store(idle, Ordering::Relaxed);
+        });
+
+        // Callback should be set but not called yet
+        assert!(monitor.callback.is_some());
+        assert!(!was_called.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_idle_monitor_thread_none_initially() {
+        let monitor = IdleMonitor::new();
+        assert!(monitor.thread.is_none());
+    }
 }

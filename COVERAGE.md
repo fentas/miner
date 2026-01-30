@@ -1,0 +1,188 @@
+# Test Coverage Documentation
+
+This document describes the test coverage for the BTC Miner project.
+
+## Overview
+
+**Total Tests: 442+**
+
+The codebase has extensive test coverage focusing on:
+- Unit tests for core functionality
+- Integration tests with mock servers
+- Edge case handling
+- Concurrent access testing
+
+## Test Distribution by Module
+
+### Source Code Unit Tests
+
+| Module | Tests | Coverage Focus |
+|--------|-------|----------------|
+| `src/config.rs` | 38 | Config parsing, defaults, validation, all presets |
+| `src/tui/state.rs` | 37 | TUI state management, getters/setters |
+| `src/bitcoin/manager.rs` | 35 | Bitcoin Core management, download, paths |
+| `src/mining/sha256_simd.rs` | 27 | SHA256 SIMD implementations |
+| `src/main.rs` | 21 | Main app flow tests |
+| `src/mining/job.rs` | 18 | Job creation, header building, targets |
+| `src/mining/mod.rs` | 18 | Coordinator, stats tracking |
+| `src/mining/hasher.rs` | 17 | Hashing operations, midstate |
+| `src/mining/gpu_worker.rs` | 16 | GPU job creation, coordinator |
+| `src/web/mod.rs` | 13 | Web API endpoints |
+| `src/stratum/v1.rs` | 13 | Stratum V1 protocol |
+| `src/stats/mod.rs` | 13 | Statistics tracking |
+| `src/idle/mod.rs` | 13 | Idle detection |
+| `src/stratum/v2.rs` | 11 | Stratum V2 protocol |
+| `src/bitcoin/rpc.rs` | 11 | RPC client |
+| `src/tui/widgets.rs` | 9 | UI widget rendering |
+| `src/gpu/opencl.rs` | 9 | OpenCL GPU mining |
+| `src/gpu/manager.rs` | 7 | GPU device management |
+| `src/stratum/mod.rs` | 5 | Stratum abstractions |
+| `src/mining/worker.rs` | 5 | CPU worker threads |
+| `src/bitcoin/mod.rs` | 3 | Bitcoin types |
+
+### Integration Tests
+
+| Test File | Tests | Coverage Focus |
+|-----------|-------|----------------|
+| `tests/integration_tests.rs` | 34 | End-to-end mining flow, block submission, GPU coordination |
+| `tests/gpu_tests.rs` | 21 | GPU coordinator, job handling, tuning params |
+| `tests/stratum_integration_tests.rs` | 18 | Mock stratum server, protocol flow |
+| `tests/mining_tests.rs` | 15 | Mining primitives, encoding |
+| `tests/config_tests.rs` | 7 | Config file parsing |
+| `tests/web_api_tests.rs` | 5 | HTTP API endpoints |
+| `tests/rpc_integration_tests.rs` | 11 | Mock RPC server tests |
+| `tests/tui_tests.rs` | 1 | TUI state |
+
+## Critical Path Coverage
+
+### Block Submission Flow (Solo Mining)
+- Job creation from block template
+- Header construction with merkle root
+- Varint encoding for transaction counts
+- Block building with coinbase + transactions
+- Target comparison (pool vs network)
+- Block submission via RPC
+- **Tests:** `test_job_build_block_*`, `test_block_*`, `test_varint_*`
+
+### Share Submission Flow (Pool Mining)
+- Stratum subscribe/authorize
+- Job notification parsing
+- Difficulty tracking
+- Share construction and submission
+- Accept/reject handling
+- **Tests:** `test_stratum_*`, `test_share_*`
+
+### RPC Communication
+- Connection establishment
+- Authentication
+- Block template fetching
+- Block submission
+- Error handling (warmup, IBD, no peers)
+- **Tests:** `test_mock_*` in `rpc_integration_tests.rs`
+
+### Mining Coordination
+- CPU worker thread management
+- GPU worker coordination
+- Job distribution
+- Nonce range allocation
+- Stats aggregation
+- **Tests:** `test_coordinator_*`, `test_cpu_gpu_*`
+
+### Idle Mode
+- Environment detection (Linux, WSL2, Windows)
+- Timeout handling
+- State transitions
+- CPU/GPU selective control
+- **Tests:** `test_idle_*`, `test_environment_*`
+
+## Excluded from Coverage
+
+The following are intentionally excluded from coverage metrics:
+
+### TUI/UI Code (`#[cfg(not(tarpaulin_include))]`)
+- `src/tui/widgets.rs` - Terminal rendering
+- `src/tui/mod.rs` - TUI main loop
+- Visual display functions
+
+### Platform-Specific Code
+- Windows-only FFI (`GetLastInputInfo`)
+- Linux-only X11 calls (`xprintidle`)
+- GPU kernel code (OpenCL)
+
+### Interactive Features
+- Keyboard handling
+- Real-time display updates
+
+## Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run with output
+cargo test -- --nocapture
+
+# Run specific test file
+cargo test --test integration_tests
+
+# Run tests matching pattern
+cargo test block_submission
+```
+
+## Coverage Tools
+
+To generate coverage reports:
+
+```bash
+# Install tarpaulin
+cargo install cargo-tarpaulin
+
+# Run coverage (excluding TUI)
+cargo tarpaulin --exclude-files 'src/tui/*' --out Html
+```
+
+## Adding Tests
+
+When adding new functionality:
+
+1. **Unit tests** - Add in the same file under `#[cfg(test)]` module
+2. **Integration tests** - Add to appropriate file in `tests/`
+3. **Mock tests** - Use `wiremock` for HTTP/RPC, TCP listener for stratum
+
+### Test Naming Convention
+- `test_<module>_<functionality>` for unit tests
+- `test_<flow>_<scenario>` for integration tests
+- `test_mock_<rpc_method>_<scenario>` for RPC tests
+
+## Coverage Goals
+
+| Category | Target | Current |
+|----------|--------|---------|
+| Core Mining | 95%+ | High |
+| Block Submission | 95%+ | High |
+| RPC Client | 90%+ | High |
+| Stratum Protocol | 90%+ | High |
+| Config Parsing | 95%+ | High |
+| Stats/Metrics | 90%+ | High |
+| GPU Coordination | 85%+ | Medium |
+| Idle Detection | 80%+ | Medium |
+| TUI/UI | N/A | Excluded |
+
+## Recent Additions
+
+### Block Submission Tests (Session)
+- `test_job_build_block_with_data` - Full block construction
+- `test_job_build_block_missing_coinbase` - Error handling
+- `test_job_build_block_missing_transactions` - Error handling
+- `test_job_build_block_with_multiple_transactions` - Multi-tx blocks
+- `test_job_build_block_different_nonces` - Nonce variation
+- `test_varint_encoding_in_block` - Bitcoin varint encoding
+- `test_block_meets_network_target_integration` - Block detection
+
+### RPC Mock Tests (Session)
+- `test_mock_getblocktemplate` - Template parsing
+- `test_mock_getblocktemplate_warmup` - Warmup error
+- `test_mock_getblocktemplate_no_peers` - Peer error
+- `test_mock_getblocktemplate_ibd` - IBD error
+- `test_mock_getconnectioncount` - Peer count
+- `test_mock_submitblock_stale` - Stale block rejection

@@ -280,18 +280,32 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
     let workers = state.get_worker_count();
     let web_url = state.get_web_url();
 
-    let status_color = if state.is_connected() {
-        Color::Green
-    } else if state.is_syncing() {
+    let status_color = if state.is_syncing() {
         Color::Yellow
+    } else if state.is_connected() {
+        // Check if idle mode is preventing mining
+        if state.is_idle_enabled() && !state.is_idle_active() && state.is_idle_cpu() {
+            Color::Cyan  // Ready but waiting for idle
+        } else if state.is_paused() {
+            Color::Yellow  // Paused
+        } else {
+            Color::Green  // Mining
+        }
     } else {
-        Color::Red
+        Color::Red  // Disconnected
     };
 
     let status_text = if state.is_syncing() {
         format!("Syncing {:.1}%", state.get_sync_progress())
     } else if state.is_connected() {
-        "Connected".to_string()
+        // Check if idle mode is preventing mining
+        if state.is_idle_enabled() && !state.is_idle_active() && state.is_idle_cpu() {
+            "Ready (idle waiting)".to_string()
+        } else if state.is_paused() {
+            "Mining [PAUSED]".to_string()
+        } else {
+            "Mining".to_string()
+        }
     } else {
         "Disconnected".to_string()
     };

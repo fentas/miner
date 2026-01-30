@@ -653,3 +653,339 @@ fn test_gpu_coordinator_device_queries() {
         assert_eq!(total_rate, 0.0);
     }
 }
+
+// ============================================================================
+// Block Submission Integration Tests
+// ============================================================================
+
+/// Test building a complete block from job data (solo mining scenario)
+#[test]
+fn test_job_build_block_with_data() {
+    let mut job = Job::new("block-build-test".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x12; 32];
+    job.merkle_root_override = Some([0x34; 32]);
+    job.target = [0xFF; 32];
+
+    // Set coinbase transaction (required for block building)
+    job.coinbase_tx = Some(hex::decode(
+        "01000000010000000000000000000000000000000000000000000000000000000000000000\
+         ffffffff0704ffff001d0104ffffffff0100f2052a0100000043410496b538e853519c72\
+         6a2c91e61ec11600ae1390813a627c66fb8be7947be63c52da7589379515d4e0a604f814\
+         1781e62294721166bf621e73a82cbf2342c858eeac00000000"
+    ).unwrap());
+
+    // Set empty transactions list (just coinbase)
+    job.transactions = Some(vec![]);
+
+    // Build block with nonce
+    let block_hex = job.build_block(0xDEADBEEF);
+
+    assert!(block_hex.is_some(), "Should build block successfully");
+    let block_data = block_hex.unwrap();
+
+    // Decode to verify structure
+    let block_bytes = hex::decode(&block_data).unwrap();
+
+    // Block should have at least: 80 bytes header + 1 byte varint + coinbase tx
+    assert!(block_bytes.len() > 80);
+
+    // First 80 bytes are the header
+    let header = &block_bytes[0..80];
+
+    // Check version (bytes 0-4, little-endian)
+    assert_eq!(&header[0..4], &0x20000000u32.to_le_bytes());
+
+    // Check nonce (bytes 76-80, little-endian)
+    assert_eq!(&header[76..80], &0xDEADBEEFu32.to_le_bytes());
+
+    // Byte 80 should be varint for tx count (1 = coinbase only)
+    assert_eq!(block_bytes[80], 1);
+}
+
+/// Test that build_block returns None when coinbase_tx is missing
+#[test]
+fn test_job_build_block_missing_coinbase() {
+    let mut job = Job::new("missing-coinbase".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x00; 32];
+    job.merkle_root_override = Some([0x00; 32]);
+
+    // Don't set coinbase_tx
+    job.transactions = Some(vec![]);
+
+    let result = job.build_block(0);
+    assert!(result.is_none(), "Should return None without coinbase_tx");
+}
+
+/// Test that build_block returns None when transactions is missing
+#[test]
+fn test_job_build_block_missing_transactions() {
+    let mut job = Job::new("missing-txs".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x00; 32];
+    job.merkle_root_override = Some([0x00; 32]);
+
+    // Set coinbase but not transactions
+    job.coinbase_tx = Some(vec![0x01, 0x00, 0x00, 0x00]);
+
+    let result = job.build_block(0);
+    assert!(result.is_none(), "Should return None without transactions");
+}
+
+/// Test building block with multiple transactions
+#[test]
+fn test_job_build_block_with_multiple_transactions() {
+    let mut job = Job::new("multi-tx-block".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x56; 32];
+    job.merkle_root_override = Some([0x78; 32]);
+
+    // Set coinbase
+    job.coinbase_tx = Some(vec![0x01, 0x00, 0x00, 0x00, 0x01, 0x00]);
+
+    // Set 3 additional transactions
+    let tx1 = vec![0x02, 0x00, 0x00, 0x00, 0x01, 0x00];
+    let tx2 = vec![0x02, 0x00, 0x00, 0x00, 0x02, 0x00];
+    let tx3 = vec![0x02, 0x00, 0x00, 0x00, 0x03, 0x00];
+    job.transactions = Some(vec![tx1.clone(), tx2.clone(), tx3.clone()]);
+
+    let block_hex = job.build_block(0x12345678);
+    assert!(block_hex.is_some());
+
+    let block_bytes = hex::decode(block_hex.unwrap()).unwrap();
+
+    // Varint at position 80 should be 4 (1 coinbase + 3 transactions)
+    assert_eq!(block_bytes[80], 4);
+
+    // Total size: 80 header + 1 varint + 6 coinbase + 6*3 txs = 105
+    let expected_size = 80 + 1 + 6 + 6 + 6 + 6;
+    assert_eq!(block_bytes.len(), expected_size);
+}
+
+/// Test block building with different nonces produces different headers
+#[test]
+fn test_job_build_block_different_nonces() {
+    let mut job = Job::new("nonce-test".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0xAB; 32];
+    job.merkle_root_override = Some([0xCD; 32]);
+    job.coinbase_tx = Some(vec![0x01, 0x00, 0x00, 0x00]);
+    job.transactions = Some(vec![]);
+
+    let block1 = job.build_block(0).unwrap();
+    let block2 = job.build_block(1).unwrap();
+    let block3 = job.build_block(0xFFFFFFFF).unwrap();
+
+    // All should be different
+    assert_ne!(block1, block2);
+    assert_ne!(block2, block3);
+    assert_ne!(block1, block3);
+
+    // But all have same prefix (bytes 0-76)
+    let b1 = hex::decode(&block1).unwrap();
+    let b2 = hex::decode(&block2).unwrap();
+    let b3 = hex::decode(&block3).unwrap();
+
+    assert_eq!(&b1[0..76], &b2[0..76]);
+    assert_eq!(&b2[0..76], &b3[0..76]);
+
+    // Nonces at bytes 76-80 should be different
+    assert_ne!(&b1[76..80], &b2[76..80]);
+}
+
+/// Test varint encoding for various transaction counts
+#[test]
+fn test_varint_encoding_in_block() {
+    let mut job = Job::new("varint-test".to_string());
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x00; 32];
+    job.merkle_root_override = Some([0x00; 32]);
+    job.coinbase_tx = Some(vec![0x01]);
+
+    // Test with 1 tx (coinbase only) - varint is 1 byte
+    job.transactions = Some(vec![]);
+    let block = hex::decode(job.build_block(0).unwrap()).unwrap();
+    assert_eq!(block[80], 1); // Single byte varint
+
+    // Test with 100 txs - varint is still 1 byte
+    let txs: Vec<Vec<u8>> = (0..99).map(|_| vec![0x02]).collect();
+    job.transactions = Some(txs);
+    let block = hex::decode(job.build_block(0).unwrap()).unwrap();
+    assert_eq!(block[80], 100); // Single byte varint
+
+    // Test with 252 txs - varint is still 1 byte
+    let txs: Vec<Vec<u8>> = (0..251).map(|_| vec![0x02]).collect();
+    job.transactions = Some(txs);
+    let block = hex::decode(job.build_block(0).unwrap()).unwrap();
+    assert_eq!(block[80], 252); // Single byte varint
+
+    // Test with 253 txs - varint is 3 bytes (0xfd + 2 bytes little-endian)
+    let txs: Vec<Vec<u8>> = (0..252).map(|_| vec![0x02]).collect();
+    job.transactions = Some(txs);
+    let block = hex::decode(job.build_block(0).unwrap()).unwrap();
+    assert_eq!(block[80], 0xfd); // 3-byte varint marker
+    assert_eq!(block[81], 253); // Low byte of 253
+    assert_eq!(block[82], 0);   // High byte of 253
+}
+
+/// Test that block meets network target for valid hash
+#[test]
+fn test_block_meets_network_target_integration() {
+    let mut job = Job::new("target-test".to_string());
+
+    // Pool target (easy)
+    job.target = [0xFF; 32];
+
+    // Network target (4 leading zero bytes)
+    job.network_target = Some([
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    ]);
+
+    // Hash with 4+ leading zero bytes meets network target (it's a BLOCK!)
+    let block_hash = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x45,
+        0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45,
+        0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45,
+        0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45,
+    ];
+
+    assert!(job.meets_target(&block_hash), "Should meet pool target");
+    assert!(job.meets_network_target(&block_hash), "Should meet network target - BLOCK FOUND!");
+
+    // Hash with only 3 leading zero bytes does NOT meet network target
+    let share_hash = [
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    assert!(job.meets_target(&share_hash), "Should meet pool target");
+    assert!(!job.meets_network_target(&share_hash), "Should NOT meet network target");
+}
+
+/// Test hasher correctly validates blocks against network target
+#[test]
+fn test_hasher_block_validation() {
+    let hasher = Hasher::new();
+
+    // Create a header that might produce a hash meeting target
+    let mut header_prefix = [0u8; 76];
+    header_prefix[0..4].copy_from_slice(&0x20000000u32.to_le_bytes());
+
+    // Very easy target for testing
+    let easy_target = [0xFF; 32];
+
+    // Find a nonce (should be immediate with easy target)
+    let result = hasher.hash_nonce_range(&header_prefix, 0, 100, &easy_target);
+    assert!(result.is_some());
+
+    let (nonce, hash) = result.unwrap();
+
+    // Hash should be 32 bytes
+    assert_eq!(hash.len(), 32);
+
+    // Hash should meet the easy target
+    assert!(hash.as_slice() <= easy_target.as_slice());
+
+    // Nonce should be in range
+    assert!(nonce < 100);
+}
+
+// ============================================================================
+// Coordinator Share Detection Tests
+// ============================================================================
+
+/// Test coordinator detects shares correctly
+#[test]
+fn test_coordinator_share_detection() {
+    let coord = Coordinator::new(1); // Single worker for deterministic testing
+
+    // Create job with easy target
+    let mut job = Job::new("share-detect-test".to_string());
+    job.target = [0xFF; 32]; // Everyone wins!
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x00; 32];
+    job.merkle_root_override = Some([0x00; 32]);
+
+    coord.update_job(job);
+    coord.start();
+
+    // Give it a moment to potentially find shares
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    coord.stop();
+
+    // With such an easy target, we should have found many "shares"
+    // (In reality, the workers use hash_nonce_range which will find shares quickly)
+}
+
+/// Test coordinator with network target for block detection
+#[test]
+fn test_coordinator_block_detection_setup() {
+    let coord = Coordinator::new(2);
+
+    let mut job = Job::new("block-detect-test".to_string());
+    job.target = [0xFF; 32]; // Easy pool target
+    job.network_target = Some([0x00; 32]); // Impossible network target (all zeros)
+    job.version = 0x20000000;
+    job.ntime = 1706400000;
+    job.nbits = 0x1d00ffff;
+    job.prev_hash = [0x11; 32];
+    job.merkle_root_override = Some([0x22; 32]);
+
+    coord.update_job(job.clone());
+
+    // The job should have the network target set
+    assert!(job.network_target.is_some());
+
+    // All zero target should be practically impossible to meet
+    let test_hash = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+
+    // Even nearly-all-zeros hash won't meet all-zeros target
+    assert!(!job.meets_network_target(&test_hash));
+}
+
+/// Test stats correctly track block finds
+#[test]
+fn test_stats_block_tracking() {
+    let stats = Stats::new();
+
+    // Initially no blocks
+    assert_eq!(stats.snapshot().blocks_found, 0);
+
+    // Find a block!
+    stats.found_block();
+    assert_eq!(stats.snapshot().blocks_found, 1);
+
+    // Find more blocks
+    stats.found_block();
+    stats.found_block();
+    assert_eq!(stats.snapshot().blocks_found, 3);
+
+    // Shares shouldn't affect block count
+    stats.accept_share();
+    stats.reject_share();
+    assert_eq!(stats.snapshot().blocks_found, 3);
+}

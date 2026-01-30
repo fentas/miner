@@ -628,6 +628,8 @@ async fn run_solo_mode_with_tui(
     let mut hashrate_calc = HashrateCalculator::new(60);
     let stats_interval = Duration::from_millis(500);
     let mut last_stats = Instant::now();
+    // Note: initialized to None but loop always sets Some before first read
+    #[allow(unused_assignments)]
     let mut current_job: Option<mining::Job> = None;
 
     // Wait for first valid block template before starting mining
@@ -1646,6 +1648,8 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     let start_time = Instant::now();
     let stats_interval = Duration::from_secs(cfg.logging.stats_interval as u64);
     let mut last_stats = Instant::now();
+    // Note: initialized to None but loop always sets Some before first read
+    #[allow(unused_assignments)]
     let mut current_job: Option<mining::Job> = None;
 
     // Wait for first valid block template before starting mining

@@ -1495,4 +1495,81 @@ mod tests {
         let result = manager.load_assumeutxo().await;
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_parse_loading_progress_snapshot_log() {
+        let line = "2026-01-29T17:54:45Z [snapshot] 116000000 coins loaded (69.12%, 16711 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, Some(69.12));
+    }
+
+    #[test]
+    fn test_parse_loading_progress_loadtxoutset_log() {
+        let line = "2026-01-29T17:54:45Z loadtxoutset progress (50%, 10000 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, Some(50.0));
+    }
+
+    #[test]
+    fn test_parse_loading_progress_100_percent() {
+        let line = "2026-01-29T17:54:45Z [snapshot] completed (100%, 20000 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, Some(100.0));
+    }
+
+    #[test]
+    fn test_parse_loading_progress_0_percent() {
+        let line = "2026-01-29T17:54:45Z [snapshot] starting (0%, 0 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, Some(0.0));
+    }
+
+    #[test]
+    fn test_parse_loading_progress_no_match() {
+        let line = "2026-01-29T17:54:45Z Some other log message";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, None);
+    }
+
+    #[test]
+    fn test_parse_loading_progress_invalid_percentage() {
+        // Percentage outside valid range should not match
+        let line = "2026-01-29T17:54:45Z [snapshot] error (150%, 20000 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, None);
+    }
+
+    #[test]
+    fn test_parse_loading_progress_negative_percentage() {
+        let line = "2026-01-29T17:54:45Z [snapshot] error (-5%, 0 MB)";
+        let progress = BitcoindManager::parse_loading_progress(line);
+        assert_eq!(progress, None);
+    }
+
+    #[test]
+    fn test_debug_log_path() {
+        let (manager, data, _install) = manager_with_temp_dirs();
+        let expected = data.path().join("debug.log");
+        assert_eq!(manager.debug_log_path(), expected);
+    }
+
+    #[test]
+    fn test_data_dir() {
+        let (manager, data, _install) = manager_with_temp_dirs();
+        assert_eq!(manager.data_dir(), data.path());
+    }
+
+    #[test]
+    fn test_with_assumeutxo_torrent() {
+        let manager = BitcoindManager::new()
+            .with_assumeutxo_torrent(Some(PathBuf::from("/path/to/snapshot.torrent")));
+        assert_eq!(manager.assumeutxo_torrent, Some(PathBuf::from("/path/to/snapshot.torrent")));
+    }
+
+    #[test]
+    fn test_with_assumeutxo_torrent_none() {
+        let manager = BitcoindManager::new()
+            .with_assumeutxo_torrent(None);
+        assert!(manager.assumeutxo_torrent.is_none());
+    }
 }
