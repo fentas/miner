@@ -14,11 +14,64 @@ use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
-/// Mining statistics
+/// Cache line size for padding (64 bytes on most x86 CPUs)
+const CACHE_LINE_SIZE: usize = 64;
+
+/// Cache-line padded atomic counter to prevent false sharing
+///
+/// When multiple threads update different atomics in the same cache line,
+/// they invalidate each other's caches even though the data is independent.
+/// This padding ensures each counter is on its own cache line.
+#[repr(C)]
+#[derive(Debug)]
+pub struct PaddedAtomicU64 {
+    value: AtomicU64,
+    _padding: [u8; CACHE_LINE_SIZE - 8], // 64 - 8 = 56 bytes padding
+}
+
+impl PaddedAtomicU64 {
+    pub const fn new(v: u64) -> Self {
+        Self {
+            value: AtomicU64::new(v),
+            _padding: [0; CACHE_LINE_SIZE - 8],
+        }
+    }
+
+    #[inline]
+    pub fn fetch_add(&self, val: u64, order: Ordering) -> u64 {
+        self.value.fetch_add(val, order)
+    }
+
+    #[inline]
+    pub fn load(&self, order: Ordering) -> u64 {
+        self.value.load(order)
+    }
+
+    #[inline]
+    pub fn swap(&self, val: u64, order: Ordering) -> u64 {
+        self.value.swap(val, order)
+    }
+}
+
+impl Default for PaddedAtomicU64 {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+/// Mining statistics with cache-line padding to prevent false sharing
+///
+/// The `hashes` counter is updated by all worker threads on every batch,
+/// so it's padded to avoid cache line contention. Other counters are
+/// updated rarely and grouped together.
+#[repr(C)]
 #[derive(Debug, Default)]
 pub struct Stats {
-    pub hashes: AtomicU64,
-    pub gpu_hashes: AtomicU64,
+    /// CPU hash counter - hot path, cache-line padded
+    pub hashes: PaddedAtomicU64,
+    /// GPU hash counter - hot path, cache-line padded
+    pub gpu_hashes: PaddedAtomicU64,
+    /// Cold counters - rarely updated, can share cache line
     pub shares_accepted: AtomicU64,
     pub shares_rejected: AtomicU64,
     pub blocks_found: AtomicU64,
@@ -29,13 +82,13 @@ impl Stats {
         Self::default()
     }
 
-    /// Add CPU hashes to the counter (hot path)
+    /// Add CPU hashes to the counter (hot path - cache-line padded)
     #[inline]
     pub fn add_hashes(&self, count: u64) {
         self.hashes.fetch_add(count, Ordering::Relaxed);
     }
 
-    /// Add GPU hashes to the counter (hot path)
+    /// Add GPU hashes to the counter (hot path - cache-line padded)
     #[inline]
     pub fn add_gpu_hashes(&self, count: u64) {
         self.gpu_hashes.fetch_add(count, Ordering::Relaxed);

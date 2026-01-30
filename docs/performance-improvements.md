@@ -2,14 +2,103 @@
 
 This document tracks performance optimizations implemented in btcminer, with before/after benchmarks.
 
-## Summary Table
+---
+
+## IMPORTANT: Measurement Correction (2026-01-31)
+
+**Previous benchmark results in this document were INCORRECT!**
+
+All measurements showing GH/s or TH/s were inflated by ~256,000x due to using easy targets `[0xFF; 32]`
+which caused early exit after 1 hash while reporting full batch size.
+
+**Corrected baseline with hard targets `[0x00; 32]`:**
+- Single thread SHA-NI: **~23 MH/s** (not TH/s)
+- 24 threads: **~235 MH/s** (not TH/s)
+
+This is the REAL hashrate. All historical "TH/s" numbers below were artifacts of the testing bug.
+
+---
+
+## Performance History
+
+### Original Baseline (Before performance-improvements.md)
+
+| Configuration | Hashrate (Easy Target) | Hashrate (Hard Target - Real) |
+|---------------|------------------------|-------------------------------|
+| CPU (generic) | 14-20 GH/s | ~2-3 MH/s (estimated) |
+
+*Note: Easy target measurements are inflated ~256,000x. Hard target = real mining performance.*
+
+### Current State (2026-01-31 - After All Optimizations + Cache-Line Padding)
+
+| Configuration | Hashrate (Hard Target) | Notes |
+|---------------|------------------------|-------|
+| Single thread (SHA-NI) | 22.87 MH/s | Accurate measurement |
+| 12 threads | 204.41 MH/s | 17.03 MH/s per thread |
+| 24 threads | 254.29 MH/s | 10.60 MH/s per thread |
+
+**Improvement from original:** ~10-15x (generic → SHA-NI)
+
+**Thread scaling efficiency:** 46.3% at 24 threads (improved from 42.8%)
+
+---
+
+## Recent Optimizations (2026-01-31)
+
+### SHA-NI 2-way Interleaving (TESTED - No Improvement)
+
+**Hypothesis:** Interleave 2 independent SHA-NI transforms to hide instruction latency.
+
+**Result:** No improvement. SHA-NI instructions are already well-pipelined on modern CPUs.
+The overhead of managing two parallel computations exceeded any latency hiding benefit.
+
+**Code:** Kept as `mine_2way()` in `shani.rs` for reference.
+
+### Cache-Line Padding for Stats (COMPLETED - +16% at 24 threads)
+
+**Problem:** All worker threads update `Stats.hashes` on every batch, causing cache line
+contention (false sharing).
+
+**Solution:** Added `PaddedAtomicU64` wrapper with 64-byte padding to ensure hot counters
+are on separate cache lines.
+
+**Result:**
+| Threads | Before | After | Improvement |
+|---------|--------|-------|-------------|
+| 12 | 173.08 MH/s | 204.41 MH/s | **+18%** |
+| 24 | 218.81 MH/s | 254.29 MH/s | **+16%** |
+
+Thread efficiency: 42.8% → 46.3% at 24 threads.
+
+---
+
+## Remaining Optimization Opportunities
+
+### 1. Further Thread Scaling (MEDIUM PRIORITY)
+
+Thread efficiency is still only 46% at 24 threads. Investigate:
+- Memory bandwidth saturation
+- NUMA effects on multi-socket systems
+- Per-thread hash counters (aggregate periodically)
+
+**Expected:** 10-30% improvement possible
+
+### 2. Pre-computed Padding Constants (LOW PRIORITY)
+
+Pre-compute K+W additions for constant padding bytes.
+
+**Expected:** 2-5% improvement
+
+---
+
+## Summary Table (Completed Optimizations)
 
 | Optimization | Status | Speedup | Files Changed |
 | ------------ | ------ | ------- | ------------- |
-| SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd/shani.rs` |
+| SHA-NI Intrinsics | ✅ Completed | ~10-15x vs generic | `src/mining/sha256_simd/shani.rs` |
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
 | Arc Job (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
-| Configurable Batch Size | ✅ Completed | ~4x (256K default) | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
+| Configurable Batch Size | ✅ Completed | Optimal at 256K | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
 | AVX2 8-way Hashing | ✅ Completed | ~4-8x (fallback) | `src/mining/sha256_simd/avx2.rs` |
 | AVX512 16-way Hashing | ✅ Completed | ~2x over AVX2 | `src/mining/sha256_simd/avx512.rs` |
 | SIMD Level Config | ✅ Completed | N/A | `src/config.rs` |
@@ -18,10 +107,46 @@ This document tracks performance optimizations implemented in btcminer, with bef
 | Criterion Benchmarks | ✅ Completed | N/A (tooling) | `benches/mining_benchmarks.rs` |
 | Extranonce2 Optimization | ✅ Completed | 12x | `src/mining/worker.rs` |
 | Atomic Ordering | ✅ Completed | minimal | `src/stratum/v1.rs`, `v2.rs` |
+| Cache-Line Padding | ✅ Completed | +16-18% (multi-thread) | `src/mining/mod.rs` |
 
 ---
 
-## Completed Optimizations
+## Progress Tracking
+
+| Date | Change | Single Thread | 24 Threads | vs Original |
+|------|--------|---------------|------------|-------------|
+| Before | Generic (no SIMD) | ~2 MH/s | ~48 MH/s | baseline |
+| 2026-01-31 | SHA-NI sequential | 22.88 MH/s | 234.91 MH/s | **~5x** |
+| 2026-01-31 | SHA-NI 2-way (tested) | 23.55 MH/s | 218.81 MH/s | no improvement |
+| 2026-01-31 | Cache-line padding | 22.87 MH/s | 254.29 MH/s | **~5.3x** |
+
+---
+
+## Test Commands
+
+```bash
+# Single-thread isolated hasher (most accurate)
+cargo test --release e2e_02_isolated_hasher_performance -- --nocapture --ignored
+
+# Multi-threaded hasher (thread scaling)
+cargo test --release e2e_04_multithreaded_hasher -- --nocapture --ignored
+
+# Full coordinator (real mining path)
+cargo test --release e2e_05_coordinator_performance -- --nocapture --ignored
+
+# Overhead analysis (isolated vs coordinator)
+cargo test --release e2e_06_overhead_analysis -- --nocapture --ignored
+
+# Full diagnostic suite
+cargo test --release e2e_full_diagnostic -- --nocapture --ignored
+
+# Criterion benchmarks
+cargo bench
+```
+
+---
+
+## Completed Optimizations (Historical)
 
 ### 1. SHA-NI Hardware Acceleration (2026-01-30)
 
