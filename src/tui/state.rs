@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
 const MAX_LOGS: usize = 1000;
@@ -275,6 +276,10 @@ pub struct TuiState {
     history_focused: AtomicBool,
     history_time_filter: RwLock<LogTimeFilter>,
     history_samples: RwLock<VecDeque<HashrateSample>>,
+
+    // Desktop overlay (separate floating window)
+    overlay_enabled: AtomicBool,
+    overlay_process: Mutex<Option<Child>>,
 }
 
 impl TuiState {
@@ -329,6 +334,8 @@ impl TuiState {
             history_focused: AtomicBool::new(false),
             history_time_filter: RwLock::new(LogTimeFilter::default()),
             history_samples: RwLock::new(VecDeque::with_capacity(MAX_HASHRATE_HISTORY)),
+            overlay_enabled: AtomicBool::new(false),
+            overlay_process: Mutex::new(None),
         }
     }
 
@@ -918,6 +925,68 @@ impl TuiState {
 
     pub fn get_log_scroll(&self) -> usize {
         self.log_scroll.load(Ordering::Relaxed)
+    }
+
+    // Overlay controls
+    pub fn set_overlay_enabled(&self, enabled: bool) {
+        self.overlay_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_overlay_enabled(&self) -> bool {
+        self.overlay_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn is_overlay_running(&self) -> bool {
+        self.overlay_process
+            .lock()
+            .map(|p| p.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Toggle the overlay window. Returns true if overlay is now running.
+    pub fn toggle_overlay(&self) -> bool {
+        let mut process = match self.overlay_process.lock() {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        if let Some(ref mut child) = *process {
+            // Overlay is running, kill it
+            let _ = child.kill();
+            let _ = child.wait();
+            *process = None;
+            false
+        } else {
+            // Overlay is not running, try to start it
+            // Look for btcminer-overlay in same directory as current executable
+            let overlay_path = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("btcminer-overlay")));
+
+            if let Some(path) = overlay_path {
+                if path.exists() {
+                    match Command::new(&path).spawn() {
+                        Ok(child) => {
+                            *process = Some(child);
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+    }
+
+    /// Check if overlay binary exists (for showing shortcut in TUI)
+    pub fn overlay_available(&self) -> bool {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("btcminer-overlay")))
+            .is_some_and(|p| p.exists())
     }
 }
 

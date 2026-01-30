@@ -533,7 +533,7 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
     };
 
     // k9s style: label in one color, value in another, aligned with spaces
-    let label_style = Style::default().fg(Color::Magenta);
+    let label_style = Style::default().fg(Color::White);
     let value_style = Style::default().fg(Color::Cyan);
 
     let mut lines = vec![
@@ -614,7 +614,7 @@ fn draw_header_filters(f: &mut Frame, area: Rect, state: &TuiState) {
     let yellow = Style::default().fg(Color::Yellow);
 
     // Title line with magenta color (k9s style)
-    let title_style = Style::default().fg(Color::Magenta);
+    let title_style = Style::default().fg(Color::Gray);
 
     if state.is_logs_focused() {
         // Log focused mode: show log time filters
@@ -709,11 +709,11 @@ fn draw_header_filters(f: &mut Frame, area: Rect, state: &TuiState) {
 /// Draw Actions section (k9s style: blue title, no border)
 #[cfg(not(tarpaulin_include))]
 fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
-    let key_style = Style::default().fg(Color::Blue);
+    let key_style = Style::default().fg(Color::LightBlue);
     let desc_style = Style::default().fg(Color::DarkGray);
 
     // Title line with blue color (k9s style)
-    let title_style = Style::default().fg(Color::Blue);
+    let title_style = Style::default().fg(Color::Gray);
     let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
 
     if state.is_logs_focused() {
@@ -796,6 +796,15 @@ fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled("<shift+h>", key_style),
             Span::styled(" History Chart", desc_style),
         ]));
+
+        // Show overlay toggle if available
+        if state.overlay_available() {
+            let overlay_label = if state.is_overlay_running() { " Close Overlay" } else { " Open Overlay" };
+            lines.push(Line::from(vec![
+                Span::styled("<o>", key_style),
+                Span::styled(overlay_label, desc_style),
+            ]));
+        }
 
         let para = Paragraph::new(lines);
         f.render_widget(para, area);

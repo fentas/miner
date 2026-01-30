@@ -213,6 +213,18 @@ impl TuiRunner {
                                 self.state.log_info(format!("Hashrate display: {}", mode.as_str()));
                             }
                         }
+                        // Toggle overlay window: o
+                        (KeyCode::Char('o'), KeyModifiers::NONE) => {
+                            if !self.state.is_logs_focused() && !self.state.is_history_focused() {
+                                if self.state.overlay_available() {
+                                    let running = self.state.toggle_overlay();
+                                    let status = if running { "opened" } else { "closed" };
+                                    self.state.log_info(format!("Overlay {}", status));
+                                } else {
+                                    self.state.log_warn("Overlay not available (build with --features overlay)".to_string());
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
