@@ -27,7 +27,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([180.0, 80.0])
+            .with_inner_size([240.0, 80.0])
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
@@ -163,7 +163,8 @@ struct MinerStats {
     hashrate: f64,
     hashrate_formatted: String,
     mining_paused: bool,
-    idle_mining: bool,
+    idle_enabled: bool,
+    idle_active: bool,
     connected: bool,
     shares_accepted: u64,
 }
@@ -215,7 +216,8 @@ impl OverlayApp {
                         .unwrap_or("0.00 H/s")
                         .to_string();
                     s.mining_paused = json["mining_paused"].as_bool().unwrap_or(false);
-                    s.idle_mining = json["idle_mining"].as_bool().unwrap_or(false);
+                    s.idle_enabled = json["idle_mining_enabled"].as_bool().unwrap_or(false);
+                    s.idle_active = json["idle_mining_active"].as_bool().unwrap_or(false);
                     s.connected = true;
                     s.shares_accepted = json["shares_accepted"].as_u64().unwrap_or(0);
                 }
@@ -232,6 +234,20 @@ impl OverlayApp {
 
         let action = if is_paused { "resume" } else { "pause" };
         let url = format!("{}/api/control/{}", self.api_base, action);
+        let auth = self.auth.clone();
+
+        std::thread::spawn(move || {
+            let mut request = ureq::get(&url).timeout(Duration::from_secs(2));
+            if let Some((user, pass)) = &auth {
+                let credentials = BASE64.encode(format!("{}:{}", user, pass));
+                request = request.set("Authorization", &format!("Basic {}", credentials));
+            }
+            let _ = request.call();
+        });
+    }
+
+    fn toggle_idle(&self) {
+        let url = format!("{}/api/control/idle", self.api_base);
         let auth = self.auth.clone();
 
         std::thread::spawn(move || {
@@ -332,8 +348,10 @@ impl eframe::App for OverlayApp {
                             "Disconnected"
                         } else if stats.mining_paused {
                             "Paused"
-                        } else if stats.idle_mining {
+                        } else if stats.idle_enabled && stats.idle_active {
                             "Idle Mining"
+                        } else if stats.idle_enabled && !stats.idle_active {
+                            "Idle Waiting"
                         } else {
                             "Mining"
                         };
@@ -362,6 +380,11 @@ impl eframe::App for OverlayApp {
                         let btn_text = if stats.mining_paused { "▶ Start" } else { "⏸ Pause" };
                         if ui.small_button(btn_text).clicked() {
                             self.toggle_pause();
+                        }
+                        // Idle toggle button
+                        let idle_btn = if stats.idle_enabled { "🌙 Idle On" } else { "☀ Idle Off" };
+                        if ui.small_button(idle_btn).clicked() {
+                            self.toggle_idle();
                         }
                     });
                 });

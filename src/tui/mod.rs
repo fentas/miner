@@ -27,6 +27,7 @@ use tokio::sync::mpsc;
 pub enum TuiCommand {
     Quit,
     TogglePause,
+    ToggleIdle,
     ClearLogs,
     ToggleBitcoinLogs,
 }
@@ -147,6 +148,15 @@ impl TuiRunner {
                         (KeyCode::Char('p'), _) | (KeyCode::Char(' '), _) => {
                             if !self.state.is_logs_focused() && !self.state.is_history_focused() {
                                 let _ = self.cmd_tx.send(TuiCommand::TogglePause);
+                            }
+                        }
+                        // Toggle idle mode: i (temporary, not saved to config)
+                        (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                            if !self.state.is_logs_focused() && !self.state.is_history_focused() {
+                                let enabled = self.state.toggle_idle_enabled();
+                                let status = if enabled { "enabled" } else { "disabled" };
+                                self.state.log_info(format!("Idle mode {}", status));
+                                let _ = self.cmd_tx.send(TuiCommand::ToggleIdle);
                             }
                         }
                         // Focus/unfocus logs: l

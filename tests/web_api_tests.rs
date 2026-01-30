@@ -496,6 +496,50 @@ async fn test_api_idle_disable() {
     assert!(!json["enabled"].as_bool().unwrap());
 }
 
+/// Test GET /api/control/idle toggle endpoint
+#[tokio::test]
+async fn test_api_idle_toggle() {
+    let state = create_test_state();
+    let app = create_router(state.clone(), "web", None);
+
+    // Initially disabled, toggle should enable
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/control/idle")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["status"].as_str().unwrap(), "enabled");
+    assert!(json["enabled"].as_bool().unwrap());
+
+    // Toggle again should disable
+    let app = create_router(state.clone(), "web", None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/control/idle")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["status"].as_str().unwrap(), "disabled");
+    assert!(!json["enabled"].as_bool().unwrap());
+}
+
 /// Test GET /api/logs endpoint
 #[tokio::test]
 async fn test_api_logs() {

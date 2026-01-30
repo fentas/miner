@@ -616,55 +616,74 @@ async fn run_solo_mode_with_tui(
                         tui_state.log_success("Mining resumed");
                     }
                 }
+                TuiCommand::ToggleIdle => {
+                    // Toggle already happened in TUI, update web state
+                    let enabled = tui_state.is_idle_enabled();
+                    if let Some(ref state) = web_state {
+                        state.set_idle_enabled(enabled, Some(cfg.idle.timeout as u64)).await;
+                    }
+                    // If idle was disabled, restart mining immediately (unless paused)
+                    if !enabled && !tui_state.is_paused() {
+                        coordinator.start();
+                        if let Some(ref gpu_coord) = gpu_coordinator {
+                            gpu_coord.start();
+                        }
+                    }
+                }
                 TuiCommand::ClearLogs => {}
                 TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 
-        // Check idle state
-        if let Some(ref monitor) = idle_monitor {
-            let is_idle = monitor.is_idle();
-            tui_state.set_idle_active(is_idle);
+        // Check idle state (only if idle mode is enabled at runtime)
+        if tui_state.is_idle_enabled() {
+            if let Some(ref monitor) = idle_monitor {
+                let is_idle = monitor.is_idle();
+                tui_state.set_idle_active(is_idle);
 
-            // Determine if we're mining because of idle state
-            let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
+                // Determine if we're mining because of idle state
+                let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
 
-            // Update web state with idle info (idle_time tracked elsewhere)
-            if let Some(ref state) = web_state {
-                state.update_idle(is_idle, 0, mining_due_to_idle).await;
-            }
-
-            if !tui_state.is_paused() {
-                // CPU follows normal idle behavior (if cpu=true: mine when idle, pause when active)
-                if cfg.idle.cpu {
-                    if cfg.idle.pause_on_active && !is_idle {
-                        coordinator.stop();
-                    } else {
-                        coordinator.start();
-                    }
+                // Update web state with idle info (idle_time tracked elsewhere)
+                if let Some(ref state) = web_state {
+                    state.update_idle(is_idle, 0, mining_due_to_idle).await;
                 }
 
-                // GPU behavior depends on gpu_inverse flag
-                if let Some(ref gpu_coord) = gpu_coordinator {
-                    if cfg.idle.gpu {
-                        if cfg.idle.gpu_inverse {
-                            // Inverse: GPU runs when ACTIVE, pauses when IDLE
-                            if is_idle {
-                                gpu_coord.stop();
-                            } else {
-                                gpu_coord.start();
-                            }
+                if !tui_state.is_paused() {
+                    // CPU follows normal idle behavior (if cpu=true: mine when idle, pause when active)
+                    if cfg.idle.cpu {
+                        if cfg.idle.pause_on_active && !is_idle {
+                            coordinator.stop();
                         } else {
-                            // Normal: GPU runs when IDLE, pauses when ACTIVE
-                            if cfg.idle.pause_on_active && !is_idle {
-                                gpu_coord.stop();
+                            coordinator.start();
+                        }
+                    }
+
+                    // GPU behavior depends on gpu_inverse flag
+                    if let Some(ref gpu_coord) = gpu_coordinator {
+                        if cfg.idle.gpu {
+                            if cfg.idle.gpu_inverse {
+                                // Inverse: GPU runs when ACTIVE, pauses when IDLE
+                                if is_idle {
+                                    gpu_coord.stop();
+                                } else {
+                                    gpu_coord.start();
+                                }
                             } else {
-                                gpu_coord.start();
+                                // Normal: GPU runs when IDLE, pauses when ACTIVE
+                                if cfg.idle.pause_on_active && !is_idle {
+                                    gpu_coord.stop();
+                                } else {
+                                    gpu_coord.start();
+                                }
                             }
                         }
                     }
                 }
             }
+        } else if idle_monitor.is_some() {
+            // Idle mode disabled at runtime, clear the idle active state
+            tui_state.set_idle_active(false);
         }
 
         // Check peer count before attempting block template
@@ -700,7 +719,7 @@ async fn run_solo_mode_with_tui(
             // Ensure mining is running (if not paused AND not stopped by idle mode)
             // Only restart CPU if idle mode allows it
             if !tui_state.is_paused() {
-                let should_cpu_run = if cfg.idle.enabled && cfg.idle.cpu && cfg.idle.pause_on_active {
+                let should_cpu_run = if tui_state.is_idle_enabled() && cfg.idle.cpu && cfg.idle.pause_on_active {
                     // With pause_on_active, CPU runs only when system IS idle
                     tui_state.is_idle_active()
                 } else {
@@ -954,23 +973,35 @@ async fn run_sv2_mode_with_tui(
                         tui_state.log_success("Mining resumed");
                     }
                 }
+                TuiCommand::ToggleIdle => {
+                    // Toggle already happened in TUI
+                    let enabled = tui_state.is_idle_enabled();
+                    // If idle was disabled, restart mining immediately (unless paused)
+                    if !enabled && !tui_state.is_paused() {
+                        coordinator.start();
+                    }
+                }
                 TuiCommand::ClearLogs => {}
                 TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 
-        // Check idle state
-        if let Some(ref monitor) = idle_monitor {
-            let is_idle = monitor.is_idle();
-            tui_state.set_idle_active(is_idle);
+        // Check idle state (only if idle mode is enabled at runtime)
+        if tui_state.is_idle_enabled() {
+            if let Some(ref monitor) = idle_monitor {
+                let is_idle = monitor.is_idle();
+                tui_state.set_idle_active(is_idle);
 
-            if !tui_state.is_paused() && cfg.idle.cpu {
-                if cfg.idle.pause_on_active && !is_idle {
-                    coordinator.stop();
-                } else {
-                    coordinator.start();
+                if !tui_state.is_paused() && cfg.idle.cpu {
+                    if cfg.idle.pause_on_active && !is_idle {
+                        coordinator.stop();
+                    } else {
+                        coordinator.start();
+                    }
                 }
             }
+        } else if idle_monitor.is_some() {
+            tui_state.set_idle_active(false);
         }
 
         // Receive job from SV2 proxy
@@ -1105,37 +1136,52 @@ async fn run_pool_mode_with_tui(
                         tui_state.log_success("Mining resumed");
                     }
                 }
+                TuiCommand::ToggleIdle => {
+                    // Toggle already happened in TUI, update web state
+                    let enabled = tui_state.is_idle_enabled();
+                    if let Some(ref state) = web_state {
+                        state.set_idle_enabled(enabled, Some(cfg.idle.timeout as u64)).await;
+                    }
+                    // If idle was disabled, restart mining immediately (unless paused)
+                    if !enabled && !tui_state.is_paused() {
+                        coordinator.start();
+                    }
+                }
                 TuiCommand::ClearLogs => {}
                 TuiCommand::ToggleBitcoinLogs => {}
             }
         }
 
-        // Check idle state
-        if let Some(ref monitor) = idle_monitor {
-            let is_idle = monitor.is_idle();
-            tui_state.set_idle_active(is_idle);
+        // Check idle state (only if idle mode is enabled at runtime)
+        if tui_state.is_idle_enabled() {
+            if let Some(ref monitor) = idle_monitor {
+                let is_idle = monitor.is_idle();
+                tui_state.set_idle_active(is_idle);
 
-            // Determine if we're mining because of idle state
-            let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
+                // Determine if we're mining because of idle state
+                let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
 
-            // Update web state with idle info
-            if let Some(ref state) = web_state {
-                state.update_idle(is_idle, 0, mining_due_to_idle).await;
-            }
+                // Update web state with idle info
+                if let Some(ref state) = web_state {
+                    state.update_idle(is_idle, 0, mining_due_to_idle).await;
+                }
 
-            if !tui_state.is_paused() && cfg.idle.cpu {
-                if cfg.idle.pause_on_active && !is_idle {
-                    coordinator.stop();
-                    if let Some(ref state) = web_state {
-                        state.set_paused(true).await;
-                    }
-                } else {
-                    coordinator.start();
-                    if let Some(ref state) = web_state {
-                        state.set_paused(false).await;
+                if !tui_state.is_paused() && cfg.idle.cpu {
+                    if cfg.idle.pause_on_active && !is_idle {
+                        coordinator.stop();
+                        if let Some(ref state) = web_state {
+                            state.set_paused(true).await;
+                        }
+                    } else {
+                        coordinator.start();
+                        if let Some(ref state) = web_state {
+                            state.set_paused(false).await;
+                        }
                     }
                 }
             }
+        } else if idle_monitor.is_some() {
+            tui_state.set_idle_active(false);
         }
 
         // Poll for notifications (jobs, difficulty changes)

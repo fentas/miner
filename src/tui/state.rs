@@ -612,6 +612,13 @@ impl TuiState {
         self.idle_enabled.load(Ordering::Relaxed)
     }
 
+    /// Toggle idle mode enabled state and return the new value
+    pub fn toggle_idle_enabled(&self) -> bool {
+        // Use fetch_xor to atomically toggle the value
+        let old = self.idle_enabled.fetch_xor(true, Ordering::Relaxed);
+        !old // Return the new value
+    }
+
     pub fn set_idle_active(&self, active: bool) {
         self.idle_active.store(active, Ordering::Relaxed);
     }
@@ -1272,5 +1279,28 @@ mod tests {
         assert!(state.is_idle_enabled());
         assert!(state.is_idle_cpu());
         assert!(state.is_idle_gpu());
+    }
+
+    #[test]
+    fn test_tui_state_toggle_idle_enabled() {
+        let state = TuiState::new();
+
+        // Default should be false
+        assert!(!state.is_idle_enabled());
+
+        // Toggle on
+        let result = state.toggle_idle_enabled();
+        assert!(result);
+        assert!(state.is_idle_enabled());
+
+        // Toggle off
+        let result = state.toggle_idle_enabled();
+        assert!(!result);
+        assert!(!state.is_idle_enabled());
+
+        // Toggle back on
+        let result = state.toggle_idle_enabled();
+        assert!(result);
+        assert!(state.is_idle_enabled());
     }
 }

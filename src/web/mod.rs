@@ -364,6 +364,7 @@ pub fn create_router(state: Arc<WebState>, static_dir: &str, auth: Option<BasicA
         // Mining control
         .route("/api/control/pause", get(api_pause))
         .route("/api/control/resume", get(api_resume))
+        .route("/api/control/idle", get(api_toggle_idle))
         // Idle mining
         .route("/api/idle", get(api_idle_status))
         .route("/api/idle/enable", axum::routing::post(api_idle_enable))
@@ -536,6 +537,16 @@ async fn api_pause(State(state): State<Arc<WebState>>) -> impl IntoResponse {
 async fn api_resume(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     state.set_paused(false).await;
     Json(serde_json::json!({ "status": "resumed" }))
+}
+
+/// API endpoint to toggle idle mode
+async fn api_toggle_idle(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let mut idle = state.idle_state.write().await;
+    idle.enabled = !idle.enabled;
+    let enabled = idle.enabled;
+    let timeout = idle.timeout;
+    drop(idle);
+    Json(serde_json::json!({ "status": if enabled { "enabled" } else { "disabled" }, "enabled": enabled, "timeout": timeout }))
 }
 
 /// API endpoint for logs

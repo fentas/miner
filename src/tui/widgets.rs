@@ -92,6 +92,9 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("<Shift+h>", cyan), Span::styled(" Hashrate History (expanded chart)", action),
         ]),
+        Line::from(vec![
+            Span::styled("<i>", cyan), Span::styled(" Toggle Idle Mode (temporary)", action),
+        ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("NAVIGATION", header)]),
         Line::from(vec![
