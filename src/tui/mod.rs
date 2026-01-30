@@ -1,7 +1,11 @@
 mod state;
 mod widgets;
+mod logs;
+mod history;
 
-pub use state::{TuiState, LogEntry, LogLevel};
+pub use state::TuiState;
+pub use logs::{LogEntry, LogLevel, LogTimeFilter};
+pub use history::{HashrateSample, HashrateDisplayMode};
 pub use widgets::draw_ui;
 
 use std::io;
@@ -178,11 +182,11 @@ impl TuiRunner {
                         // Time filters: 0-6 (in logs or history focused mode)
                         (KeyCode::Char(c @ '0'..='6'), KeyModifiers::NONE) => {
                             if self.state.is_logs_focused() {
-                                if let Some(filter) = state::LogTimeFilter::from_key(c) {
+                                if let Some(filter) = logs::LogTimeFilter::from_key(c) {
                                     self.state.set_log_time_filter(filter);
                                 }
                             } else if self.state.is_history_focused() {
-                                if let Some(filter) = state::LogTimeFilter::from_key(c) {
+                                if let Some(filter) = logs::LogTimeFilter::from_key(c) {
                                     self.state.set_history_time_filter(filter);
                                 }
                             }

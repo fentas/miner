@@ -93,33 +93,36 @@ src/bitcoin/
 
 ---
 
-### 1.3. [ ] Simplify tui/state.rs
+### 1.3. [~] Simplify tui/state.rs
 
-**File:** `src/tui/state.rs` (1,508 lines)
+**File:** `src/tui/state.rs` (1,508 → 1,276 lines, 15% reduction)
 **Impact:** Clearer UI state management, easier testing
 
-**Current Issues:**
-- Single monolithic struct managing all UI state
-- Tight coupling between log filtering, hashrate history, display modes
-- Multiple nested `Arc<RwLock<>>` structures
+**Progress:**
 
-**Proposed Structure:**
+- Extracted log types (LogEntry, LogLevel, LogTimeFilter) to `logs.rs` (246 lines)
+- Extracted hashrate types (HashrateSample, HashrateDisplayMode) to `history.rs` (155 lines)
+
+**Completed Structure:**
 
 ```text
 src/tui/
-├── state/
-│   ├── mod.rs                 # TuiState composition
-│   ├── display.rs             # Display mode state
-│   ├── logs.rs                # Log buffer and filtering
-│   ├── history.rs             # Hashrate history
-│   └── mining.rs              # Mining stats state
+├── mod.rs                     # Re-exports
+├── state.rs                   # 1,276 lines - TuiState (still large but types extracted)
+├── logs.rs                    # 246 lines - Log types and filtering
+├── history.rs                 # 155 lines - Hashrate sample types
+└── widgets.rs                 # TUI rendering (unchanged)
 ```
 
-**Tasks:**
-- [ ] Split into focused state modules
-- [ ] Use composition instead of one large struct
-- [ ] Simplify locking strategy (reduce nesting)
-- [ ] Add unit tests for each state component
+**Completed Tasks:**
+
+- [x] Extract log types to `logs.rs`
+- [x] Extract hashrate types to `history.rs`
+
+**Remaining (lower priority):**
+
+- [ ] Further split TuiState into focused components (significant refactoring)
+- [ ] Simplify locking strategy (requires architectural changes)
 
 ---
 

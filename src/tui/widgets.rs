@@ -8,7 +8,8 @@ use ratatui::{
 };
 
 use std::time::Instant;
-use super::state::{LogLevel, TuiState};
+use super::logs::LogLevel;
+use super::state::TuiState;
 use crate::stats::format_hashrate;
 
 const DEFAULT_LOG_TAIL: usize = 100;
@@ -845,10 +846,10 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     // Determine which hashrate to show based on display mode
     let gpu_device_names = state.get_gpu_devices();
     let (primary_hashrate, mode_label): (f64, String) = match display_mode {
-        crate::tui::state::HashrateDisplayMode::Total => (total_hashrate, "Total".to_string()),
-        crate::tui::state::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU".to_string()),
-        crate::tui::state::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU".to_string()),
-        crate::tui::state::HashrateDisplayMode::GpuDevice(idx) => {
+        crate::tui::HashrateDisplayMode::Total => (total_hashrate, "Total".to_string()),
+        crate::tui::HashrateDisplayMode::CpuOnly => (cpu_hashrate, "CPU".to_string()),
+        crate::tui::HashrateDisplayMode::GpuOnly => (gpu_hashrate, "GPU".to_string()),
+        crate::tui::HashrateDisplayMode::GpuDevice(idx) => {
             // Show per-device hashrate with device name
             let device_rate = state.get_gpu_device_hashrate(idx as u32);
             let device_name = gpu_device_names.get(idx as usize)

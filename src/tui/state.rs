@@ -4,198 +4,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
+use super::history::{HashrateSample, HashrateDisplayMode};
+use super::logs::{LogEntry, LogTimeFilter};
+
 const MAX_LOGS: usize = 1000;
 const MAX_HASHRATE_HISTORY: usize = 3600; // 1 hour at 1 sample/sec
+#[allow(dead_code)]
 const DEFAULT_LOG_TAIL: usize = 100; // Default tail count for display
 const DEFAULT_HISTORY_TAIL: usize = 120; // 2 minutes for compact view
-
-/// A hashrate sample with per-source breakdown and event markers
-#[derive(Debug, Clone)]
-pub struct HashrateSample {
-    pub timestamp: Instant,
-    pub cpu_hashrate: f64,
-    pub gpu_hashrate: f64,
-    pub gpu_device_hashrates: Vec<f64>, // Per-device GPU hashrates
-    pub total_hashrate: f64,
-    pub block_height: u64,
-    pub new_block: bool, // True if this sample marks a new block
-}
-
-/// Time filter for logs (k9s style: 0=tail, 1=1m, 2=5m, 3=15m, 4=30m, 5=1h, 6=all)
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum LogTimeFilter {
-    #[default]
-    Tail,      // 0 - Show last N logs (default 100)
-    OneMin,    // 1 - Last 1 minute
-    FiveMin,   // 2 - Last 5 minutes
-    FifteenMin,// 3 - Last 15 minutes
-    ThirtyMin, // 4 - Last 30 minutes
-    OneHour,   // 5 - Last 1 hour
-    All,       // 6 - All logs (up to MAX_LOGS)
-}
-
-impl LogTimeFilter {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LogTimeFilter::Tail => "tail",
-            LogTimeFilter::OneMin => "1m",
-            LogTimeFilter::FiveMin => "5m",
-            LogTimeFilter::FifteenMin => "15m",
-            LogTimeFilter::ThirtyMin => "30m",
-            LogTimeFilter::OneHour => "1h",
-            LogTimeFilter::All => "all",
-        }
-    }
-
-    pub fn from_key(key: char) -> Option<Self> {
-        match key {
-            '0' => Some(LogTimeFilter::Tail),
-            '1' => Some(LogTimeFilter::OneMin),
-            '2' => Some(LogTimeFilter::FiveMin),
-            '3' => Some(LogTimeFilter::FifteenMin),
-            '4' => Some(LogTimeFilter::ThirtyMin),
-            '5' => Some(LogTimeFilter::OneHour),
-            '6' => Some(LogTimeFilter::All),
-            _ => None,
-        }
-    }
-
-    /// Returns the maximum age for logs (None for Tail/All which don't filter by time)
-    pub fn max_age(&self) -> Option<std::time::Duration> {
-        match self {
-            LogTimeFilter::Tail => None,  // Handled separately (last N)
-            LogTimeFilter::OneMin => Some(std::time::Duration::from_secs(60)),
-            LogTimeFilter::FiveMin => Some(std::time::Duration::from_secs(5 * 60)),
-            LogTimeFilter::FifteenMin => Some(std::time::Duration::from_secs(15 * 60)),
-            LogTimeFilter::ThirtyMin => Some(std::time::Duration::from_secs(30 * 60)),
-            LogTimeFilter::OneHour => Some(std::time::Duration::from_secs(60 * 60)),
-            LogTimeFilter::All => None,  // Show all
-        }
-    }
-
-    pub fn is_tail(&self) -> bool {
-        matches!(self, LogTimeFilter::Tail)
-    }
-}
-
-/// Hashrate display mode
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum HashrateDisplayMode {
-    #[default]
-    Total,     // Show total (CPU + GPU combined)
-    CpuOnly,   // Show CPU hashrate only
-    GpuOnly,   // Show GPU hashrate only (combined all GPUs)
-    GpuDevice(u8), // Show specific GPU device (0, 1, 2, ...)
-}
-
-impl HashrateDisplayMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            HashrateDisplayMode::Total => "Total",
-            HashrateDisplayMode::CpuOnly => "CPU",
-            HashrateDisplayMode::GpuOnly => "GPU",
-            HashrateDisplayMode::GpuDevice(_) => "GPU#",
-        }
-    }
-
-    /// Cycle to next mode
-    pub fn next(self, gpu_count: usize) -> Self {
-        match self {
-            HashrateDisplayMode::Total => HashrateDisplayMode::CpuOnly,
-            HashrateDisplayMode::CpuOnly => {
-                if gpu_count > 0 {
-                    HashrateDisplayMode::GpuOnly
-                } else {
-                    HashrateDisplayMode::Total
-                }
-            }
-            HashrateDisplayMode::GpuOnly => {
-                if gpu_count > 1 {
-                    HashrateDisplayMode::GpuDevice(0)
-                } else {
-                    HashrateDisplayMode::Total
-                }
-            }
-            HashrateDisplayMode::GpuDevice(idx) => {
-                let next_idx = idx + 1;
-                if (next_idx as usize) < gpu_count {
-                    HashrateDisplayMode::GpuDevice(next_idx)
-                } else {
-                    HashrateDisplayMode::Total
-                }
-            }
-        }
-    }
-}
-
-/// Log level for TUI display
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LogLevel {
-    Info,
-    Warn,
-    Error,
-    Success,
-    Debug,
-}
-
-impl LogLevel {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LogLevel::Info => "INFO",
-            LogLevel::Warn => "WARN",
-            LogLevel::Error => "ERROR",
-            LogLevel::Success => "OK",
-            LogLevel::Debug => "DEBUG",
-        }
-    }
-}
-
-/// A log entry for display
-#[derive(Debug, Clone)]
-pub struct LogEntry {
-    pub level: LogLevel,
-    pub message: String,
-    pub timestamp: String,
-    pub created_at: Instant,
-}
-
-impl LogEntry {
-    pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
-        let now = chrono::Local::now();
-        Self {
-            level,
-            message: message.into(),
-            timestamp: now.format("%H:%M:%S").to_string(),
-            created_at: Instant::now(),
-        }
-    }
-
-    pub fn info(message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Info, message)
-    }
-
-    pub fn warn(message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Warn, message)
-    }
-
-    pub fn error(message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Error, message)
-    }
-
-    pub fn success(message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Success, message)
-    }
-
-    /// Create a log entry with a custom timestamp
-    pub fn with_timestamp(level: LogLevel, message: impl Into<String>, timestamp: impl Into<String>) -> Self {
-        Self {
-            level,
-            created_at: Instant::now(),
-            message: message.into(),
-            timestamp: timestamp.into(),
-        }
-    }
-}
 
 /// Shared state between mining threads and TUI
 pub struct TuiState {
@@ -1009,6 +825,7 @@ impl Default for TuiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::LogLevel;
 
     #[test]
     fn test_tui_state_new() {
@@ -1150,40 +967,6 @@ mod tests {
 
         state.set_quit();
         assert!(state.should_quit());
-    }
-
-    #[test]
-    fn test_log_entry_levels() {
-        assert_eq!(LogLevel::Info.as_str(), "INFO");
-        assert_eq!(LogLevel::Warn.as_str(), "WARN");
-        assert_eq!(LogLevel::Error.as_str(), "ERROR");
-        assert_eq!(LogLevel::Success.as_str(), "OK");
-        assert_eq!(LogLevel::Debug.as_str(), "DEBUG");
-    }
-
-    #[test]
-    fn test_log_entry_new() {
-        let entry = LogEntry::new(LogLevel::Debug, "Debug message");
-        assert_eq!(entry.level, LogLevel::Debug);
-        assert_eq!(entry.message, "Debug message");
-        // Timestamp should be in HH:MM:SS format
-        assert_eq!(entry.timestamp.len(), 8);
-        assert!(entry.timestamp.contains(':'));
-    }
-
-    #[test]
-    fn test_log_entry_factory_methods() {
-        let info = LogEntry::info("info");
-        assert_eq!(info.level, LogLevel::Info);
-
-        let warn = LogEntry::warn("warn");
-        assert_eq!(warn.level, LogLevel::Warn);
-
-        let error = LogEntry::error("error");
-        assert_eq!(error.level, LogLevel::Error);
-
-        let success = LogEntry::success("success");
-        assert_eq!(success.level, LogLevel::Success);
     }
 
     #[test]
@@ -1394,21 +1177,6 @@ mod tests {
 
         // Should be limited to MAX_LOGS (1000)
         assert_eq!(state.get_log_count(), 1000);
-    }
-
-    #[test]
-    fn test_log_level_equality() {
-        assert_eq!(LogLevel::Info, LogLevel::Info);
-        assert_ne!(LogLevel::Info, LogLevel::Warn);
-    }
-
-    #[test]
-    fn test_log_entry_clone() {
-        let entry = LogEntry::info("test message");
-        let cloned = entry.clone();
-        assert_eq!(cloned.level, entry.level);
-        assert_eq!(cloned.message, entry.message);
-        assert_eq!(cloned.timestamp, entry.timestamp);
     }
 
     #[test]
