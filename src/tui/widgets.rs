@@ -272,9 +272,8 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // Header
-            Constraint::Min(10),    // Chart
-            Constraint::Length(2),  // Filter bar
+            Constraint::Length(7),  // Header (includes filters and actions)
+            Constraint::Min(8),     // Chart (reduced height)
             Constraint::Length(cmd_height),
         ])
         .split(area);
@@ -371,24 +370,24 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
             );
         }
 
-        // Format X axis labels based on time range
+        // Format X axis labels based on time range (left=oldest, right=now)
         let x_labels: Vec<Span> = if time_range <= 120.0 {
             vec![
-                Span::raw("now"),
-                Span::raw(format!("-{:.0}s", time_range / 2.0)),
                 Span::raw(format!("-{:.0}s", time_range)),
+                Span::raw(format!("-{:.0}s", time_range / 2.0)),
+                Span::raw("now"),
             ]
         } else if time_range <= 3600.0 {
             vec![
-                Span::raw("now"),
-                Span::raw(format!("-{:.0}m", time_range / 120.0)),
                 Span::raw(format!("-{:.0}m", time_range / 60.0)),
+                Span::raw(format!("-{:.0}m", time_range / 120.0)),
+                Span::raw("now"),
             ]
         } else {
             vec![
-                Span::raw("now"),
-                Span::raw(format!("-{:.1}h", time_range / 7200.0)),
                 Span::raw(format!("-{:.1}h", time_range / 3600.0)),
+                Span::raw(format!("-{:.1}h", time_range / 7200.0)),
+                Span::raw("now"),
             ]
         };
 
@@ -457,68 +456,9 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
         }
     }
 
-    // Draw filter bar below the chart (same style as log focus mode)
-    draw_history_filter_bar(f, chunks[2], state);
-
     if state.is_command_mode() {
-        draw_command_input(f, chunks[3], state);
+        draw_command_input(f, chunks[2], state);
     }
-}
-
-/// Draw the filter bar for history panel (k9s style, same as log filter bar)
-#[cfg(not(tarpaulin_include))]
-fn draw_history_filter_bar(f: &mut Frame, area: Rect, state: &TuiState) {
-    let current = state.get_history_time_filter();
-    let filters = [
-        (LogTimeFilter::Tail, "0:tail"),
-        (LogTimeFilter::OneMin, "1:1m"),
-        (LogTimeFilter::FiveMin, "2:5m"),
-        (LogTimeFilter::FifteenMin, "3:15m"),
-        (LogTimeFilter::ThirtyMin, "4:30m"),
-        (LogTimeFilter::OneHour, "5:1h"),
-        (LogTimeFilter::All, "6:all"),
-    ];
-
-    // First line: filters
-    let mut filter_spans = vec![Span::styled(" <", Style::default().fg(Color::Blue))];
-    for (i, (filter, label)) in filters.iter().enumerate() {
-        let style = if *filter == current {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        filter_spans.push(Span::styled(*label, style));
-        if i < filters.len() - 1 {
-            filter_spans.push(Span::raw(" "));
-        }
-    }
-    filter_spans.push(Span::styled(">", Style::default().fg(Color::Blue)));
-
-    // Second line: actions
-    let action_spans = vec![
-        Span::styled(" <esc>", Style::default().fg(Color::Blue)),
-        Span::styled(" Unfocus", Style::default().fg(Color::DarkGray)),
-        Span::raw("  "),
-        Span::styled("Total:", Style::default().fg(Color::White)),
-        Span::styled("White", Style::default().fg(Color::White)),
-        Span::raw(" "),
-        Span::styled("CPU:", Style::default().fg(Color::Cyan)),
-        Span::styled("Cyan", Style::default().fg(Color::Cyan)),
-        Span::raw(" "),
-        Span::styled("GPU:", Style::default().fg(Color::Green)),
-        Span::styled("Green", Style::default().fg(Color::Green)),
-        Span::raw(" │ "),
-        Span::styled("Blocks:", Style::default().fg(Color::Yellow)),
-        Span::styled("Yellow", Style::default().fg(Color::Yellow)),
-    ];
-
-    let lines = vec![
-        Line::from(filter_spans),
-        Line::from(action_spans),
-    ];
-
-    let filter_para = Paragraph::new(lines);
-    f.render_widget(filter_para, area);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -677,8 +617,40 @@ fn draw_header_filters(f: &mut Frame, area: Rect, state: &TuiState) {
     let title_style = Style::default().fg(Color::Magenta);
 
     if state.is_logs_focused() {
-        // Focused mode: show time filters
+        // Log focused mode: show log time filters
         let filter = state.get_log_time_filter();
+        let active = |name: &str| if filter.as_str() == name { yellow } else { key_style };
+
+        let lines = vec![
+            Line::from(vec![Span::styled("Filters ", title_style), Span::raw("─".repeat(12))]),
+            Line::from(vec![
+                Span::styled("<0>", active("tail")),
+                Span::styled(" tail  ", desc_style),
+                Span::styled("<1>", active("1m")),
+                Span::styled(" 1m", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<2>", active("5m")),
+                Span::styled(" 5m    ", desc_style),
+                Span::styled("<3>", active("15m")),
+                Span::styled(" 15m", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<4>", active("30m")),
+                Span::styled(" 30m   ", desc_style),
+                Span::styled("<5>", active("1h")),
+                Span::styled(" 1h", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<6>", active("all")),
+                Span::styled(" all", desc_style),
+            ]),
+        ];
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+    } else if state.is_history_focused() {
+        // History focused mode: show history time filters
+        let filter = state.get_history_time_filter();
         let active = |name: &str| if filter.as_str() == name { yellow } else { key_style };
 
         let lines = vec![
@@ -745,7 +717,7 @@ fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
     let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
 
     if state.is_logs_focused() {
-        // Focused mode: show all log actions
+        // Log focused mode: show all log actions
         let scroll_status = if state.is_autoscroll() { "Scroll:On" } else { "Scroll:Off" };
 
         let mut lines = vec![
@@ -771,6 +743,33 @@ fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
                 Span::styled(log_label, desc_style),
             ]));
         }
+
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+    } else if state.is_history_focused() {
+        // History focused mode: show history actions
+        let lines = vec![
+            Line::from(vec![Span::styled("Actions ", title_style), Span::raw("─".repeat(12))]),
+            Line::from(vec![
+                Span::styled("<esc>", key_style),
+                Span::styled(" Unfocus", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Total:", Style::default().fg(Color::White)),
+                Span::styled("White", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("CPU:", Style::default().fg(Color::Cyan)),
+                Span::styled("Cyan", desc_style),
+                Span::raw(" "),
+                Span::styled("GPU:", Style::default().fg(Color::Green)),
+                Span::styled("Green", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Blocks:", Style::default().fg(Color::Yellow)),
+                Span::styled("Yellow", desc_style),
+            ]),
+        ];
 
         let para = Paragraph::new(lines);
         f.render_widget(para, area);
