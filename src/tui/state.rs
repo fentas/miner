@@ -4,8 +4,21 @@ use std::sync::RwLock;
 use std::time::Instant;
 
 const MAX_LOGS: usize = 1000;
-const MAX_HASHRATE_HISTORY: usize = 120; // 2 minutes at 1 sample/sec
+const MAX_HASHRATE_HISTORY: usize = 3600; // 1 hour at 1 sample/sec
 const DEFAULT_LOG_TAIL: usize = 100; // Default tail count for display
+const DEFAULT_HISTORY_TAIL: usize = 120; // 2 minutes for compact view
+
+/// A hashrate sample with per-source breakdown and event markers
+#[derive(Debug, Clone)]
+pub struct HashrateSample {
+    pub timestamp: Instant,
+    pub cpu_hashrate: f64,
+    pub gpu_hashrate: f64,
+    pub gpu_device_hashrates: Vec<f64>, // Per-device GPU hashrates
+    pub total_hashrate: f64,
+    pub block_height: u64,
+    pub new_block: bool, // True if this sample marks a new block
+}
 
 /// Time filter for logs (k9s style: 0=tail, 1=1m, 2=5m, 3=15m, 4=30m, 5=1h, 6=all)
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -257,6 +270,11 @@ pub struct TuiState {
     command_mode: AtomicBool,
     command_buffer: RwLock<String>,
     log_time_filter: RwLock<LogTimeFilter>,
+
+    // History panel (Shift+H to focus)
+    history_focused: AtomicBool,
+    history_time_filter: RwLock<LogTimeFilter>,
+    history_samples: RwLock<VecDeque<HashrateSample>>,
 }
 
 impl TuiState {
@@ -308,6 +326,9 @@ impl TuiState {
             command_buffer: RwLock::new(String::new()),
             log_time_filter: RwLock::new(LogTimeFilter::default()),
             hashrate_display_mode: RwLock::new(HashrateDisplayMode::default()),
+            history_focused: AtomicBool::new(false),
+            history_time_filter: RwLock::new(LogTimeFilter::default()),
+            history_samples: RwLock::new(VecDeque::with_capacity(MAX_HASHRATE_HISTORY)),
         }
     }
 
@@ -315,12 +336,53 @@ impl TuiState {
     pub fn set_hashrate(&self, rate: f64) {
         self.hashrate.store(rate.to_bits(), Ordering::Relaxed);
 
-        // Add to history
+        // Add to simple history (legacy)
         if let Ok(mut history) = self.hashrate_history.write() {
             if history.len() >= MAX_HASHRATE_HISTORY {
                 history.pop_front();
             }
             history.push_back(rate);
+        }
+
+        // Add to detailed history samples
+        self.record_hashrate_sample(rate);
+    }
+
+    /// Record a detailed hashrate sample with per-source breakdown
+    pub fn record_hashrate_sample(&self, total: f64) {
+        let gpu_rate = f64::from_bits(self.gpu_hashrate.load(Ordering::Relaxed));
+        let cpu_rate = total - gpu_rate;
+
+        // Get per-device GPU hashrates
+        let device_rates: Vec<f64> = self.gpu_device_hashrates
+            .read()
+            .map(|h| h.iter().map(|(_, bits)| f64::from_bits(*bits)).collect())
+            .unwrap_or_default();
+
+        let sample = HashrateSample {
+            timestamp: Instant::now(),
+            cpu_hashrate: cpu_rate.max(0.0),
+            gpu_hashrate: gpu_rate,
+            gpu_device_hashrates: device_rates,
+            total_hashrate: total,
+            block_height: self.block_height.load(Ordering::Relaxed),
+            new_block: false,
+        };
+
+        if let Ok(mut samples) = self.history_samples.write() {
+            if samples.len() >= MAX_HASHRATE_HISTORY {
+                samples.pop_front();
+            }
+            samples.push_back(sample);
+        }
+    }
+
+    /// Mark the most recent sample as a new block event
+    pub fn mark_new_block(&self) {
+        if let Ok(mut samples) = self.history_samples.write() {
+            if let Some(sample) = samples.back_mut() {
+                sample.new_block = true;
+            }
         }
     }
 
@@ -345,6 +407,8 @@ impl TuiState {
             if let Ok(mut time) = self.last_block_time.write() {
                 *time = Some(Instant::now());
             }
+            // Mark new block in hashrate history
+            self.mark_new_block();
         }
     }
 
@@ -540,6 +604,55 @@ impl TuiState {
 
     pub fn get_log_time_filter(&self) -> LogTimeFilter {
         self.log_time_filter.read().map(|f| *f).unwrap_or_default()
+    }
+
+    // History panel focus (Shift+H)
+    pub fn toggle_history_focus(&self) -> bool {
+        // Unfocus logs when focusing history
+        if !self.history_focused.load(Ordering::Relaxed) {
+            self.logs_focused.store(false, Ordering::Relaxed);
+        }
+        let prev = self.history_focused.fetch_xor(true, Ordering::Relaxed);
+        !prev
+    }
+
+    pub fn is_history_focused(&self) -> bool {
+        self.history_focused.load(Ordering::Relaxed)
+    }
+
+    pub fn set_history_time_filter(&self, filter: LogTimeFilter) {
+        if let Ok(mut f) = self.history_time_filter.write() {
+            *f = filter;
+        }
+    }
+
+    pub fn get_history_time_filter(&self) -> LogTimeFilter {
+        self.history_time_filter.read().map(|f| *f).unwrap_or_default()
+    }
+
+    /// Get filtered history samples based on current time filter
+    pub fn get_filtered_history_samples(&self) -> Vec<HashrateSample> {
+        let filter = self.get_history_time_filter();
+        let now = Instant::now();
+
+        if let Ok(samples) = self.history_samples.read() {
+            if filter.is_tail() {
+                // Tail mode: return last N samples (2 minutes = 120)
+                let skip = samples.len().saturating_sub(DEFAULT_HISTORY_TAIL);
+                samples.iter().skip(skip).cloned().collect()
+            } else if let Some(max_age) = filter.max_age() {
+                // Time-based filter
+                samples.iter()
+                    .filter(|s| now.duration_since(s.timestamp) <= max_age)
+                    .cloned()
+                    .collect()
+            } else {
+                // All samples
+                samples.iter().cloned().collect()
+            }
+        } else {
+            Vec::new()
+        }
     }
 
     // Getters

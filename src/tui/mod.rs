@@ -123,10 +123,12 @@ impl TuiRunner {
                             let _ = self.cmd_tx.send(TuiCommand::Quit);
                             return Ok(());
                         }
-                        // Escape: unfocus logs or do nothing
+                        // Escape: unfocus logs/history or do nothing
                         (KeyCode::Esc, _) => {
                             if self.state.is_logs_focused() {
                                 self.state.toggle_logs_focus();
+                            } else if self.state.is_history_focused() {
+                                self.state.toggle_history_focus();
                             }
                         }
                         // Help: ?
@@ -139,13 +141,19 @@ impl TuiRunner {
                         }
                         // Pause: p or space (only when logs not focused)
                         (KeyCode::Char('p'), _) | (KeyCode::Char(' '), _) => {
-                            if !self.state.is_logs_focused() {
+                            if !self.state.is_logs_focused() && !self.state.is_history_focused() {
                                 let _ = self.cmd_tx.send(TuiCommand::TogglePause);
                             }
                         }
                         // Focus/unfocus logs: l
                         (KeyCode::Char('l'), KeyModifiers::NONE) => {
-                            self.state.toggle_logs_focus();
+                            if !self.state.is_history_focused() {
+                                self.state.toggle_logs_focus();
+                            }
+                        }
+                        // Focus/unfocus history: Shift+H
+                        (KeyCode::Char('H'), KeyModifiers::SHIFT) => {
+                            self.state.toggle_history_focus();
                         }
                         // Clear logs: Shift+C (only in focused mode)
                         (KeyCode::Char('C'), KeyModifiers::SHIFT) => {
@@ -167,11 +175,15 @@ impl TuiRunner {
                                 self.state.toggle_autoscroll();
                             }
                         }
-                        // Time filters: 0-6 (in focused mode)
+                        // Time filters: 0-6 (in logs or history focused mode)
                         (KeyCode::Char(c @ '0'..='6'), KeyModifiers::NONE) => {
                             if self.state.is_logs_focused() {
                                 if let Some(filter) = state::LogTimeFilter::from_key(c) {
                                     self.state.set_log_time_filter(filter);
+                                }
+                            } else if self.state.is_history_focused() {
+                                if let Some(filter) = state::LogTimeFilter::from_key(c) {
+                                    self.state.set_history_time_filter(filter);
                                 }
                             }
                         }
@@ -194,9 +206,9 @@ impl TuiRunner {
                         (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                             self.state.scroll_to_bottom();
                         }
-                        // Toggle hashrate display mode: h
+                        // Toggle hashrate display mode: h (only when not focused on anything)
                         (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                            if !self.state.is_logs_focused() {
+                            if !self.state.is_logs_focused() && !self.state.is_history_focused() {
                                 let mode = self.state.toggle_hashrate_display_mode();
                                 self.state.log_info(format!("Hashrate display: {}", mode.as_str()));
                             }

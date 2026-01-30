@@ -3,12 +3,12 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline},
+    widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, GraphType, List, ListItem, Paragraph, Sparkline},
     Frame,
 };
 
 use std::time::Instant;
-use super::state::{LogLevel, TuiState};
+use super::state::{LogLevel, LogTimeFilter, TuiState};
 use crate::stats::format_hashrate;
 
 const DEFAULT_LOG_TAIL: usize = 100;
@@ -28,6 +28,12 @@ pub fn draw_ui(f: &mut Frame, state: &TuiState) {
     // Check if logs are focused - show full screen logs view
     if state.is_logs_focused() {
         draw_focused_logs(f, size, state);
+        return;
+    }
+
+    // Check if history is focused - show expanded hashrate chart
+    if state.is_history_focused() {
+        draw_focused_history(f, size, state);
         return;
     }
 
@@ -81,6 +87,9 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("<h>", cyan), Span::styled(" Toggle Hashrate View (Total/CPU/GPU)", action),
+        ]),
+        Line::from(vec![
+            Span::styled("<Shift+h>", cyan), Span::styled(" Hashrate History (expanded chart)", action),
         ]),
         Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("NAVIGATION", header)]),
@@ -254,6 +263,245 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
     if state.is_command_mode() {
         draw_command_input(f, chunks[2], state);
     }
+}
+
+/// Draw focused history view with expanded chart
+#[cfg(not(tarpaulin_include))]
+fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
+    let cmd_height = if state.is_command_mode() { 1 } else { 0 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7),  // Header
+            Constraint::Min(10),    // Chart
+            Constraint::Length(cmd_height),
+        ])
+        .split(area);
+
+    draw_header(f, chunks[0], state);
+
+    // Get filtered samples
+    let samples = state.get_filtered_history_samples();
+    let filter = state.get_history_time_filter();
+
+    if samples.is_empty() {
+        let empty_msg = Paragraph::new("No hashrate data yet...")
+            .alignment(Alignment::Center)
+            .block(Block::default()
+                .title(" Hashrate History ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)));
+        f.render_widget(empty_msg, chunks[1]);
+    } else {
+        // Build datasets for chart
+        let now = Instant::now();
+        let oldest = samples.first().map(|s| s.timestamp).unwrap_or(now);
+        let time_range = now.duration_since(oldest).as_secs_f64().max(1.0);
+
+        // Convert samples to chart data points (x=time, y=hashrate)
+        let total_data: Vec<(f64, f64)> = samples.iter()
+            .map(|s| {
+                let x = now.duration_since(s.timestamp).as_secs_f64();
+                let x_normalized = time_range - x; // Reverse so oldest is at left
+                (x_normalized, s.total_hashrate / 1_000_000.0) // Convert to MH/s
+            })
+            .collect();
+
+        let cpu_data: Vec<(f64, f64)> = samples.iter()
+            .map(|s| {
+                let x = now.duration_since(s.timestamp).as_secs_f64();
+                let x_normalized = time_range - x;
+                (x_normalized, s.cpu_hashrate / 1_000_000.0)
+            })
+            .collect();
+
+        let gpu_data: Vec<(f64, f64)> = samples.iter()
+            .map(|s| {
+                let x = now.duration_since(s.timestamp).as_secs_f64();
+                let x_normalized = time_range - x;
+                (x_normalized, s.gpu_hashrate / 1_000_000.0)
+            })
+            .collect();
+
+        // Find block markers
+        let block_markers: Vec<(f64, u64)> = samples.iter()
+            .filter(|s| s.new_block)
+            .map(|s| {
+                let x = now.duration_since(s.timestamp).as_secs_f64();
+                let x_normalized = time_range - x;
+                (x_normalized, s.block_height)
+            })
+            .collect();
+
+        // Calculate Y axis bounds
+        let max_hashrate = samples.iter()
+            .map(|s| s.total_hashrate)
+            .fold(0.0_f64, f64::max) / 1_000_000.0;
+        let y_max = (max_hashrate * 1.1).max(1.0); // 10% headroom
+
+        // Build datasets
+        let mut datasets = vec![
+            Dataset::default()
+                .name("Total")
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Color::White))
+                .data(&total_data),
+        ];
+
+        // Only add CPU/GPU datasets if we have both
+        let has_gpu = samples.iter().any(|s| s.gpu_hashrate > 0.0);
+        if has_gpu {
+            datasets.push(
+                Dataset::default()
+                    .name("CPU")
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::Cyan))
+                    .data(&cpu_data)
+            );
+            datasets.push(
+                Dataset::default()
+                    .name("GPU")
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::Green))
+                    .data(&gpu_data)
+            );
+        }
+
+        // Format X axis labels based on time range
+        let x_labels: Vec<Span> = if time_range <= 120.0 {
+            vec![
+                Span::raw("now"),
+                Span::raw(format!("-{:.0}s", time_range / 2.0)),
+                Span::raw(format!("-{:.0}s", time_range)),
+            ]
+        } else if time_range <= 3600.0 {
+            vec![
+                Span::raw("now"),
+                Span::raw(format!("-{:.0}m", time_range / 120.0)),
+                Span::raw(format!("-{:.0}m", time_range / 60.0)),
+            ]
+        } else {
+            vec![
+                Span::raw("now"),
+                Span::raw(format!("-{:.1}h", time_range / 7200.0)),
+                Span::raw(format!("-{:.1}h", time_range / 3600.0)),
+            ]
+        };
+
+        let x_axis = Axis::default()
+            .style(Style::default().fg(Color::Gray))
+            .bounds([0.0, time_range])
+            .labels(x_labels);
+
+        let y_axis = Axis::default()
+            .style(Style::default().fg(Color::Gray))
+            .bounds([0.0, y_max])
+            .labels(vec![
+                Span::raw("0"),
+                Span::raw(format!("{:.1}", y_max / 2.0)),
+                Span::raw(format!("{:.1} MH/s", y_max)),
+            ]);
+
+        // Build title with filter info
+        let filter_str = filter.as_str();
+        let sample_count = samples.len();
+        let block_count = block_markers.len();
+        let title = if block_count > 0 {
+            format!(" Hashrate History ({} samples, {} blocks) [{}] ", sample_count, block_count, filter_str)
+        } else {
+            format!(" Hashrate History ({} samples) [{}] ", sample_count, filter_str)
+        };
+
+        // Legend
+        let legend = if has_gpu {
+            " Total:White CPU:Cyan GPU:Green │ Blocks:Yellow "
+        } else {
+            " Total:White │ Blocks:Yellow "
+        };
+
+        let chart = Chart::new(datasets)
+            .block(Block::default()
+                .title(title)
+                .title_bottom(Line::from(legend).alignment(Alignment::Right))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)))
+            .x_axis(x_axis)
+            .y_axis(y_axis);
+
+        f.render_widget(chart, chunks[1]);
+
+        // Draw block markers as labels (vertical lines simulation)
+        if !block_markers.is_empty() {
+            let chart_area = chunks[1];
+            let inner_width = chart_area.width.saturating_sub(8) as f64; // Account for Y axis
+            let inner_x_start = chart_area.x + 7;
+
+            for (x_pos, height) in block_markers.iter().take(5) { // Max 5 markers
+                let x_ratio = x_pos / time_range;
+                let screen_x = inner_x_start + (x_ratio * inner_width) as u16;
+                if screen_x > inner_x_start && screen_x < chart_area.x + chart_area.width - 1 {
+                    // Draw a vertical marker
+                    let marker_area = Rect::new(screen_x, chart_area.y + 1, 1, chart_area.height.saturating_sub(3));
+                    for y in marker_area.y..marker_area.y + marker_area.height {
+                        f.render_widget(
+                            Paragraph::new("│").style(Style::default().fg(Color::Yellow)),
+                            Rect::new(screen_x, y, 1, 1)
+                        );
+                    }
+                    // Draw height label at top
+                    let label = format!("{}", height);
+                    let label_len = label.len() as u16;
+                    if screen_x + label_len <= chart_area.x + chart_area.width - 1 {
+                        f.render_widget(
+                            Paragraph::new(label).style(Style::default().fg(Color::Yellow)),
+                            Rect::new(screen_x, chart_area.y + 1, label_len, 1)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw filter bar at the bottom of the chart area
+    let filter_area = Rect::new(chunks[1].x + 1, chunks[1].y + chunks[1].height - 1, chunks[1].width - 2, 1);
+    draw_history_filter_bar(f, filter_area, state);
+
+    if state.is_command_mode() {
+        draw_command_input(f, chunks[2], state);
+    }
+}
+
+/// Draw the filter bar for history panel
+#[cfg(not(tarpaulin_include))]
+fn draw_history_filter_bar(f: &mut Frame, area: Rect, state: &TuiState) {
+    let current = state.get_history_time_filter();
+    let filters = [
+        (LogTimeFilter::Tail, "0:tail"),
+        (LogTimeFilter::OneMin, "1:1m"),
+        (LogTimeFilter::FiveMin, "2:5m"),
+        (LogTimeFilter::FifteenMin, "3:15m"),
+        (LogTimeFilter::ThirtyMin, "4:30m"),
+        (LogTimeFilter::OneHour, "5:1h"),
+        (LogTimeFilter::All, "6:all"),
+    ];
+
+    let mut spans = vec![Span::raw(" Filters: ")];
+    for (filter, label) in filters.iter() {
+        let style = if *filter == current {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(*label, style));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::raw("│ <esc> close"));
+
+    let filter_line = Paragraph::new(Line::from(spans));
+    f.render_widget(filter_line, area);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -523,10 +771,14 @@ fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
             ]));
         }
 
-        // Always show hashrate toggle
+        // Always show hashrate toggle and history
         lines.push(Line::from(vec![
             Span::styled("<h>", key_style),
             Span::styled(" Toggle Hashrate", desc_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("<shift+h>", key_style),
+            Span::styled(" History Chart", desc_style),
         ]));
 
         let para = Paragraph::new(lines);
