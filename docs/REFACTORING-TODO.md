@@ -28,34 +28,28 @@ Comprehensive list of refactoring and optimization opportunities identified in t
 
 ### 1.1. [~] Split main.rs into modules
 
-**File:** `src/main.rs` (2,290 lines, down from 2,783 - 17.7% reduction)
+**File:** `src/main.rs` (2,136 lines, down from 2,783 - 23.3% reduction)
 **Impact:** Massive improvement in maintainability and testability
 
 **Progress:**
 
 - ✅ Extracted Bitcoin helpers (coinbase building, merkle root, BIP34, bech32) to `src/bitcoin/helpers.rs` (493 lines extracted)
+- ✅ Extracted print helpers to `src/app/output.rs` (111 lines)
+- ✅ Extracted Bitcoin Core log tailing to `src/app/bitcoin_log.rs` (126 lines)
 
-**Current State:**
-- Single monolithic async block containing all application logic
-- Mixed concerns: CLI, config, mining, stratum, TUI, web API
-- Deeply nested `select!` macro with 6+ branches
-- State mutations scattered throughout
-
-**Proposed Structure:**
+**Current Structure:**
 
 ```text
 src/
-├── main.rs                    # ~100 lines - entry point only
+├── main.rs                    # 2,136 lines - still large
 ├── app/
-│   ├── mod.rs                 # MiningApplication struct
-│   ├── mining_coordinator.rs  # CPU/GPU mining orchestration
-│   ├── pool_coordinator.rs    # Stratum connection management
-│   ├── bitcoin_coordinator.rs # Bitcoin Core lifecycle
-│   ├── stats_reporter.rs      # Stats collection and reporting
-│   └── event_loop.rs          # Main select! loop
+│   ├── mod.rs                 # Module re-exports
+│   ├── output.rs              # Print helper functions (111 lines)
+│   └── bitcoin_log.rs         # Bitcoin Core log tailing (126 lines)
 ```
 
-**Tasks:**
+**Remaining work (lower priority):**
+
 - [ ] Create `MiningApplication` struct to hold shared state
 - [ ] Extract mining coordination into `mining_coordinator.rs`
 - [ ] Extract pool/stratum logic into `pool_coordinator.rs`
@@ -63,6 +57,8 @@ src/
 - [ ] Extract stats reporting into `stats_reporter.rs`
 - [ ] Create event-driven architecture with channels
 - [ ] Add integration tests for each coordinator
+
+**Note:** The remaining tasks require significant architectural changes (event-driven architecture) and are deferred to P2/Architecture improvements.
 
 ---
 
