@@ -1554,8 +1554,17 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         }
     }
 
-    // For non-managed mode, check sync status
+    // For non-managed mode, connect to external bitcoind and check sync status
     if !cfg.bitcoind.managed {
+        // Connect to external RPC
+        bitcoind.connect(
+            &cfg.bitcoind.host,
+            cfg.bitcoind.rpc_port,
+            cfg.bitcoind.rpc_user.as_deref().unwrap_or(""),
+            cfg.bitcoind.rpc_password.as_deref().unwrap_or(""),
+        );
+        info!("Connecting to external Bitcoin Core at {}:{}", cfg.bitcoind.host, cfg.bitcoind.rpc_port);
+
         loop {
             match bitcoind.get_sync_status().await {
                 Ok(status) if status.synced => {

@@ -149,6 +149,18 @@ impl BitcoindManager {
         self
     }
 
+    /// Connect to an external Bitcoin Core RPC (without managing the process)
+    /// Use this when connecting to an already-running bitcoind
+    pub fn connect(&mut self, host: &str, port: u16, user: &str, password: &str) {
+        self.rpc_port = port;
+        self.rpc_user = user.to_string();
+        self.rpc_password = password.to_string();
+        self.rpc = Some(
+            BitcoinRpc::new(host, port)
+                .with_auth(user, password)
+        );
+    }
+
     /// Check if Bitcoin Core is installed
     pub fn is_installed(&self) -> bool {
         self.bitcoind_path().exists()
