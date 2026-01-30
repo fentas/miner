@@ -495,7 +495,7 @@ mod tests {
         let block_hex = job.build_block(0x12345678);
         assert!(block_hex.is_some());
 
-        let bytes = hex::decode(&block_hex.unwrap()).unwrap();
+        let bytes = hex::decode(block_hex.unwrap()).unwrap();
 
         // Check tx count (should be 3: coinbase + 2)
         assert_eq!(bytes[80], 3);

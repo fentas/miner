@@ -2556,7 +2556,7 @@ mod tests {
 
         // Find the height in the transaction
         let tx_str = hex::encode(&tx);
-        let height_hex = hex::encode(&height_bytes);
+        let height_hex = hex::encode(height_bytes);
         assert!(tx_str.contains(&height_hex), "Transaction should contain BIP34 height");
     }
 
@@ -2597,7 +2597,7 @@ mod tests {
         hasher.update(&coinbase);
         let first = hasher.finalize();
         let mut hasher = Sha256::new();
-        hasher.update(&first);
+        hasher.update(first);
         let expected: [u8; 32] = hasher.finalize().into();
 
         assert_eq!(merkle_root, expected);

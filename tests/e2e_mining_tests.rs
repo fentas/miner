@@ -22,6 +22,7 @@ struct MockRpcServer {
     running: Arc<AtomicBool>,
     blocks_submitted: Arc<AtomicU64>,
     submitted_blocks: Arc<Mutex<Vec<String>>>,
+    #[allow(dead_code)] // Reserved for future tests
     block_height: Arc<AtomicU64>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
@@ -344,7 +345,7 @@ fn e2e_mine_multiple_blocks() {
             // Easy target
             let mut target = [0x7f; 32];
             target[0] = 0x7f;
-            for i in 1..32 { target[i] = 0xff; }
+            target[1..32].fill(0xff);
             job.target = target;
             job.network_target = Some(target);
             job.merkle_root_override = Some([0x22; 32]);

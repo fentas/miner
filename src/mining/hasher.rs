@@ -317,10 +317,10 @@ mod tests {
 
         // Prepare twice with same prefix - should not recompute
         hasher.prepare_midstate(&prefix);
-        let hash1 = hasher.hash_with_midstate(&[0xab; 80].into());
+        let hash1 = hasher.hash_with_midstate(&[0xab; 80]);
 
         hasher.prepare_midstate(&prefix);
-        let hash2 = hasher.hash_with_midstate(&[0xab; 80].into());
+        let hash2 = hasher.hash_with_midstate(&[0xab; 80]);
 
         assert_eq!(hash1, hash2);
     }

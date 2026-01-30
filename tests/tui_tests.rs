@@ -9,7 +9,8 @@ fn test_tui_integration_placeholder() {
     // TUI state is tested via unit tests since it requires internal access.
     // This file serves as a placeholder for future integration tests
     // that might test TUI rendering or interaction patterns.
-    assert!(true);
+    // Verify the btcminer library crate is accessible
+    let _version = env!("CARGO_PKG_VERSION");
 }
 
 // Integration tests that could be added when TuiState is exposed:
