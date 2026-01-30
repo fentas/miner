@@ -383,6 +383,13 @@ pub struct Job {
 }
 ```
 
+#### Validation
+
+- `prev_hash` must be exactly 32 bytes
+- Each `merkle_branch` must be exactly 32 bytes
+- All hex values validated before parsing
+- 64KB response size limit (DoS protection)
+
 ### 8. Stratum V2 Client (`stratum/v2.rs`)
 
 Binary protocol for efficient communication.
@@ -425,10 +432,11 @@ impl BitcoinRpc {
 Handles automatic Bitcoin Core lifecycle:
 
 - Download and install Bitcoin Core
-- Generate secure RPC credentials
+- Generate cryptographically secure RPC credentials (via `getrandom`)
 - Start/stop daemon
 - Monitor sync status
 - Configure pruning for disk space efficiency
+- AssumeUTXO fast sync support
 
 ### 10. Web Interface (`web/mod.rs`)
 
@@ -627,14 +635,24 @@ cargo test -- --nocapture
 
 ### Test Coverage
 
+Total: 391+ tests
+
 | Module | Tests |
 |--------|-------|
-| `config` | Pool presets, validation |
-| `mining::job` | Hash comparison |
+| `config` | Pool presets, validation, port ranges, auth |
+| `mining::job` | Hash comparison, block building |
 | `mining::hasher` | SHA-256d correctness |
 | `mining::sha256_simd` | SIMD detection, output verification |
+| `mining::worker` | Extranonce generation |
+| `mining::gpu_worker` | GPU coordination |
+| `stratum::v1` | Job parsing, validation, notifications |
+| `stratum::v2` | Channel handling, job parsing |
+| `bitcoin::rpc` | Sync status, block templates, error handling |
+| `bitcoin::manager` | Config, paths, lifecycle |
 | `gpu` | Device enumeration (when feature enabled) |
-| `stats` | Hashrate calculation |
+| `stats` | Hashrate calculation, edge cases |
+| `web` | API endpoints, WebSocket |
+| `tui` | State management, widgets |
 
 ## Build Options
 
