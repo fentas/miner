@@ -25,6 +25,10 @@ pub struct Job {
     pub clean_jobs: bool,
     /// Pre-computed merkle root (for solo mining, bypasses coinbase computation)
     pub merkle_root_override: Option<[u8; 32]>,
+    /// Full coinbase transaction (for solo block submission)
+    pub coinbase_tx: Option<Vec<u8>>,
+    /// Other transactions in the block (for solo block submission)
+    pub transactions: Option<Vec<Vec<u8>>>,
 }
 
 impl Job {
@@ -43,7 +47,36 @@ impl Job {
             network_target: None,
             clean_jobs: false,
             merkle_root_override: None,
+            coinbase_tx: None,
+            transactions: None,
         }
+    }
+
+    /// Build a complete block for submission (header + transactions)
+    /// Returns hex-encoded block data suitable for submitblock RPC
+    pub fn build_block(&self, nonce: u32) -> Option<String> {
+        let coinbase = self.coinbase_tx.as_ref()?;
+        let txs = self.transactions.as_ref()?;
+
+        let mut block_data = Vec::new();
+
+        // Block header (80 bytes)
+        let header = self.build_header(&[], &[], nonce);
+        block_data.extend_from_slice(&header);
+
+        // Transaction count (varint)
+        let tx_count = 1 + txs.len(); // coinbase + other txs
+        encode_varint(tx_count as u64, &mut block_data);
+
+        // Coinbase transaction
+        block_data.extend_from_slice(coinbase);
+
+        // Other transactions
+        for tx in txs {
+            block_data.extend_from_slice(tx);
+        }
+
+        Some(hex::encode(block_data))
     }
 
     /// Build the block header for a given nonce and extranonce
@@ -144,6 +177,22 @@ fn compare_hash_to_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
         }
     }
     true // Equal
+}
+
+/// Encode a number as a Bitcoin varint
+fn encode_varint(value: u64, out: &mut Vec<u8>) {
+    if value < 0xfd {
+        out.push(value as u8);
+    } else if value <= 0xffff {
+        out.push(0xfd);
+        out.extend_from_slice(&(value as u16).to_le_bytes());
+    } else if value <= 0xffffffff {
+        out.push(0xfe);
+        out.extend_from_slice(&(value as u32).to_le_bytes());
+    } else {
+        out.push(0xff);
+        out.extend_from_slice(&value.to_le_bytes());
+    }
 }
 
 /// Convert difficulty to target bytes
@@ -317,5 +366,132 @@ mod tests {
 
         let merkle_root = job.compute_merkle_root(&[0xAA], &[0xBB]);
         assert_eq!(merkle_root.len(), 32);
+    }
+
+    #[test]
+    fn test_encode_varint_small() {
+        let mut out = Vec::new();
+        super::encode_varint(0, &mut out);
+        assert_eq!(out, vec![0x00]);
+
+        out.clear();
+        super::encode_varint(100, &mut out);
+        assert_eq!(out, vec![100]);
+
+        out.clear();
+        super::encode_varint(252, &mut out);
+        assert_eq!(out, vec![252]);
+    }
+
+    #[test]
+    fn test_encode_varint_two_bytes() {
+        let mut out = Vec::new();
+        super::encode_varint(253, &mut out);
+        assert_eq!(out, vec![0xfd, 253, 0]);
+
+        out.clear();
+        super::encode_varint(0xffff, &mut out);
+        assert_eq!(out, vec![0xfd, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn test_encode_varint_four_bytes() {
+        let mut out = Vec::new();
+        super::encode_varint(0x10000, &mut out);
+        assert_eq!(out, vec![0xfe, 0x00, 0x00, 0x01, 0x00]);
+
+        out.clear();
+        super::encode_varint(0xffffffff, &mut out);
+        assert_eq!(out, vec![0xfe, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn test_build_block_missing_data() {
+        let job = Job::new("test".to_string());
+        // Without coinbase_tx and transactions, should return None
+        assert!(job.build_block(0).is_none());
+    }
+
+    #[test]
+    fn test_build_block_with_data() {
+        let mut job = Job::new("test".to_string());
+        job.version = 0x20000000;
+        job.prev_hash = [0x11; 32];
+        job.nbits = 0x1d00ffff;
+        job.ntime = 0x12345678;
+        job.merkle_root_override = Some([0x22; 32]);
+        job.coinbase_tx = Some(vec![0x01, 0x00, 0x00, 0x00]); // Minimal tx
+        job.transactions = Some(vec![]); // No other transactions
+
+        let block_hex = job.build_block(0xDEADBEEF);
+        assert!(block_hex.is_some());
+
+        let hex = block_hex.unwrap();
+        // Should be at least header (80 bytes * 2 hex chars) + varint (2) + coinbase
+        assert!(hex.len() >= 160 + 2 + 8);
+
+        // Decode and verify structure
+        let bytes = hex::decode(&hex).unwrap();
+
+        // Check header (80 bytes)
+        assert!(bytes.len() >= 80);
+
+        // Check version
+        assert_eq!(&bytes[0..4], &0x20000000u32.to_le_bytes());
+
+        // Check nonce at offset 76
+        assert_eq!(&bytes[76..80], &0xDEADBEEFu32.to_le_bytes());
+
+        // Check varint tx count (should be 1 for just coinbase)
+        assert_eq!(bytes[80], 1);
+    }
+
+    #[test]
+    fn test_build_block_with_transactions() {
+        let mut job = Job::new("test".to_string());
+        job.version = 0x20000000;
+        job.prev_hash = [0x11; 32];
+        job.nbits = 0x1d00ffff;
+        job.ntime = 0x12345678;
+        job.merkle_root_override = Some([0x22; 32]);
+        job.coinbase_tx = Some(vec![0x01, 0x00, 0x00, 0x00]); // Minimal coinbase
+        job.transactions = Some(vec![
+            vec![0x02, 0x00, 0x00, 0x00], // tx1
+            vec![0x03, 0x00, 0x00, 0x00], // tx2
+        ]);
+
+        let block_hex = job.build_block(0x12345678);
+        assert!(block_hex.is_some());
+
+        let bytes = hex::decode(&block_hex.unwrap()).unwrap();
+
+        // Check tx count (should be 3: coinbase + 2)
+        assert_eq!(bytes[80], 3);
+
+        // Check coinbase follows
+        assert_eq!(&bytes[81..85], &[0x01, 0x00, 0x00, 0x00]);
+
+        // Check tx1 follows coinbase
+        assert_eq!(&bytes[85..89], &[0x02, 0x00, 0x00, 0x00]);
+
+        // Check tx2 follows tx1
+        assert_eq!(&bytes[89..93], &[0x03, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_build_block_deterministic() {
+        let mut job = Job::new("test".to_string());
+        job.version = 0x20000000;
+        job.merkle_root_override = Some([0x33; 32]);
+        job.coinbase_tx = Some(vec![0xAA, 0xBB, 0xCC]);
+        job.transactions = Some(vec![]);
+
+        let block1 = job.build_block(0x11111111);
+        let block2 = job.build_block(0x11111111);
+
+        assert_eq!(block1, block2, "Same nonce should produce same block");
+
+        let block3 = job.build_block(0x22222222);
+        assert_ne!(block1, block3, "Different nonce should produce different block");
     }
 }

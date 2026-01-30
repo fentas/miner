@@ -586,7 +586,7 @@ async fn run_solo_mode_with_tui(
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::new(thread_count);
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
@@ -628,6 +628,7 @@ async fn run_solo_mode_with_tui(
     let mut hashrate_calc = HashrateCalculator::new(60);
     let stats_interval = Duration::from_millis(500);
     let mut last_stats = Instant::now();
+    let mut current_job: Option<mining::Job> = None;
 
     // Wait for first valid block template before starting mining
     tui_state.log_info("Waiting for block template...");
@@ -680,6 +681,14 @@ async fn run_solo_mode_with_tui(
                 let merkle_root = compute_merkle_root(&coinbase_tx, &template.transactions);
                 job.merkle_root_override = Some(merkle_root);
 
+                // Store full block data for block submission
+                job.coinbase_tx = Some(coinbase_tx);
+                job.transactions = Some(
+                    template.transactions.iter()
+                        .filter_map(|tx_hex| hex::decode(tx_hex).ok())
+                        .collect()
+                );
+
                 job.clean_jobs = true;
                 coordinator.update_job(job.clone());
                 coordinator.start();
@@ -691,6 +700,9 @@ async fn run_solo_mode_with_tui(
                 }
 
                 tui_state.log_success("Mining started");
+
+                // Store initial job for block submission
+                current_job = Some(job);
                 break;
             }
             Err(e) => {
@@ -795,9 +807,18 @@ async fn run_solo_mode_with_tui(
             static LOGGED_NO_PEERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             LOGGED_NO_PEERS.store(false, std::sync::atomic::Ordering::Relaxed);
 
-            // Ensure mining is running (if not paused)
+            // Ensure mining is running (if not paused AND not stopped by idle mode)
+            // Only restart CPU if idle mode allows it
             if !tui_state.is_paused() {
-                coordinator.start();
+                let should_cpu_run = if cfg.idle.enabled && cfg.idle.cpu && cfg.idle.pause_on_active {
+                    // With pause_on_active, CPU runs only when system IS idle
+                    tui_state.is_idle_active()
+                } else {
+                    true
+                };
+                if should_cpu_run {
+                    coordinator.start();
+                }
             }
 
             // Get block template
@@ -851,6 +872,14 @@ async fn run_solo_mode_with_tui(
                         let merkle_root = compute_merkle_root(&coinbase_tx, &template.transactions);
                         job.merkle_root_override = Some(merkle_root);
 
+                        // Store full block data for block submission
+                        job.coinbase_tx = Some(coinbase_tx);
+                        job.transactions = Some(
+                            template.transactions.iter()
+                                .filter_map(|tx_hex| hex::decode(tx_hex).ok())
+                                .collect()
+                        );
+
                         job.clean_jobs = true;
                         coordinator.update_job(job.clone());
 
@@ -859,6 +888,9 @@ async fn run_solo_mode_with_tui(
                             gpu_coord.update_job(&job);
                         }
 
+                        // Store current job for block submission
+                        current_job = Some(job);
+
                         last_template_height = template.height as u64;
                         tui_state.log_info(format!("New block template: height {}", template.height));
                     }
@@ -866,6 +898,41 @@ async fn run_solo_mode_with_tui(
                 Err(e) => {
                     // Log all errors for debugging
                     tui_state.log_warn(format!("Block template error: {}", e));
+                }
+            }
+        }
+
+        // Check for found blocks and submit
+        while let Some(share) = coordinator.try_recv_share() {
+            if let Some(ref job) = current_job {
+                // Check if this share meets the network target (is a valid block)
+                if job.meets_network_target(&share.hash) {
+                    tui_state.log_success("🎉 BLOCK FOUND! Submitting to network...");
+                    if cfg.logging.system_bell {
+                        // Triple bell for block found!
+                        print!("\x07\x07\x07");
+                    }
+
+                    // Build the full block and submit
+                    if let Some(block_hex) = job.build_block(share.nonce) {
+                        let rpc = bitcoind.rpc().unwrap();
+                        match rpc.submit_block(&block_hex).await {
+                            Ok(()) => {
+                                coordinator.stats().accept_share();
+                                tui_state.record_share();
+                                tui_state.log_success("✅ BLOCK ACCEPTED BY NETWORK!");
+                                // Log the block hash
+                                let hash_hex = hex::encode(share.hash);
+                                tui_state.log_success(format!("Block hash: {}", hash_hex));
+                            }
+                            Err(e) => {
+                                coordinator.stats().reject_share();
+                                tui_state.log_error(format!("❌ Block rejected: {}", e));
+                            }
+                        }
+                    } else {
+                        tui_state.log_error("Failed to build block data");
+                    }
                 }
             }
         }
@@ -1545,7 +1612,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Create mining coordinator (but don't start yet)
     let thread_count = cfg.effective_threads();
-    let coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::new(thread_count);
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
@@ -1579,6 +1646,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     let start_time = Instant::now();
     let stats_interval = Duration::from_secs(cfg.logging.stats_interval as u64);
     let mut last_stats = Instant::now();
+    let mut current_job: Option<mining::Job> = None;
 
     // Wait for first valid block template before starting mining
     println!(
@@ -1627,6 +1695,14 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                 let merkle_root = compute_merkle_root(&coinbase_tx, &template.transactions);
                 job.merkle_root_override = Some(merkle_root);
 
+                // Store full block data for block submission
+                job.coinbase_tx = Some(coinbase_tx);
+                job.transactions = Some(
+                    template.transactions.iter()
+                        .filter_map(|tx_hex| hex::decode(tx_hex).ok())
+                        .collect()
+                );
+
                 job.clean_jobs = true;
                 coordinator.update_job(job.clone());
                 coordinator.start();
@@ -1636,6 +1712,9 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                     gpu_coord.update_job(&job);
                     gpu_coord.start();
                 }
+
+                // Store initial job for block submission
+                current_job = Some(job);
 
                 print_mining_started();
                 break;
@@ -1753,6 +1832,14 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
             let merkle_root = compute_merkle_root(&coinbase_tx, &template.transactions);
             job.merkle_root_override = Some(merkle_root);
 
+            // Store full block data for block submission
+            job.coinbase_tx = Some(coinbase_tx);
+            job.transactions = Some(
+                template.transactions.iter()
+                    .filter_map(|tx_hex| hex::decode(tx_hex).ok())
+                    .collect()
+            );
+
             job.clean_jobs = true;
             coordinator.update_job(job.clone());
 
@@ -1761,8 +1848,44 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                 gpu_coord.update_job(&job);
             }
 
+            // Store current job for block submission
+            current_job = Some(job);
+
             last_template_height = template.height as u64;
             info!("New block template: height {}", template.height);
+        }
+
+        // Check for found blocks and submit
+        while let Some(share) = coordinator.try_recv_share() {
+            if let Some(ref job) = current_job {
+                // Check if this share meets the network target (is a valid block)
+                if job.meets_network_target(&share.hash) {
+                    println!("\n{}", "🎉 BLOCK FOUND! Submitting to network...".bright_green().bold());
+                    if cfg.logging.system_bell {
+                        // Triple bell for block found!
+                        print!("\x07\x07\x07");
+                    }
+
+                    // Build the full block and submit
+                    if let Some(block_hex) = job.build_block(share.nonce) {
+                        match rpc.submit_block(&block_hex).await {
+                            Ok(()) => {
+                                coordinator.stats().accept_share();
+                                println!("{}", "✅ BLOCK ACCEPTED BY NETWORK!".bright_green().bold());
+                                // Log the block hash
+                                let hash_hex = hex::encode(share.hash);
+                                println!("{} {}", "Block hash:".bright_white(), hash_hex.bright_cyan());
+                            }
+                            Err(e) => {
+                                coordinator.stats().reject_share();
+                                println!("{} {}", "❌ Block rejected:".bright_red().bold(), e);
+                            }
+                        }
+                    } else {
+                        error!("Failed to build block data");
+                    }
+                }
+            }
         }
 
         // Print stats periodically

@@ -36,12 +36,16 @@ threads = 0
 # Enable GPU mining (requires CUDA/OpenCL build)
 enable_gpu = false
 
-# GPU devices (comma-separated, empty = all)
-# gpu_devices = [0, 1, 2]
+# GPU devices to use for mining (empty = all available)
+# IMPORTANT: Onboard/integrated GPUs (iGPU/APU) share memory bandwidth with CPU
+# This can reduce CPU hashrate by 30-50% when both mine simultaneously
+# Recommendation: Exclude onboard GPUs if you have external GPUs
+# Example: [0, 1] uses only GPUs 0 and 1, excluding onboard GPU #2
+# gpu_devices = [0, 1]
 
 # GPU intensity (1-100, default 100)
 # Higher = more GPU utilization, may affect system responsiveness
-# gpu_intensity = 100
+gpu_intensity = 10
 
 # GPU work group size (0 = auto, 64-1024)
 # Higher values may improve performance on modern GPUs (RDNA2+)
@@ -166,15 +170,40 @@ timeout = 900
 pause_on_active = true
 
 # Idle CPU mining (true = CPU follows idle state)
-# CPU mines when idle, pauses when user is active
+# When true: CPU mines when idle, pauses when user is active
 cpu = true
 
 # Idle GPU mining (true = GPU follows idle state)
+# Set to false to make GPU always run regardless of idle state
+# Recommended: false if you have external GPUs (let them run 24/7)
+#              true if you only have onboard GPU (save power when active)
 gpu = true
 
 # Inverse GPU mode: GPU runs when ACTIVE, pauses when IDLE
-# Useful because GPU reduces CPU hashrate - run GPU only when you're using the PC
+# Useful because onboard/integrated GPUs reduce CPU hashrate significantly
+# With gpu_inverse=true: GPU runs only when you're using the PC
 # gpu_inverse = false
 
 # Specific GPU devices to idle (empty = all GPUs follow idle setting)
 # gpu_devices = [0, 1]
+
+# ============================================
+# IDLE MODE EXAMPLES
+# ============================================
+#
+# Example 1: External GPU always on, CPU only when idle
+#   cpu = true
+#   gpu = false    # GPU doesn't follow idle, always runs
+#   pause_on_active = true
+#
+# Example 2: Both CPU and GPU only when idle
+#   cpu = true
+#   gpu = true
+#   gpu_inverse = false
+#   pause_on_active = true
+#
+# Example 3: Onboard GPU when active (for display), CPU when idle
+#   cpu = true
+#   gpu = true
+#   gpu_inverse = true  # GPU runs when active, stops when idle
+#   pause_on_active = true
