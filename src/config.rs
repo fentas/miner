@@ -99,6 +99,10 @@ pub struct MiningConfig {
     pub enable_cpu: bool,
     #[serde(default)]
     pub threads: usize,
+    /// CPU batch size as power of 2 (e.g., 18 = 2^18 = 256K nonces per batch)
+    /// Range: 16-22, default 18. Higher = better throughput but slower job response
+    #[serde(default = "default_cpu_batch_exp")]
+    pub cpu_batch_exp: u8,
     #[serde(default)]
     pub enable_gpu: bool,
     #[serde(default)]
@@ -123,6 +127,10 @@ fn default_gpu_intensity() -> u8 {
     100  // Maximum intensity for best GPU performance
 }
 
+fn default_cpu_batch_exp() -> u8 {
+    18  // 2^18 = 256K nonces per batch (good balance of throughput vs responsiveness)
+}
+
 fn default_gpu_batch_exp() -> u8 {
     25  // 2^25 = 32M nonces per batch
 }
@@ -132,6 +140,7 @@ impl Default for MiningConfig {
         Self {
             enable_cpu: true,
             threads: 0,
+            cpu_batch_exp: 18,      // 256K nonces per batch
             enable_gpu: false,
             gpu_devices: vec![],
             gpu_intensity: 100,

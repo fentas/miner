@@ -106,6 +106,7 @@ payout_address = "bc1q..."     # Your Bitcoin address (required)
 [mining]
 enable_cpu = true
 threads = 0                    # 0 = auto-detect
+cpu_batch_exp = 18             # Batch size: 2^18 = 256K nonces
 enable_gpu = false             # Enable OpenCL/CUDA
 gpu_devices = []               # Specific GPU IDs or empty for all
 gpu_intensity = 100            # GPU intensity (1-100)

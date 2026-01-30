@@ -119,6 +119,11 @@ pub struct Share {
 impl Coordinator {
     /// Create a new mining coordinator
     pub fn new(thread_count: usize) -> Self {
+        Self::with_batch_size(thread_count, 1 << 18) // Default: 256K nonces
+    }
+
+    /// Create a new mining coordinator with custom batch size
+    pub fn with_batch_size(thread_count: usize, batch_size: u32) -> Self {
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
         let (job_tx, _job_rx) = watch::channel(None);
@@ -132,6 +137,7 @@ impl Coordinator {
                 Arc::clone(&running),
                 job_tx.subscribe(),
                 share_tx.clone(),
+                batch_size,
             );
             workers.push(handle);
         }

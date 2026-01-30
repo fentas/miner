@@ -31,6 +31,7 @@ pub struct Worker {
     hasher: Hasher,
     extranonce1: Vec<u8>,
     extranonce2_size: usize,
+    batch_size: u32,
 }
 
 impl Worker {
@@ -41,6 +42,7 @@ impl Worker {
         running: Arc<AtomicBool>,
         job_rx: watch::Receiver<Option<Arc<Job>>>,
         share_tx: mpsc::Sender<Share>,
+        batch_size: u32,
     ) -> WorkerHandle {
         let handle = thread::Builder::new()
             .name(format!("miner-{}", id))
@@ -54,6 +56,7 @@ impl Worker {
                     hasher: Hasher::new(),
                     extranonce1: vec![0u8; 4],
                     extranonce2_size: 4,
+                    batch_size,
                 };
                 worker.run();
             })
@@ -73,7 +76,7 @@ impl Worker {
 
     /// Main mining loop
     fn run(&mut self) {
-        const BATCH_SIZE: u32 = 65536; // Hash batch before checking for new job
+        let batch_size = self.batch_size;
 
         loop {
             // Wait for running flag to be set (coordinator.start() called)
@@ -114,12 +117,12 @@ impl Worker {
                 let result = self.hasher.hash_nonce_range(
                     &header_prefix,
                     nonce,
-                    BATCH_SIZE,
+                    batch_size,
                     &job.target,
                 );
 
                 // Update stats
-                self.stats.add_hashes(BATCH_SIZE as u64);
+                self.stats.add_hashes(batch_size as u64);
 
                 // Check for share
                 if let Some((found_nonce, hash)) = result {
@@ -141,7 +144,7 @@ impl Worker {
                 }
 
                 // Advance nonce
-                nonce = nonce.wrapping_add(BATCH_SIZE);
+                nonce = nonce.wrapping_add(batch_size);
                 if nonce < nonce_start {
                     // Wrapped around, need new extranonce2
                     break;
@@ -232,6 +235,7 @@ mod tests {
             hasher: Hasher::new(),
             extranonce1: vec![0u8; 4],
             extranonce2_size: 8,
+            batch_size: 65536,
         };
 
         let extranonce2 = worker.generate_extranonce2();
@@ -260,6 +264,7 @@ mod tests {
             hasher: Hasher::new(),
             extranonce1: vec![0u8; 4],
             extranonce2_size: 2,
+            batch_size: 65536,
         };
 
         let extranonce2 = worker.generate_extranonce2();
@@ -282,6 +287,7 @@ mod tests {
             hasher: Hasher::new(),
             extranonce1: vec![],
             extranonce2_size: 4,
+            batch_size: 65536,
         };
 
         let new_extranonce1 = vec![0xAA, 0xBB, 0xCC, 0xDD];
@@ -309,6 +315,7 @@ mod tests {
             hasher: Hasher::new(),
             extranonce1: vec![0u8; 4],
             extranonce2_size: 4,
+            batch_size: 65536,
         };
 
         let worker2 = Worker {
@@ -320,6 +327,7 @@ mod tests {
             hasher: Hasher::new(),
             extranonce1: vec![0u8; 4],
             extranonce2_size: 4,
+            batch_size: 65536,
         };
 
         let en1 = worker1.generate_extranonce2();

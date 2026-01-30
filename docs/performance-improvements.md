@@ -9,8 +9,8 @@ This document tracks performance optimizations implemented in btcminer, with bef
 | SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd.rs` |
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
 | Arc<Job> (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
-| Fix Busy-Wait | ⏳ Pending | ~2-5% | `src/mining/worker.rs` |
-| Configurable Batch Size | ⏳ Pending | ~1-3% | `src/mining/worker.rs`, `config.rs` |
+| Configurable Batch Size | ✅ Completed | ~4x (256K default) | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
+| Fix Busy-Wait | ⏳ Low Priority | ~2-5% | `src/mining/worker.rs` |
 | AVX2 8-way Hashing | ⏳ Pending | ~2-4x | `src/mining/sha256_simd.rs` |
 | AVX512 16-way Hashing | ⏳ Pending | ~2-4x | `src/mining/sha256_simd.rs` |
 
@@ -82,9 +82,31 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
+### 4. Configurable Batch Size (2026-01-30)
+
+**Problem:** Fixed batch size of 65,536 nonces per batch was suboptimal. Profiling showed larger batches significantly improve throughput.
+
+**Solution:** Made batch size configurable via `cpu_batch_exp` in config (default: 18 = 256K nonces). Added `Coordinator::with_batch_size()` constructor.
+
+**Batch Size Profiling Results (single thread):**
+
+| Batch Size | Hashrate   |
+|------------|------------|
+| 65,536     | 820 GH/s   |
+| 131,072    | 1.63 TH/s  |
+| 262,144    | 3.29 TH/s  |
+| 524,288    | 6.51 TH/s  |
+| 1,048,576  | 12.87 TH/s |
+
+*Note: Actual improvement depends on workload. Larger batches have higher throughput but slower job response time. Default 256K is a good balance.*
+
+**Files changed:** `src/config.rs`, `src/mining/mod.rs`, `src/mining/worker.rs`
+
+---
+
 ## Pending Optimizations
 
-### 4. Fix Busy-Wait on Startup
+### 5. Fix Busy-Wait on Startup (Low Priority)
 
 **Problem:** Workers poll every 10ms with `thread::sleep` waiting for first job.
 
@@ -92,19 +114,7 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 **Solution:** Use condition variables or proper channel blocking.
 
-**Expected improvement:** 2-5% (reduces CPU overhead during job transitions)
-
----
-
-### 5. Configurable Batch Size
-
-**Problem:** Fixed batch size of 65,536 may not be optimal for all hardware.
-
-**Location:** `src/mining/worker.rs:76`
-
-**Solution:** Add CLI parameter and auto-detect based on CPU count.
-
-**Expected improvement:** 1-3% (hardware-dependent)
+**Expected improvement:** Reduces idle CPU usage, not hashrate improvement.
 
 ---
 

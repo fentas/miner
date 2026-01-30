@@ -33,6 +33,11 @@ enable_cpu = true
 # Number of CPU threads (0 = auto-detect all cores)
 threads = 0
 
+# CPU batch size exponent (16-22, default 18 = 256K nonces)
+# Higher = better throughput but slower response to new jobs
+# 16 = 64K, 17 = 128K, 18 = 256K, 19 = 512K, 20 = 1M
+# cpu_batch_exp = 18
+
 # Enable GPU mining (requires CUDA/OpenCL build)
 enable_gpu = false
 
