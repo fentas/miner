@@ -209,6 +209,11 @@ fn test_stats_update_serialization() {
         mining_paused: false,
         state: "running".to_string(),
         threads: 8,
+        block_height: 850000,
+        difficulty: 95.67e12,
+        est_time_to_share: 3600.0,
+        gpu_enabled: false,
+        gpu_hashrate: 0.0,
     };
 
     let json = serde_json::to_string(&update).unwrap();
@@ -227,6 +232,9 @@ fn test_stats_update_serialization() {
     assert!(json.contains("\"mining_paused\":false"));
     assert!(json.contains("\"state\":\"running\""));
     assert!(json.contains("\"threads\":8"));
+    assert!(json.contains("\"block_height\":850000"));
+    assert!(json.contains("\"difficulty\":"));
+    assert!(json.contains("\"gpu_enabled\":false"));
 }
 
 /// Test StatsUpdate clone
@@ -246,6 +254,11 @@ fn test_stats_update_clone() {
         mining_paused: true,
         state: "paused".to_string(),
         threads: 4,
+        block_height: 850000,
+        difficulty: 95.67e12,
+        est_time_to_share: 3600.0,
+        gpu_enabled: true,
+        gpu_hashrate: 50_000_000.0,
     };
 
     let cloned = update.clone();
@@ -254,6 +267,8 @@ fn test_stats_update_clone() {
     assert_eq!(cloned.hashrate_formatted, update.hashrate_formatted);
     assert_eq!(cloned.hashes, update.hashes);
     assert_eq!(cloned.shares_accepted, update.shares_accepted);
+    assert_eq!(cloned.block_height, update.block_height);
+    assert_eq!(cloned.gpu_enabled, update.gpu_enabled);
     assert_eq!(cloned.blocks_found, update.blocks_found);
     assert_eq!(cloned.mining_paused, update.mining_paused);
 }
@@ -364,6 +379,11 @@ fn test_hashrate_formatting() {
             mining_paused: false,
             state: "stopped".to_string(),
             threads: 0,
+            block_height: 0,
+            difficulty: 0.0,
+            est_time_to_share: 0.0,
+            gpu_enabled: false,
+            gpu_hashrate: 0.0,
         };
 
         assert_eq!(update.hashrate_formatted, expected_suffix,

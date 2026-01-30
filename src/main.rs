@@ -732,6 +732,31 @@ async fn run_solo_mode_with_tui(
             None
         };
 
+        // Initialize config snapshot for web state
+        let config_snapshot = web::ConfigSnapshot {
+            pool_preset: "solo".to_string(),
+            pool_address: "Bitcoin Network (direct)".to_string(),
+            payout_address: cfg.pool.payout_address.clone(),
+            enable_cpu: cfg.mining.enable_cpu,
+            cpu_threads: thread_count,
+            enable_gpu: cfg.mining.enable_gpu,
+            idle_enabled: cfg.idle.enabled,
+            idle_timeout: cfg.idle.timeout as u64,
+            bitcoind_enabled: true,
+            bitcoind_managed: cfg.bitcoind.managed,
+        };
+        state.set_config(config_snapshot).await;
+
+        // Initialize idle settings in web state
+        if cfg.idle.enabled {
+            state.set_idle_enabled(true, Some(cfg.idle.timeout as u64)).await;
+        }
+
+        // Initialize GPU stats if enabled
+        if cfg.mining.enable_gpu {
+            state.set_gpu_stats(true, 0.0, String::new()).await;
+        }
+
         tokio::spawn(async move {
             if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
                 tracing::error!("Web server error: {}", e);
@@ -880,6 +905,14 @@ async fn run_solo_mode_with_tui(
             let is_idle = monitor.is_idle();
             tui_state.set_idle_active(is_idle);
 
+            // Determine if we're mining because of idle state
+            let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
+
+            // Update web state with idle info (idle_time tracked elsewhere)
+            if let Some(ref state) = web_state {
+                state.update_idle(is_idle, 0, mining_due_to_idle).await;
+            }
+
             if !tui_state.is_paused() {
                 // CPU follows normal idle behavior (if cpu=true: mine when idle, pause when active)
                 if cfg.idle.cpu {
@@ -925,6 +958,11 @@ async fn run_solo_mode_with_tui(
         let peer_count = rpc.get_connection_count().await.unwrap_or(0);
         tui_state.set_peer_count(peer_count);
 
+        // Update web state with peer count
+        if let Some(ref state) = web_state {
+            state.set_network_info(peer_count as u32, 0.0).await;
+        }
+
         if peer_count == 0 {
             // No peers - pause mining and wait
             coordinator.stop();
@@ -958,9 +996,19 @@ async fn run_solo_mode_with_tui(
                     tui_state.set_block_height(template.height);
 
                     // Calculate and set difficulty from bits
-                    if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
-                        let difficulty = bits_to_difficulty(bits);
-                        tui_state.set_difficulty(difficulty as u64);
+                    let difficulty = if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                        let diff = bits_to_difficulty(bits);
+                        tui_state.set_difficulty(diff as u64);
+                        diff
+                    } else {
+                        0.0
+                    };
+
+                    // Update web state with block height and difficulty
+                    if let Some(ref state) = web_state {
+                        state.set_block_height(template.height).await;
+                        // In solo mining, pool_difficulty is the same as network difficulty
+                        state.set_difficulty(difficulty, difficulty).await;
                     }
 
                     let mut job = mining::Job::new(format!("solo-{}", template.height));
@@ -1092,10 +1140,15 @@ async fn run_solo_mode_with_tui(
                 0.0
             };
 
-            // Update web state with combined hashrate
+            // Update web state with combined hashrate and GPU stats
             if let Some(ref state) = web_state {
                 let total_hashrate = cpu_hashrate + gpu_hashrate;
                 state.update_stats(stats, total_hashrate).await;
+
+                // Update GPU stats in web state
+                if gpu_coordinator.is_some() {
+                    state.set_gpu_stats(true, gpu_hashrate, String::new()).await;
+                }
             }
 
             last_stats = Instant::now();
@@ -1298,6 +1351,26 @@ async fn run_pool_mode_with_tui(
             None
         };
 
+        // Initialize config snapshot for web state
+        let config_snapshot = web::ConfigSnapshot {
+            pool_preset: format!("{:?}", cfg.pool.preset),
+            pool_address: pool_address.clone(),
+            payout_address: cfg.pool.payout_address.clone(),
+            enable_cpu: cfg.mining.enable_cpu,
+            cpu_threads: thread_count,
+            enable_gpu: cfg.mining.enable_gpu,
+            idle_enabled: cfg.idle.enabled,
+            idle_timeout: cfg.idle.timeout as u64,
+            bitcoind_enabled: false,
+            bitcoind_managed: false,
+        };
+        state.set_config(config_snapshot).await;
+
+        // Initialize idle settings in web state
+        if cfg.idle.enabled {
+            state.set_idle_enabled(true, Some(cfg.idle.timeout as u64)).await;
+        }
+
         tokio::spawn(async move {
             if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
                 eprintln!("Web server error: {}", e);
@@ -1347,6 +1420,14 @@ async fn run_pool_mode_with_tui(
             let is_idle = monitor.is_idle();
             tui_state.set_idle_active(is_idle);
 
+            // Determine if we're mining because of idle state
+            let mining_due_to_idle = is_idle && cfg.idle.cpu && !tui_state.is_paused();
+
+            // Update web state with idle info
+            if let Some(ref state) = web_state {
+                state.update_idle(is_idle, 0, mining_due_to_idle).await;
+            }
+
             if !tui_state.is_paused() && cfg.idle.cpu {
                 if cfg.idle.pause_on_active && !is_idle {
                     coordinator.stop();
@@ -1371,6 +1452,10 @@ async fn run_pool_mode_with_tui(
             Ok(Some(stratum::Notification::Difficulty(diff))) => {
                 tui_state.set_difficulty(diff as u64);
                 tui_state.log_info(format!("Difficulty: {}", diff));
+                // Update web state with pool difficulty
+                if let Some(ref state) = web_state {
+                    state.set_difficulty(diff, diff).await;
+                }
             }
             Ok(None) => {}
             Err(e) => {
@@ -2218,6 +2303,26 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
             None
         };
 
+        // Initialize config snapshot for web state
+        let config_snapshot = web::ConfigSnapshot {
+            pool_preset: format!("{:?}", cfg.pool.preset),
+            pool_address: pool_address.clone(),
+            payout_address: cfg.pool.payout_address.clone(),
+            enable_cpu: cfg.mining.enable_cpu,
+            cpu_threads: thread_count,
+            enable_gpu: cfg.mining.enable_gpu,
+            idle_enabled: cfg.idle.enabled,
+            idle_timeout: cfg.idle.timeout as u64,
+            bitcoind_enabled: false,
+            bitcoind_managed: false,
+        };
+        state.set_config(config_snapshot).await;
+
+        // Initialize idle settings in web state
+        if cfg.idle.enabled {
+            state.set_idle_enabled(true, Some(cfg.idle.timeout as u64)).await;
+        }
+
         tokio::spawn(async move {
             if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
                 error!("Web server error: {}", e);
@@ -2241,6 +2346,15 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
         // Check idle state and update web state
         if let Some(ref monitor) = idle_monitor {
             let is_idle = monitor.is_idle();
+
+            // Determine if we're mining because of idle state
+            let mining_due_to_idle = is_idle && cfg.idle.cpu;
+
+            // Update web state with idle info
+            if let Some(ref state) = web_state {
+                state.update_idle(is_idle, 0, mining_due_to_idle).await;
+            }
+
             if cfg.idle.cpu {
                 if cfg.idle.pause_on_active && !is_idle {
                     coordinator.stop();
@@ -2268,6 +2382,10 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
                     "Difficulty:".bright_white(),
                     diff.to_string().bright_yellow()
                 );
+                // Update web state with pool difficulty
+                if let Some(ref state) = web_state {
+                    state.set_difficulty(diff, diff).await;
+                }
             }
             Ok(None) => {}
             Err(e) => {
