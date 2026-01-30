@@ -76,12 +76,16 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 Changed watch channel from `Option<Job>` to `Option<Arc<Job>>`. Workers now only increment Arc reference count instead of deep-cloning the Job struct with its Vec fields.
 
-### 6. [ ] Fix Busy-Wait on Startup (Low Priority)
+### 6. [x] Fix Busy-Wait with Condvar - COMPLETED
 
-**File:** `src/mining/worker.rs:81-83`
-**Current:** Polls every 10ms with `thread::sleep`
-**Fix:** Use condition variables or proper channel blocking
-**Note:** This reduces idle CPU usage, not hashrate. Low priority.
+**Files:** `src/mining/worker.rs`, `src/mining/mod.rs`
+**Result:** Replaced busy-wait polling with proper condition variable blocking
+
+Added `Notifier` struct using `std::sync::Condvar`:
+
+- Workers wait on condvar instead of polling with `thread::sleep`
+- Coordinator notifies workers when `start()`, `stop()`, or `update_job()` called
+- Reduces idle CPU usage significantly while maintaining responsiveness
 
 ### 7. [N/A] Avoid Merkle Recomputation Per Nonce
 

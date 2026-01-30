@@ -4,7 +4,7 @@ mod hasher;
 pub mod sha256_simd;
 pub mod gpu_worker;
 
-pub use worker::{Worker, WorkerHandle};
+pub use worker::{Worker, WorkerHandle, Notifier};
 pub use job::{Job, difficulty_to_target, hash_meets_target};
 pub use hasher::Hasher;
 pub use sha256_simd::{SimdLevel, Midstate};
@@ -103,6 +103,7 @@ pub struct Coordinator {
     workers: Vec<WorkerHandle>,
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
+    notifier: Arc<Notifier>,
     job_tx: watch::Sender<Option<Arc<Job>>>,
     share_rx: mpsc::Receiver<Share>,
 }
@@ -126,6 +127,7 @@ impl Coordinator {
     pub fn with_batch_size(thread_count: usize, batch_size: u32) -> Self {
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
+        let notifier = Arc::new(Notifier::new());
         let (job_tx, _job_rx) = watch::channel(None);
         let (share_tx, share_rx) = mpsc::channel(100);
 
@@ -136,6 +138,7 @@ impl Coordinator {
                 id,
                 Arc::clone(&stats),
                 Arc::clone(&running),
+                Arc::clone(&notifier),
                 job_tx.subscribe(),
                 share_tx.clone(),
                 batch_size,
@@ -161,6 +164,7 @@ impl Coordinator {
             workers,
             stats,
             running,
+            notifier,
             job_tx,
             share_rx,
         }
@@ -170,12 +174,16 @@ impl Coordinator {
     pub fn start(&self) {
         // Release ordering ensures job updates are visible to workers
         self.running.store(true, Ordering::Release);
+        // Wake all workers waiting on condvar
+        self.notifier.notify_all();
     }
 
     /// Stop mining
     pub fn stop(&self) {
         // Release ordering ensures workers see the stop before checking again
         self.running.store(false, Ordering::Release);
+        // Wake all workers so they can exit their wait loops
+        self.notifier.notify_all();
     }
 
     /// Check if mining is active
@@ -187,11 +195,15 @@ impl Coordinator {
     /// Update the current job
     pub fn update_job(&self, job: Job) {
         let _ = self.job_tx.send(Some(Arc::new(job)));
+        // Wake workers waiting for a job
+        self.notifier.notify_all();
     }
 
     /// Clear the current job
     pub fn clear_job(&self) {
         let _ = self.job_tx.send(None);
+        // Wake workers so they can see the job was cleared
+        self.notifier.notify_all();
     }
 
     /// Receive a found share (non-blocking)

@@ -8,12 +8,12 @@ This document tracks performance optimizations implemented in btcminer, with bef
 |--------------|--------|---------|---------------|
 | SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd.rs` |
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
-| Arc<Job> (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
+| Arc Job (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
 | Configurable Batch Size | ✅ Completed | ~4x (256K default) | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
 | AVX2 8-way Hashing | ✅ Completed | ~4-8x (fallback) | `src/mining/sha256_simd.rs` |
 | AVX512 16-way Hashing | ✅ Completed | ~2x over AVX2 | `src/mining/sha256_simd.rs` |
 | SIMD Level Config | ✅ Completed | N/A | `src/config.rs` |
-| Fix Busy-Wait | ⏳ Low Priority | N/A (CPU usage) | `src/mining/worker.rs` |
+| Fix Busy-Wait (Condvar) | ✅ Completed | N/A (CPU usage) | `src/mining/worker.rs`, `mod.rs` |
 
 ---
 
@@ -190,17 +190,36 @@ simd_level = "auto"  # auto, sha-ni, avx2, avx512, generic
 
 ---
 
+### 9. Fix Busy-Wait with Condvar (2026-01-30)
+
+**Problem:** Workers polled every 10ms with `thread::sleep` waiting for running flag or jobs, causing unnecessary CPU usage when idle.
+
+**Solution:** Added `Notifier` struct using `std::sync::Condvar` for proper blocking.
+
+**Implementation:**
+
+- Added `Notifier` struct with `Condvar + Mutex` pair
+- Workers now wait on condvar with 100ms timeout instead of busy-wait
+- Coordinator notifies workers when `start()`, `stop()`, or `update_job()` is called
+- Workers wake immediately on notification or after timeout to check state
+
+**Benchmark Results:**
+
+| Configuration | Before    | After     |
+|---------------|-----------|-----------|
+| 24 threads    | 3.22 TH/s | 3.46 TH/s |
+
+*Note: Slight variation is normal; the important result is no performance regression.*
+
+**Impact:** Significantly reduced CPU usage when miner is paused or waiting for jobs.
+
+**Files changed:** `src/mining/worker.rs`, `src/mining/mod.rs`
+
+---
+
 ## Pending Optimizations
 
-### 9. Fix Busy-Wait on Startup (Low Priority)
-
-**Problem:** Workers poll every 10ms with `thread::sleep` waiting for first job.
-
-**Location:** `src/mining/worker.rs:81-83`
-
-**Solution:** Use condition variables or proper channel blocking.
-
-**Expected improvement:** Reduces idle CPU usage, not hashrate improvement.
+None currently pending.
 
 ---
 

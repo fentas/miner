@@ -1,9 +1,50 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 use super::{Job, Share, Stats, Hasher};
+
+/// Notification mechanism for waking workers
+///
+/// Uses a condvar to allow workers to block instead of busy-waiting.
+/// Workers wait on the condvar with a timeout, waking immediately when
+/// notified or after the timeout to check for state changes.
+pub struct Notifier {
+    mutex: Mutex<()>,
+    condvar: Condvar,
+}
+
+impl Notifier {
+    pub fn new() -> Self {
+        Self {
+            mutex: Mutex::new(()),
+            condvar: Condvar::new(),
+        }
+    }
+
+    /// Wake all waiting workers
+    pub fn notify_all(&self) {
+        // Lock to ensure memory visibility, then notify
+        let _guard = self.mutex.lock().unwrap();
+        self.condvar.notify_all();
+    }
+
+    /// Wait for a notification or timeout
+    ///
+    /// Returns immediately if notified, otherwise waits up to `timeout`.
+    pub fn wait_timeout(&self, timeout: Duration) {
+        let guard = self.mutex.lock().unwrap();
+        let _ = self.condvar.wait_timeout(guard, timeout);
+    }
+}
+
+impl Default for Notifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Handle to a mining worker thread
 pub struct WorkerHandle {
@@ -26,6 +67,7 @@ pub struct Worker {
     id: usize,
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
+    notifier: Arc<Notifier>,
     job_rx: watch::Receiver<Option<Arc<Job>>>,
     share_tx: mpsc::Sender<Share>,
     hasher: Hasher,
@@ -42,6 +84,7 @@ impl Worker {
         id: usize,
         stats: Arc<Stats>,
         running: Arc<AtomicBool>,
+        notifier: Arc<Notifier>,
         job_rx: watch::Receiver<Option<Arc<Job>>>,
         share_tx: mpsc::Sender<Share>,
         batch_size: u32,
@@ -53,6 +96,7 @@ impl Worker {
                     id,
                     stats,
                     running,
+                    notifier,
                     job_rx,
                     share_tx,
                     hasher: Hasher::new(),
@@ -78,9 +122,9 @@ impl Worker {
 
         loop {
             // Wait for running flag to be set (coordinator.start() called)
-            // Use Acquire to synchronize with Release in coordinator.start()
+            // Uses condvar instead of busy-wait to reduce idle CPU usage
             while !self.running.load(Ordering::Acquire) {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                self.notifier.wait_timeout(Duration::from_millis(100));
             }
 
             // Wait for a job
@@ -167,8 +211,9 @@ impl Worker {
                 return job;
             }
 
-            // Small sleep to prevent busy-wait spinning
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            // Wait on condvar instead of busy-wait spinning
+            // Wakes immediately when notified or after timeout to check state
+            self.notifier.wait_timeout(Duration::from_millis(100));
         }
     }
 
@@ -223,11 +268,13 @@ mod tests {
         let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
+        let notifier = Arc::new(Notifier::new());
 
         let worker = Worker {
             id: 5,
             stats,
             running,
+            notifier,
             job_rx,
             share_tx: _share_tx,
             hasher: Hasher::new(),
@@ -252,11 +299,13 @@ mod tests {
         let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
+        let notifier = Arc::new(Notifier::new());
 
         let worker = Worker {
             id: 3,
             stats,
             running,
+            notifier,
             job_rx,
             share_tx: _share_tx,
             hasher: Hasher::new(),
@@ -275,11 +324,13 @@ mod tests {
         let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
+        let notifier = Arc::new(Notifier::new());
 
         let mut worker = Worker {
             id: 0,
             stats,
             running,
+            notifier,
             job_rx,
             share_tx: _share_tx,
             hasher: Hasher::new(),
@@ -303,11 +354,13 @@ mod tests {
         let (_, job_rx2) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
+        let notifier = Arc::new(Notifier::new());
 
         let worker1 = Worker {
             id: 0,
             stats: stats.clone(),
             running: running.clone(),
+            notifier: notifier.clone(),
             job_rx: job_rx1,
             share_tx: _share_tx1,
             hasher: Hasher::new(),
@@ -320,6 +373,7 @@ mod tests {
             id: 1,
             stats,
             running,
+            notifier,
             job_rx: job_rx2,
             share_tx: _share_tx2,
             hasher: Hasher::new(),
@@ -333,5 +387,42 @@ mod tests {
 
         // Different workers should have different extranonce2
         assert_ne!(en1, en2);
+    }
+
+    #[test]
+    fn test_notifier_new() {
+        let notifier = Notifier::new();
+        // Should be able to create without panic
+        notifier.notify_all();
+    }
+
+    #[test]
+    fn test_notifier_wait_timeout() {
+        let notifier = Arc::new(Notifier::new());
+        let notifier_clone = Arc::clone(&notifier);
+
+        // Test that wait_timeout returns after timeout
+        let start = std::time::Instant::now();
+        notifier.wait_timeout(Duration::from_millis(10));
+        let elapsed = start.elapsed();
+
+        // Should have waited approximately 10ms (allow some tolerance)
+        assert!(elapsed.as_millis() >= 8);
+        assert!(elapsed.as_millis() < 100);
+
+        // Test that notify wakes up a waiting thread early
+        let handle = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            notifier_clone.wait_timeout(Duration::from_secs(10));
+            start.elapsed()
+        });
+
+        // Give the thread time to start waiting
+        std::thread::sleep(Duration::from_millis(10));
+        notifier.notify_all();
+
+        let elapsed = handle.join().unwrap();
+        // Should have been woken up much earlier than 10 seconds
+        assert!(elapsed.as_millis() < 500);
     }
 }
