@@ -13,6 +13,7 @@ categories = ["cryptography::cryptocurrencies"]
 default = []
 opencl = ["ocl"]
 cuda = []  # Future: add cuda-sys or similar
+overlay = ["dep:eframe", "dep:egui", "dep:ureq"]
 
 [dependencies]
 # Configuration
@@ -76,6 +77,11 @@ chrono = "0.4"
 ocl = { version = "0.19", optional = true }
 base64 = "0.22.1"
 
+# Overlay (optional) - transparent floating window
+eframe = { version = "0.28", optional = true, default-features = false, features = ["glow", "default_fonts"] }
+egui = { version = "0.28", optional = true }
+ureq = { version = "2.12", optional = true, features = ["json"] }
+
 [dev-dependencies]
 tempfile = "3.24"
 tokio-test = "0.4"
@@ -103,6 +109,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "btcminer"
 path = "src/main.rs"
+
+[[bin]]
+name = "btcminer-overlay"
+path = "src/overlay/main.rs"
+required-features = ["overlay"]
 
 # Config for 'dist'
 [workspace.metadata.dist]

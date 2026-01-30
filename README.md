@@ -241,6 +241,33 @@ cargo build --release --features cuda
 
 &nbsp;
 
+## Desktop Overlay
+
+A transparent floating window showing hashrate and controls:
+
+```bash
+# Build the overlay
+cargo build --release --features overlay
+
+# Run (requires btcminer running with web API on port 8080)
+./target/release/btcminer-overlay
+```
+
+**Configuration:**
+
+```toml
+[overlay]
+auto_open = true  # Auto-launch overlay on startup
+```
+
+**Features:**
+- Transparent, borderless, always-on-top window
+- Draggable by clicking anywhere
+- Shows: hashrate, status (Mining/Paused/Idle), shares count
+- Start/Pause button and close button
+
+&nbsp;
+
 ## Idle Mining (Screensaver Mode)
 
 Automatically mine when your computer is idle:
