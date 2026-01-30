@@ -28,23 +28,24 @@ Comprehensive list of refactoring and optimization opportunities identified in t
 
 ### 1.1. [~] Split main.rs into modules
 
-**File:** `src/main.rs` (2,100 lines, down from 2,783 - 24.5% reduction)
+**File:** `src/main.rs` (2,044 lines, down from 2,783 - 26.5% reduction)
 **Impact:** Massive improvement in maintainability and testability
 
 **Progress:**
 
 - ✅ Extracted Bitcoin helpers (coinbase building, merkle root, BIP34, bech32) to `src/bitcoin/helpers.rs` (493 lines extracted)
-- ✅ Extracted print helpers to `src/app/output.rs` (111 lines)
+- ✅ Extracted print helpers to `src/app/output.rs` (97 lines)
 - ✅ Extracted Bitcoin Core log tailing to `src/app/bitcoin_log.rs` (126 lines)
+- ✅ Added template parsing helpers to deduplicate main.rs (56 lines removed)
 
 **Current Structure:**
 
 ```text
 src/
-├── main.rs                    # 2,136 lines - still large
+├── main.rs                    # 2,044 lines - reduced by consolidating parsing
 ├── app/
 │   ├── mod.rs                 # Module re-exports
-│   ├── output.rs              # Print helper functions (111 lines)
+│   ├── output.rs              # Print helper functions (97 lines)
 │   └── bitcoin_log.rs         # Bitcoin Core log tailing (126 lines)
 ```
 
@@ -336,14 +337,19 @@ macro_rules! sha256_round {
 
 ---
 
-### 4.3. [ ] Consolidate hex encoding utilities
+### 4.3. [~] Consolidate hex encoding utilities
 
 **Multiple Files:** Various hex encoding/decoding scattered
 
-**Tasks:**
-- [ ] Create `src/util/hex.rs` with common functions
-- [ ] Consolidate hash reversal logic
-- [ ] Add proper error handling for hex operations
+**Progress:**
+
+- ✅ Added `parse_prev_hash()`, `parse_nbits()`, `parse_target()` to `bitcoin/helpers.rs`
+- ✅ Consolidated 4 duplicate parsing blocks in main.rs (56 lines removed)
+- ✅ Added tests for new parsing functions
+
+**Remaining Tasks:**
+
+- [ ] Create `src/util/hex.rs` if more hex utilities are needed elsewhere
 
 ---
 
