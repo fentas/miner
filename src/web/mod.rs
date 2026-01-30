@@ -17,6 +17,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 
+use crate::config::Config;
 use crate::mining::StatsSnapshot;
 
 /// Basic authentication credentials
@@ -97,6 +98,40 @@ pub struct ConfigSnapshot {
     pub idle_timeout: u64,
     pub bitcoind_enabled: bool,
     pub bitcoind_managed: bool,
+}
+
+impl ConfigSnapshot {
+    /// Create a ConfigSnapshot for solo mining mode
+    pub fn for_solo(cfg: &Config, thread_count: usize) -> Self {
+        Self {
+            pool_preset: "solo".to_string(),
+            pool_address: "Bitcoin Network (direct)".to_string(),
+            payout_address: cfg.pool.payout_address.clone(),
+            enable_cpu: cfg.mining.enable_cpu,
+            cpu_threads: thread_count,
+            enable_gpu: cfg.mining.enable_gpu,
+            idle_enabled: cfg.idle.enabled,
+            idle_timeout: cfg.idle.timeout as u64,
+            bitcoind_enabled: true,
+            bitcoind_managed: cfg.bitcoind.managed,
+        }
+    }
+
+    /// Create a ConfigSnapshot for pool mining mode
+    pub fn for_pool(cfg: &Config, pool_address: &str, thread_count: usize) -> Self {
+        Self {
+            pool_preset: format!("{:?}", cfg.pool.preset),
+            pool_address: pool_address.to_string(),
+            payout_address: cfg.pool.payout_address.clone(),
+            enable_cpu: cfg.mining.enable_cpu,
+            cpu_threads: thread_count,
+            enable_gpu: cfg.mining.enable_gpu,
+            idle_enabled: cfg.idle.enabled,
+            idle_timeout: cfg.idle.timeout as u64,
+            bitcoind_enabled: false,
+            bitcoind_managed: false,
+        }
+    }
 }
 
 /// Shared state for the web server

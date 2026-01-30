@@ -480,19 +480,7 @@ async fn run_solo_mode_with_tui(
         };
 
         // Initialize config snapshot for web state
-        let config_snapshot = web::ConfigSnapshot {
-            pool_preset: "solo".to_string(),
-            pool_address: "Bitcoin Network (direct)".to_string(),
-            payout_address: cfg.pool.payout_address.clone(),
-            enable_cpu: cfg.mining.enable_cpu,
-            cpu_threads: thread_count,
-            enable_gpu: cfg.mining.enable_gpu,
-            idle_enabled: cfg.idle.enabled,
-            idle_timeout: cfg.idle.timeout as u64,
-            bitcoind_enabled: true,
-            bitcoind_managed: cfg.bitcoind.managed,
-        };
-        state.set_config(config_snapshot).await;
+        state.set_config(web::ConfigSnapshot::for_solo(&cfg, thread_count)).await;
 
         // Initialize idle settings in web state
         if cfg.idle.enabled {
@@ -1099,19 +1087,7 @@ async fn run_pool_mode_with_tui(
         };
 
         // Initialize config snapshot for web state
-        let config_snapshot = web::ConfigSnapshot {
-            pool_preset: format!("{:?}", cfg.pool.preset),
-            pool_address: pool_address.clone(),
-            payout_address: cfg.pool.payout_address.clone(),
-            enable_cpu: cfg.mining.enable_cpu,
-            cpu_threads: thread_count,
-            enable_gpu: cfg.mining.enable_gpu,
-            idle_enabled: cfg.idle.enabled,
-            idle_timeout: cfg.idle.timeout as u64,
-            bitcoind_enabled: false,
-            bitcoind_managed: false,
-        };
-        state.set_config(config_snapshot).await;
+        state.set_config(web::ConfigSnapshot::for_pool(&cfg, &pool_address, thread_count)).await;
 
         // Initialize idle settings in web state
         if cfg.idle.enabled {
@@ -1972,19 +1948,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
         };
 
         // Initialize config snapshot for web state
-        let config_snapshot = web::ConfigSnapshot {
-            pool_preset: format!("{:?}", cfg.pool.preset),
-            pool_address: pool_address.clone(),
-            payout_address: cfg.pool.payout_address.clone(),
-            enable_cpu: cfg.mining.enable_cpu,
-            cpu_threads: thread_count,
-            enable_gpu: cfg.mining.enable_gpu,
-            idle_enabled: cfg.idle.enabled,
-            idle_timeout: cfg.idle.timeout as u64,
-            bitcoind_enabled: false,
-            bitcoind_managed: false,
-        };
-        state.set_config(config_snapshot).await;
+        state.set_config(web::ConfigSnapshot::for_pool(&cfg, &pool_address, thread_count)).await;
 
         // Initialize idle settings in web state
         if cfg.idle.enabled {
