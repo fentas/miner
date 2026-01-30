@@ -2,6 +2,9 @@ mod rpc;
 mod manager;
 mod metadata_fetcher;
 mod helpers;
+mod downloader;
+mod snapshot;
+mod config_writer;
 
 pub use rpc::BitcoinRpc;
 pub use manager::BitcoindManager;
