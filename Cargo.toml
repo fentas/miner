@@ -87,6 +87,11 @@ tempfile = "3.24"
 tokio-test = "0.4"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "mining_benchmarks"
+harness = false
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }

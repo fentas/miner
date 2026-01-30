@@ -3,6 +3,9 @@
 //! Fallback for CPUs with AVX512 but without SHA-NI.
 //! Processes 16 nonces in parallel using 512-bit registers.
 
+// Allow indexed loops in SIMD code - clearer than iterator patterns for multi-array access
+#![allow(clippy::needless_range_loop)]
+
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 

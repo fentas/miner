@@ -246,7 +246,7 @@ fn test_merkle_root_computation() {
 /// Test that headers with different nonces produce different hashes
 #[test]
 fn test_nonce_produces_different_hashes() {
-    let mut hasher = Hasher::new();
+    let hasher = Hasher::new();
 
     let mut header1 = [0u8; 80];
     let mut header2 = [0u8; 80];

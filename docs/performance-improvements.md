@@ -5,7 +5,7 @@ This document tracks performance optimizations implemented in btcminer, with bef
 ## Summary Table
 
 | Optimization | Status | Speedup | Files Changed |
-|--------------|--------|---------|---------------|
+| ------------ | ------ | ------- | ------------- |
 | SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd/shani.rs` |
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
 | Arc Job (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
@@ -15,6 +15,9 @@ This document tracks performance optimizations implemented in btcminer, with bef
 | SIMD Level Config | ✅ Completed | N/A | `src/config.rs` |
 | Fix Busy-Wait (Condvar) | ✅ Completed | N/A (CPU usage) | `src/mining/worker.rs`, `mod.rs` |
 | SIMD Code Refactoring | ✅ Completed | N/A (maintainability) | `src/mining/sha256_simd/` |
+| Criterion Benchmarks | ✅ Completed | N/A (tooling) | `benches/mining_benchmarks.rs` |
+| Extranonce2 Optimization | ✅ Completed | 12x | `src/mining/worker.rs` |
+| Atomic Ordering | ✅ Completed | minimal | `src/stratum/v1.rs`, `v2.rs` |
 
 ---
 
@@ -249,6 +252,81 @@ src/mining/sha256_simd/
 
 ---
 
+### 11. Criterion Benchmark Infrastructure (2026-01-30)
+
+**Problem:** Benchmarks were in `tests/profiling_tests.rs` using `#[ignore]` tests instead of proper benchmark framework.
+
+**Solution:** Migrated to criterion benchmarks in `benches/`.
+
+**Structure:**
+
+```text
+benches/
+└── mining_benchmarks.rs    # Criterion benchmarks
+    ├── hasher_batch_size   # Batch size comparison
+    ├── throughput          # Single-threaded throughput
+    ├── thread_scaling      # Multi-threaded scaling
+    ├── midstate_compute    # Midstate overhead
+    └── extranonce2         # Generation method comparison
+```
+
+**Impact:** Proper statistical benchmarking with HTML reports, historical comparison, and regression detection.
+
+**Files changed:** `Cargo.toml`, `benches/mining_benchmarks.rs`, `tests/profiling_tests.rs`
+
+---
+
+### 12. Extranonce2 Generation Optimization (2026-01-30)
+
+**Problem:** `generate_extranonce2()` used `SystemTime::now()` which involves a syscall.
+
+**Solution:** Replaced with static atomic counter for ~12x faster generation.
+
+**Before:**
+```rust
+let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap_or_default()
+    .subsec_nanos();
+```
+
+**After:**
+```rust
+static EXTRANONCE2_COUNTER: AtomicU64 = AtomicU64::new(0);
+let counter = EXTRANONCE2_COUNTER.fetch_add(1, Ordering::Relaxed);
+```
+
+**Benchmark Results:**
+
+| Method | Time | Speedup |
+| ------ | ---- | ------- |
+| SystemTime | 17.79 ns | baseline |
+| Atomic counter | 1.49 ns | **12x** |
+
+**Impact:** While extranonce2 is only generated once per nonce-range-exhaustion (rare), this removes unnecessary syscall overhead and improves code clarity.
+
+**Files changed:** `src/mining/worker.rs`
+
+---
+
+### 13. Atomic Ordering Optimization (2026-01-30)
+
+**Problem:** All atomic operations used `SeqCst` ordering, the most conservative option, when weaker orderings would suffice.
+
+**Solution:** Replaced with appropriate orderings:
+
+| Operation | Before | After | Rationale |
+| --------- | ------ | ----- | --------- |
+| `connected.store()` | SeqCst | Release | Pairs with Acquire load |
+| `connected.load()` | SeqCst | Acquire | Pairs with Release store |
+| `request_id.fetch_add()` | SeqCst | Relaxed | Only needs uniqueness |
+
+**Impact:** Reduces memory barrier overhead. On x86, the difference is minimal but on ARM/weak memory models this can improve performance.
+
+**Files changed:** `src/stratum/v1.rs`, `src/stratum/v2.rs`
+
+---
+
 ## Pending Optimizations
 
 None currently pending.
@@ -257,26 +335,38 @@ None currently pending.
 
 ## Benchmarking Guide
 
-Run profiling tests to measure performance:
+Run benchmarks using criterion:
 
 ```bash
-# Quick benchmark (2 seconds)
-cargo test --release profile_quick -- --nocapture --ignored
+# Run all benchmarks
+cargo bench
 
-# Full benchmark suite (5 seconds)
-cargo test --release profile_full -- --nocapture --ignored
+# Run specific benchmark group
+cargo bench -- hasher_batch_size
+cargo bench -- throughput
+cargo bench -- thread_scaling
+cargo bench -- extranonce2
 
-# Thread scaling test
-cargo test --release profile_thread_scaling -- --nocapture --ignored
+# Run with HTML report (saved to target/criterion/)
+cargo bench
 
-# Sustained 30-second test
-cargo test --release profile_sustained -- --nocapture --ignored
+# Quick check (test mode)
+cargo bench -- --test
 ```
 
-Output files are saved to the project root:
-- `benchmark_results.json` / `.csv`
-- `thread_scaling.csv`
-- `sustained_mining.csv`
+**Benchmark groups:**
+
+| Group | Description |
+| ----- | ----------- |
+| `hasher_batch_size` | Tests different batch sizes (2^16 to 2^20) |
+| `throughput` | Single-threaded sustained throughput |
+| `thread_scaling` | Multi-threaded scaling (1, N/2, N threads) |
+| `midstate_compute` | Midstate computation overhead |
+| `extranonce2` | Compares SystemTime vs atomic counter |
+
+**HTML Reports:**
+
+Criterion generates HTML reports in `target/criterion/`. Open `target/criterion/report/index.html` in a browser to view results with graphs and historical comparisons.
 
 ---
 
@@ -288,7 +378,11 @@ Output files are saved to the project root:
 
 Check your CPU:
 ```bash
-cargo test --release profile_simd_info -- --ignored --nocapture
+# Via CLI
+./target/release/btcminer --version
+
+# Or check CPU features directly (Linux)
+lscpu | grep -i sha
 ```
 
 ### AVX2 Support

@@ -52,7 +52,7 @@ impl StratumV1Client {
 
         self.stream = Some(stream);
         self.reader = Some(reader);
-        self.connected.store(true, Ordering::SeqCst);
+        self.connected.store(true, Ordering::Release);
 
         Ok(())
     }
@@ -95,7 +95,7 @@ impl StratumV1Client {
 
     /// Disconnect from pool
     pub fn disconnect(&mut self) {
-        self.connected.store(false, Ordering::SeqCst);
+        self.connected.store(false, Ordering::Release);
         self.stream = None;
         self.reader = None;
     }
@@ -396,11 +396,13 @@ impl StratumV1Client {
     }
 
     fn next_id(&self) -> u64 {
-        self.request_id.fetch_add(1, Ordering::SeqCst)
+        // Relaxed is sufficient - we only need uniqueness, not synchronization
+        self.request_id.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::SeqCst)
+        // Acquire pairs with Release store in connect()/disconnect()
+        self.connected.load(Ordering::Acquire)
     }
 
     pub fn get_difficulty(&self) -> f64 {

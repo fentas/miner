@@ -172,6 +172,7 @@ pub fn state_to_bytes(state: &[u32; 8]) -> [u8; 32] {
 }
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
 
@@ -455,13 +456,7 @@ mod tests {
             [0x00; 64],
             [0xFF; 64],
             [0xAB; 64],
-            {
-                let mut data = [0u8; 64];
-                for i in 0..64 {
-                    data[i] = i as u8;
-                }
-                data
-            },
+            std::array::from_fn(|i| i as u8),
         ];
 
         for (i, block) in test_cases.iter().enumerate() {
@@ -512,13 +507,7 @@ mod tests {
             [0x00; 64],
             [0xFF; 64],
             [0xAB; 64],
-            {
-                let mut data = [0u8; 64];
-                for i in 0..64 {
-                    data[i] = i as u8;
-                }
-                data
-            },
+            std::array::from_fn(|i| i as u8),
         ];
 
         for (i, block) in test_cases.iter().enumerate() {
@@ -638,13 +627,7 @@ mod tests {
             [0x00; 64],
             [0xFF; 64],
             [0xAB; 64],
-            {
-                let mut data = [0u8; 64];
-                for i in 0..64 {
-                    data[i] = i as u8;
-                }
-                data
-            },
+            std::array::from_fn(|i| i as u8),
         ];
 
         for (i, block) in test_cases.iter().enumerate() {

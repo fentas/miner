@@ -461,8 +461,8 @@ async fn test_api_idle_enable() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(json["success"].as_bool().unwrap(), true);
-    assert_eq!(json["enabled"].as_bool().unwrap(), true);
+    assert!(json["success"].as_bool().unwrap());
+    assert!(json["enabled"].as_bool().unwrap());
     assert_eq!(json["timeout"].as_u64().unwrap(), 600);
 }
 
@@ -492,8 +492,8 @@ async fn test_api_idle_disable() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(json["success"].as_bool().unwrap(), true);
-    assert_eq!(json["enabled"].as_bool().unwrap(), false);
+    assert!(json["success"].as_bool().unwrap());
+    assert!(!json["enabled"].as_bool().unwrap());
 }
 
 /// Test GET /api/logs endpoint

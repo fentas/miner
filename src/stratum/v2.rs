@@ -39,7 +39,7 @@ impl StratumV2Client {
             .map_err(|e| StratumError::ConnectionError(e.to_string()))?;
 
         self.stream = Some(stream);
-        self.connected.store(true, Ordering::SeqCst);
+        self.connected.store(true, Ordering::Release);
 
         // Perform SV2 handshake
         self.handshake().await?;
@@ -49,7 +49,7 @@ impl StratumV2Client {
 
     /// Disconnect from proxy
     pub async fn disconnect(&mut self) {
-        self.connected.store(false, Ordering::SeqCst);
+        self.connected.store(false, Ordering::Release);
         self.stream = None;
     }
 
@@ -275,7 +275,7 @@ impl StratumV2Client {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::SeqCst)
+        self.connected.load(Ordering::Acquire)
     }
 
     pub fn get_difficulty(&self) -> f64 {
