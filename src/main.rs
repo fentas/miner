@@ -379,17 +379,27 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
     tui_state.set_gpu_configured(cfg.mining.enable_gpu);
     if cfg.mining.enable_gpu {
         let gpu_manager = gpu::GpuManager::new();
-        let devices: Vec<String> = gpu_manager.devices()
+        let all_devices: Vec<String> = gpu_manager.devices()
             .iter()
             .map(|d| d.name.clone())
             .collect();
-        if !devices.is_empty() {
+        if !all_devices.is_empty() {
             tui_state.set_gpu_available(true);
-            tui_state.log_info(format!("GPU: {} device(s) detected", devices.len()));
-            for (i, name) in devices.iter().enumerate() {
+            tui_state.log_info(format!("GPU: {} device(s) detected", all_devices.len()));
+            for (i, name) in all_devices.iter().enumerate() {
                 tui_state.log_info(format!("  GPU {}: {}", i, name));
             }
-            tui_state.set_gpu_devices(devices);
+            // Filter to only show enabled devices (based on gpu_devices config)
+            let enabled_devices: Vec<String> = if cfg.mining.gpu_devices.is_empty() {
+                // Empty = all devices enabled
+                all_devices
+            } else {
+                // Only show devices that are in the gpu_devices list
+                cfg.mining.gpu_devices.iter()
+                    .filter_map(|&idx| all_devices.get(idx as usize).cloned())
+                    .collect()
+            };
+            tui_state.set_gpu_devices(enabled_devices);
         } else {
             tui_state.set_gpu_available(false);
             tui_state.log_warn("GPU enabled but no OpenCL devices found - using CPU only");
@@ -679,6 +689,37 @@ async fn run_solo_mode_with_tui(
     } else {
         None
     };
+
+    // Start web server if enabled
+    if cfg.web.port > 0 {
+        let pool_address = "Bitcoin Network (direct)".to_string();
+        let thread_count = cfg.effective_threads();
+        let state = Arc::new(web::WebState::new(pool_address, thread_count));
+        let state_clone = Arc::clone(&state);
+        let web_dir = cfg.web.dir.clone();
+        let web_port = cfg.web.port;
+        let web_auth = if cfg.web.auth_enabled {
+            Some(web::BasicAuthConfig {
+                username: cfg.web.auth_user.clone().unwrap_or_default(),
+                password: cfg.web.auth_password.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        };
+
+        tokio::spawn(async move {
+            if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
+                tracing::error!("Web server error: {}", e);
+            }
+        });
+
+        let web_url = format!("http://localhost:{}", cfg.web.port);
+        tui_state.log_info(format!("Web dashboard at {}", web_url));
+        tui_state.set_web_url(&web_url);
+
+        // Keep state alive (we don't update it in solo mode currently)
+        drop(state);
+    }
 
     let mut hashrate_calc = HashrateCalculator::new(60);
     let stats_interval = Duration::from_millis(500);
@@ -1066,6 +1107,34 @@ async fn run_sv2_mode_with_tui(
     } else {
         None
     };
+
+    // Start web server if enabled
+    if cfg.web.port > 0 {
+        let state = Arc::new(web::WebState::new(proxy_addr.clone(), thread_count));
+        let state_clone = Arc::clone(&state);
+        let web_dir = cfg.web.dir.clone();
+        let web_port = cfg.web.port;
+        let web_auth = if cfg.web.auth_enabled {
+            Some(web::BasicAuthConfig {
+                username: cfg.web.auth_user.clone().unwrap_or_default(),
+                password: cfg.web.auth_password.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        };
+
+        tokio::spawn(async move {
+            if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
+                tracing::error!("Web server error: {}", e);
+            }
+        });
+
+        let web_url = format!("http://localhost:{}", cfg.web.port);
+        tui_state.log_info(format!("Web dashboard at {}", web_url));
+        tui_state.set_web_url(&web_url);
+
+        drop(state);
+    }
 
     let mut hashrate_calc = HashrateCalculator::new(60);
     let stats_interval = Duration::from_millis(500);

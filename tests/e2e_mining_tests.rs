@@ -681,3 +681,252 @@ fn integration_pause_resume() {
     assert!(hashes_after > hashes_during, "Should hash after resume");
     println!("\nTest passed!\n");
 }
+
+// ============================================================================
+// Strict Job Switch Tests (New Block Height Handling)
+// ============================================================================
+
+/// Helper to create a job simulating a specific block height
+fn create_job_at_height(job_id: &str, height: u64) -> Job {
+    let mut job = Job::new(job_id.to_string());
+    job.version = 0x20000000;
+    // Use height as part of prev_hash to make jobs distinguishable
+    let mut prev_hash = [0x00; 32];
+    prev_hash[0..8].copy_from_slice(&height.to_le_bytes());
+    job.prev_hash = prev_hash;
+    job.ntime = 1700000000 + height as u32;
+    job.nbits = 0x207fffff;
+
+    // Very easy target for fast share finding
+    let mut target = [0xFF; 32];
+    target[0] = 0x7F;
+    job.target = target;
+    job.network_target = Some(target);
+    job.merkle_root_override = Some([height as u8; 32]);
+    job.coinbase_tx = Some(create_minimal_coinbase(312500000, height));
+    job.transactions = Some(vec![]);
+
+    job
+}
+
+/// Integration test: Job switch latency - workers must switch within bounded time
+/// This tests that when a new block height arrives, workers respond quickly
+#[test]
+#[ignore]
+fn integration_job_switch_latency() {
+    println!("\n=== Integration Test: Job Switch Latency ===\n");
+
+    let mut coord = Coordinator::new(4);
+
+    // Start mining at height 100
+    let job1 = create_job_at_height("height-100", 100);
+    println!("Starting mining at height 100");
+    coord.update_job(job1.clone());
+    coord.start();
+
+    // Wait for first share to ensure mining is active
+    let start = Instant::now();
+    let mut shares_job1 = 0;
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Some(share) = coord.try_recv_share() {
+            if share.job_id == job1.id {
+                shares_job1 += 1;
+                println!("Share from job1 (height 100)");
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(shares_job1 > 0, "Should find at least one share on job1");
+
+    // Now simulate new block at height 101
+    let job2 = create_job_at_height("height-101", 101);
+    println!("\n--- New block! Switching to height 101 ---");
+    let switch_time = Instant::now();
+    coord.update_job(job2.clone());
+
+    // Measure time until first share from new job
+    let max_switch_latency = Duration::from_millis(500); // 500ms max latency
+    let mut first_job2_share_time: Option<Duration> = None;
+    let mut stale_shares_after_switch = 0;
+
+    while switch_time.elapsed() < Duration::from_secs(10) {
+        if let Some(share) = coord.try_recv_share() {
+            if share.job_id == job2.id {
+                if first_job2_share_time.is_none() {
+                    first_job2_share_time = Some(switch_time.elapsed());
+                    println!(
+                        "First share from job2 after {:.2}ms",
+                        switch_time.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+                break;
+            } else if share.job_id == job1.id {
+                // Stale share from old job
+                stale_shares_after_switch += 1;
+                println!(
+                    "  WARNING: Stale share from job1 at {:.2}ms after switch",
+                    switch_time.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    coord.stop();
+
+    // Assertions
+    let latency = first_job2_share_time.expect("Should find share on job2");
+    println!("\nSwitch latency: {:.2}ms", latency.as_secs_f64() * 1000.0);
+    println!("Stale shares after switch: {}", stale_shares_after_switch);
+
+    assert!(
+        latency < max_switch_latency,
+        "Switch latency {:.2}ms should be < {:.2}ms",
+        latency.as_secs_f64() * 1000.0,
+        max_switch_latency.as_secs_f64() * 1000.0
+    );
+
+    // Allow at most 1-2 stale shares (in-flight from batch processing)
+    assert!(
+        stale_shares_after_switch <= 2,
+        "Should have at most 2 stale shares, got {}",
+        stale_shares_after_switch
+    );
+
+    println!("\nTest passed!\n");
+}
+
+/// Integration test: No stale shares after job update
+/// Verifies that once workers acknowledge new job, no old job shares arrive
+#[test]
+#[ignore]
+fn integration_no_stale_shares() {
+    println!("\n=== Integration Test: No Stale Shares ===\n");
+
+    let mut coord = Coordinator::new(4);
+
+    // Start with job1
+    let job1 = create_job_at_height("old-block", 100);
+    coord.update_job(job1.clone());
+    coord.start();
+
+    // Let it mine for a bit
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Drain any pending shares from job1
+    while coord.try_recv_share().is_some() {}
+
+    // Switch to job2
+    let job2 = create_job_at_height("new-block", 101);
+    println!("Switching to new job...");
+    coord.update_job(job2.clone());
+
+    // Small grace period for workers to receive the update
+    std::thread::sleep(Duration::from_millis(50));
+
+    // Now collect shares and verify none are from job1
+    let start = Instant::now();
+    let timeout = Duration::from_secs(5);
+    let mut job2_shares = 0;
+    let mut job1_stale = 0;
+
+    while start.elapsed() < timeout && job2_shares < 10 {
+        if let Some(share) = coord.try_recv_share() {
+            if share.job_id == job2.id {
+                job2_shares += 1;
+            } else if share.job_id == job1.id {
+                job1_stale += 1;
+                println!(
+                    "  Stale share from job1 at {:.2}ms",
+                    start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    coord.stop();
+
+    println!("\nJob2 shares: {}", job2_shares);
+    println!("Job1 stale shares (after grace period): {}", job1_stale);
+
+    assert!(job2_shares >= 5, "Should find multiple shares on new job");
+    assert_eq!(
+        job1_stale, 0,
+        "Should have no stale shares after grace period"
+    );
+
+    println!("\nTest passed!\n");
+}
+
+/// Integration test: Block height change simulation
+/// Simulates realistic scenario of multiple consecutive blocks
+#[test]
+#[ignore]
+fn integration_block_height_sequence() {
+    println!("\n=== Integration Test: Block Height Sequence ===\n");
+
+    let mut coord = Coordinator::new(4);
+    let start_height = 840000u64;
+
+    // Simulate mining through multiple blocks
+    let num_blocks = 5;
+    let mut shares_per_height: Vec<(u64, u32)> = Vec::new();
+
+    for i in 0..num_blocks {
+        let height = start_height + i;
+        let job = create_job_at_height(&format!("block-{}", height), height);
+
+        println!("Mining at height {} (job: {})", height, job.id);
+        coord.update_job(job.clone());
+
+        if i == 0 {
+            coord.start();
+        }
+
+        // Mine until we find at least one share, or timeout
+        let block_start = Instant::now();
+        let mut shares_found = 0;
+
+        while block_start.elapsed() < Duration::from_secs(3) && shares_found < 2 {
+            if let Some(share) = coord.try_recv_share() {
+                if share.job_id == job.id {
+                    shares_found += 1;
+                    println!("  Share found at height {}", height);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        shares_per_height.push((height, shares_found));
+
+        // Brief pause before next block (like real network)
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    coord.stop();
+
+    // Print summary
+    println!("\n--- Summary ---");
+    let mut total_shares = 0;
+    for (height, shares) in &shares_per_height {
+        println!("Height {}: {} shares", height, shares);
+        total_shares += shares;
+    }
+
+    // Should have found shares at most heights
+    let heights_with_shares = shares_per_height.iter().filter(|(_, s)| *s > 0).count();
+    println!(
+        "\nFound shares at {}/{} heights",
+        heights_with_shares, num_blocks
+    );
+
+    assert!(
+        heights_with_shares >= (num_blocks - 1) as usize,
+        "Should find shares at most block heights"
+    );
+    assert!(total_shares >= 5, "Should find multiple shares total");
+
+    println!("\nTest passed!\n");
+}
