@@ -3,7 +3,7 @@
 // Application state
 let minerState = 'stopped';
 let benchmarkInterval = null;
-let startTime = Date.now();
+let logAutoScroll = true;
 
 // Pool presets configuration
 const poolPresets = {
@@ -11,19 +11,25 @@ const poolPresets = {
         host: 'solo.ckpool.org',
         port: 3333,
         stratum: 'v1',
-        description: 'Solo mining pool with Stratum V1. 2% fee on successful block rewards. Reliable and widely used.'
+        description: 'Solo mining pool with Stratum V1. 2% fee on successful block rewards.'
     },
     braiins: {
         host: 'solo.stratum.braiins.com',
         port: 3333,
         stratum: 'v1',
-        description: 'Braiins Solo mining pool with Stratum V1. 0.5% fee on found blocks (paid to CKPool authors).'
+        description: 'Braiins Solo mining pool with Stratum V1. 0.5% fee on found blocks.'
     },
     ocean: {
         host: 'mine.ocean.xyz',
         port: 3334,
         stratum: 'v1',
-        description: 'Ocean Pool with DATUM support. 0% pool fee - miners only pay Bitcoin transaction fees. Supports custom block templates.'
+        description: 'Ocean Pool with DATUM support. 0% pool fee.'
+    },
+    none: {
+        host: '',
+        port: 0,
+        stratum: 'none',
+        description: 'True solo mining - connect directly to your Bitcoin Core node. 0% fees.'
     }
 };
 
@@ -80,7 +86,11 @@ function addLog(message, type = 'info') {
     entry.className = 'log-entry';
     entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
     logOutput.appendChild(entry);
-    logOutput.scrollTop = logOutput.scrollHeight;
+
+    // Auto-scroll if enabled
+    if (logAutoScroll) {
+        logOutput.scrollTop = logOutput.scrollHeight;
+    }
 
     // Keep only last 500 entries
     while (logOutput.children.length > 500) {
@@ -100,42 +110,60 @@ function initNavigation() {
 
             btn.classList.add('active');
             const tab = document.getElementById(btn.dataset.tab);
-            tab.style.display = 'block';
-            tab.classList.add('active');
+            if (tab) {
+                tab.style.display = 'block';
+                tab.classList.add('active');
+            }
         });
     });
 }
 
 // Pool preset handling
 function updatePoolPreset() {
-    const preset = document.getElementById('solo-pool-preset').value;
+    const preset = document.getElementById('solo-pool-preset')?.value;
     const poolHostInput = document.getElementById('pool-host');
-    const stratumBadge = document.getElementById('stratum-badge');
     const presetInfo = document.getElementById('pool-preset-info');
+    const poolHostRow = document.getElementById('pool-host-row');
+
+    if (!preset) return;
 
     if (preset === 'custom') {
-        poolHostInput.disabled = false;
-        poolHostInput.placeholder = 'host:port';
-        stratumBadge.className = 'stratum-badge v1';
-        stratumBadge.textContent = 'V1';
-        presetInfo.classList.remove('visible');
+        if (poolHostInput) poolHostInput.disabled = false;
+        if (poolHostRow) poolHostRow.style.display = 'block';
+        if (presetInfo) {
+            presetInfo.textContent = '';
+            presetInfo.style.display = 'none';
+        }
+    } else if (preset === 'none') {
+        if (poolHostInput) poolHostInput.disabled = true;
+        if (poolHostRow) poolHostRow.style.display = 'none';
+        if (presetInfo) {
+            presetInfo.textContent = poolPresets.none.description;
+            presetInfo.style.display = 'block';
+        }
     } else {
         const config = poolPresets[preset];
-        poolHostInput.value = `${config.host}:${config.port}`;
-        poolHostInput.disabled = true;
-        stratumBadge.className = `stratum-badge ${config.stratum}`;
-        stratumBadge.textContent = config.stratum.toUpperCase();
-        presetInfo.textContent = config.description;
-        presetInfo.classList.add('visible');
+        if (config) {
+            if (poolHostInput) {
+                poolHostInput.value = `${config.host}:${config.port}`;
+                poolHostInput.disabled = true;
+            }
+            if (poolHostRow) poolHostRow.style.display = 'block';
+            if (presetInfo) {
+                presetInfo.textContent = config.description;
+                presetInfo.style.display = 'block';
+            }
+        }
     }
 }
 
 // Address validation
 function validateAddress(address) {
     const validationEl = document.getElementById('address-validation');
+    if (!validationEl) return true;
 
     if (!address) {
-        validationEl.className = 'validation-message error';
+        validationEl.className = 'form-validation error';
         validationEl.textContent = 'Bitcoin address is required';
         return false;
     }
@@ -145,72 +173,37 @@ function validateAddress(address) {
     const bech32m = /^bc1p[a-z0-9]{58}$/i;
 
     if (legacy.test(address)) {
-        validationEl.className = 'validation-message success';
+        validationEl.className = 'form-validation success';
         validationEl.textContent = 'Valid legacy address';
         return true;
     } else if (bech32.test(address) || bech32m.test(address)) {
-        validationEl.className = 'validation-message success';
+        validationEl.className = 'form-validation success';
         validationEl.textContent = 'Valid SegWit address';
         return true;
     } else if (address.length < 26) {
-        validationEl.className = 'validation-message error';
+        validationEl.className = 'form-validation error';
         validationEl.textContent = 'Address is too short';
         return false;
     } else {
-        validationEl.className = 'validation-message warning';
-        validationEl.textContent = 'Address format not recognized - verify before saving';
-        return true;
-    }
-}
-
-// Mining mode validation
-function validateMiningMode() {
-    const enableCpu = document.getElementById('enable-cpu').checked;
-    const enableGpu = document.getElementById('enable-gpu').checked;
-    const validationEl = document.getElementById('mining-mode-validation');
-
-    if (!enableCpu && !enableGpu) {
-        validationEl.className = 'validation-message error';
-        validationEl.textContent = 'At least one mining mode must be enabled (CPU or GPU)';
-        return false;
-    } else {
-        validationEl.className = 'validation-message';
+        validationEl.className = 'form-validation';
         validationEl.textContent = '';
         return true;
     }
 }
 
-// Update UI based on settings
-function updateCpuStatus(enabled) {
-    const cpuThreadsRow = document.getElementById('cpu-threads-row');
-    if (cpuThreadsRow) {
-        cpuThreadsRow.style.display = enabled ? 'grid' : 'none';
-    }
-    validateMiningMode();
-}
-
-function updateGpuStatus(enabled) {
-    const gpuStatus = document.getElementById('gpu-status');
-    if (gpuStatus) gpuStatus.style.display = enabled ? 'block' : 'none';
+// Update GPU settings visibility
+function updateGpuSettings(enabled) {
+    const gpuSettings = document.getElementById('gpu-settings');
+    if (gpuSettings) gpuSettings.style.display = enabled ? 'block' : 'none';
 
     const gpuCard = document.getElementById('gpu-hashrate-card');
     if (gpuCard) gpuCard.style.display = enabled ? 'block' : 'none';
-
-    validateMiningMode();
 }
 
-function updateBitcoindStatus(enabled) {
-    const bitcoindSettings = document.getElementById('bitcoind-settings');
-    if (bitcoindSettings) {
-        bitcoindSettings.style.display = enabled ? 'block' : 'none';
-    }
-}
-
-function updateBitcoindManagedMode(managed) {
-    const managedControls = document.getElementById('bitcoind-managed-controls');
-    const manualSettings = document.getElementById('bitcoind-manual-settings');
-    if (managedControls) managedControls.style.display = managed ? 'block' : 'none';
-    if (manualSettings) manualSettings.style.display = managed ? 'none' : 'block';
+// Update CPU threads visibility
+function updateCpuSettings(enabled) {
+    const cpuThreadsRow = document.getElementById('cpu-threads-row');
+    if (cpuThreadsRow) cpuThreadsRow.style.display = enabled ? 'block' : 'none';
 }
 
 // Miner state management
@@ -219,8 +212,12 @@ function updateMinerState(state) {
     const indicator = document.getElementById('state-indicator');
     const stateText = document.getElementById('state-text');
 
-    indicator.className = 'state-indicator ' + state;
-    stateText.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+    if (indicator) {
+        indicator.className = 'state-dot ' + state;
+    }
+    if (stateText) {
+        stateText.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+    }
 
     const btnStart = document.getElementById('btn-start');
     const btnStop = document.getElementById('btn-stop');
@@ -231,36 +228,36 @@ function updateMinerState(state) {
 
     switch (state) {
         case 'stopped':
-            btnStart.disabled = false;
-            btnStop.disabled = true;
-            btnPause.disabled = true;
-            btnResume.disabled = true;
-            btnBenchStart.disabled = false;
-            btnBenchStop.disabled = true;
+            if (btnStart) btnStart.disabled = false;
+            if (btnStop) btnStop.disabled = true;
+            if (btnPause) btnPause.disabled = true;
+            if (btnResume) btnResume.disabled = true;
+            if (btnBenchStart) btnBenchStart.disabled = false;
+            if (btnBenchStop) btnBenchStop.disabled = true;
             break;
         case 'running':
-            btnStart.disabled = true;
-            btnStop.disabled = false;
-            btnPause.disabled = false;
-            btnResume.disabled = true;
-            btnBenchStart.disabled = false;
-            btnBenchStop.disabled = true;
+            if (btnStart) btnStart.disabled = true;
+            if (btnStop) btnStop.disabled = false;
+            if (btnPause) btnPause.disabled = false;
+            if (btnResume) btnResume.disabled = true;
+            if (btnBenchStart) btnBenchStart.disabled = false;
+            if (btnBenchStop) btnBenchStop.disabled = true;
             break;
         case 'paused':
-            btnStart.disabled = true;
-            btnStop.disabled = false;
-            btnPause.disabled = true;
-            btnResume.disabled = false;
-            btnBenchStart.disabled = true;
-            btnBenchStop.disabled = true;
+            if (btnStart) btnStart.disabled = true;
+            if (btnStop) btnStop.disabled = false;
+            if (btnPause) btnPause.disabled = true;
+            if (btnResume) btnResume.disabled = false;
+            if (btnBenchStart) btnBenchStart.disabled = true;
+            if (btnBenchStop) btnBenchStop.disabled = true;
             break;
         case 'benchmarking':
-            btnStart.disabled = true;
-            btnStop.disabled = true;
-            btnPause.disabled = false;
-            btnResume.disabled = true;
-            btnBenchStart.disabled = true;
-            btnBenchStop.disabled = false;
+            if (btnStart) btnStart.disabled = true;
+            if (btnStop) btnStop.disabled = true;
+            if (btnPause) btnPause.disabled = false;
+            if (btnResume) btnResume.disabled = true;
+            if (btnBenchStart) btnBenchStart.disabled = true;
+            if (btnBenchStop) btnBenchStop.disabled = false;
             break;
     }
 }
@@ -268,10 +265,10 @@ function updateMinerState(state) {
 // Miner control
 async function controlMiner(action) {
     try {
-        const res = await fetch(`/api/control/${action}`, { method: 'POST' });
+        const res = await fetch(`/api/control/${action}`);
         const data = await res.json();
         if (data.state) updateMinerState(data.state);
-        addLog(`Miner ${action}: ${data.message || 'OK'}`, data.success ? 'success' : 'error');
+        addLog(`Miner ${action}: ${data.status || 'OK'}`, 'success');
     } catch (e) {
         addLog(`Failed to ${action} miner: ${e.message}`, 'error');
     }
@@ -279,14 +276,12 @@ async function controlMiner(action) {
 
 // Benchmark functions
 async function startBenchmark() {
-    const duration = parseInt(document.getElementById('benchmark-duration').value) || 0;
+    const duration = parseInt(document.getElementById('benchmark-duration')?.value) || 0;
     try {
         const res = await fetch(`/api/control/benchmark?duration=${duration}`, { method: 'POST' });
         const data = await res.json();
         if (data.state) updateMinerState(data.state);
         addLog(`Benchmark started${duration > 0 ? ' for ' + duration + 's' : ''}`, 'success');
-
-        document.getElementById('benchmark-results').classList.add('active');
 
         if (benchmarkInterval) clearInterval(benchmarkInterval);
         benchmarkInterval = setInterval(updateBenchmarkResults, 1000);
@@ -318,22 +313,24 @@ async function updateBenchmarkResults() {
         const res = await fetch('/api/benchmark');
         const data = await res.json();
 
-        document.getElementById('benchmark-hashrate').textContent = window.chart.formatHashrate(data.hashrate || 0);
-        document.getElementById('benchmark-hashes').textContent = formatNumber(data.total_hashes || 0);
-        document.getElementById('benchmark-time').textContent = (data.duration || 0).toFixed(1) + 's';
+        const hrEl = document.getElementById('benchmark-hashrate');
+        if (hrEl) hrEl.textContent = window.chart?.formatHashrate(data.hashrate || 0) || '0 H/s';
+
+        const hashesEl = document.getElementById('benchmark-hashes');
+        if (hashesEl) hashesEl.textContent = formatNumber(data.total_hashes || 0);
+
+        const timeEl = document.getElementById('benchmark-time');
+        if (timeEl) timeEl.textContent = (data.duration || 0).toFixed(1) + 's';
 
         const cpuHashrate = (data.hashrate || 0) - (data.gpu_hashrate || 0);
-        document.getElementById('benchmark-cpu-hashrate').textContent = window.chart.formatHashrate(cpuHashrate > 0 ? cpuHashrate : data.hashrate || 0);
+        const cpuHrEl = document.getElementById('benchmark-cpu-hashrate');
+        if (cpuHrEl) cpuHrEl.textContent = window.chart?.formatHashrate(cpuHashrate > 0 ? cpuHashrate : data.hashrate || 0) || '0 H/s';
 
         const gpuRow = document.getElementById('benchmark-gpu-row');
         if (data.gpu_hashrate !== undefined && data.gpu_hashrate > 0) {
-            gpuRow.style.display = 'flex';
-            document.getElementById('benchmark-gpu-hashrate').textContent = window.chart.formatHashrate(data.gpu_hashrate);
-        } else if (document.getElementById('enable-gpu').checked) {
-            gpuRow.style.display = 'flex';
-            document.getElementById('benchmark-gpu-hashrate').textContent = 'Initializing...';
-        } else {
-            gpuRow.style.display = 'none';
+            if (gpuRow) gpuRow.style.display = 'flex';
+            const gpuHrEl = document.getElementById('benchmark-gpu-hashrate');
+            if (gpuHrEl) gpuHrEl.textContent = window.chart?.formatHashrate(data.gpu_hashrate) || '0 H/s';
         }
 
         if (data.state && data.state !== 'benchmarking' && minerState === 'benchmarking') {
@@ -349,177 +346,107 @@ async function updateBenchmarkResults() {
     }
 }
 
-// Bitcoin Core functions
-async function testBitcoindConnection() {
-    const statusEl = document.getElementById('bitcoind-status-text');
-    const blockEl = document.getElementById('bitcoind-block-height');
-    const syncEl = document.getElementById('bitcoind-sync-progress');
-
-    statusEl.textContent = 'Testing...';
-    statusEl.style.color = 'var(--text-secondary)';
-
+// Fetch logs from backend
+async function fetchLogs() {
     try {
-        const res = await fetch('/api/bitcoind/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                host: document.getElementById('bitcoind-host').value,
-                port: parseInt(document.getElementById('bitcoind-rpc-port').value) || 8332,
-                user: document.getElementById('bitcoind-rpc-user').value,
-                password: document.getElementById('bitcoind-rpc-password').value
-            })
-        });
-
+        const res = await fetch('/api/logs');
         const data = await res.json();
 
-        if (data.success) {
-            statusEl.textContent = 'Connected';
-            statusEl.style.color = 'var(--success)';
-            blockEl.textContent = data.block_height || '-';
-            syncEl.textContent = data.sync_progress ? (data.sync_progress * 100).toFixed(1) + '%' : '100%';
-            addLog('Bitcoin Core connection successful', 'success');
-        } else {
-            statusEl.textContent = 'Failed';
-            statusEl.style.color = 'var(--danger)';
-            blockEl.textContent = '-';
-            syncEl.textContent = '-';
-            addLog('Bitcoin Core connection failed: ' + (data.error || 'Unknown error'), 'error');
+        if (data.logs && Array.isArray(data.logs)) {
+            // Clear existing logs and add backend logs
+            if (logOutput) {
+                logOutput.innerHTML = '';
+                data.logs.forEach(log => {
+                    const time = new Date(log.timestamp * 1000).toLocaleTimeString();
+                    const entry = document.createElement('div');
+                    entry.className = 'log-entry';
+                    entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${log.level}">${log.message}</span>`;
+                    logOutput.appendChild(entry);
+                });
+                if (logAutoScroll) {
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                }
+            }
         }
     } catch (e) {
-        statusEl.textContent = 'Error';
-        statusEl.style.color = 'var(--danger)';
-        blockEl.textContent = '-';
-        syncEl.textContent = '-';
-        addLog('Bitcoin Core test failed: ' + e.message, 'error');
-    }
-}
-
-async function bitcoindAction(action) {
-    const statusEl = document.getElementById('bitcoind-status-text');
-    statusEl.textContent = action === 'install' ? 'Installing...' :
-                           action === 'start' ? 'Starting...' : 'Stopping...';
-    statusEl.style.color = 'var(--text-secondary)';
-
-    try {
-        const res = await fetch('/api/bitcoind/' + action, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prune: parseInt(document.getElementById('bitcoind-prune').value) || 10000
-            })
-        });
-
-        const data = await res.json();
-
-        if (data.success) {
-            statusEl.textContent = data.status || 'Success';
-            statusEl.style.color = 'var(--success)';
-            addLog('Bitcoin Core ' + action + ' successful', 'success');
-
-            if (data.block_height) {
-                document.getElementById('bitcoind-block-height').textContent = data.block_height;
-            }
-            if (data.sync_progress !== undefined) {
-                document.getElementById('bitcoind-sync-progress').textContent =
-                    (data.sync_progress * 100).toFixed(1) + '%';
-            }
-        } else {
-            statusEl.textContent = 'Failed';
-            statusEl.style.color = 'var(--danger)';
-            addLog('Bitcoin Core ' + action + ' failed: ' + (data.error || 'Unknown error'), 'error');
-        }
-    } catch (e) {
-        statusEl.textContent = 'Error';
-        statusEl.style.color = 'var(--danger)';
-        addLog('Bitcoin Core ' + action + ' failed: ' + e.message, 'error');
+        console.error('Failed to fetch logs:', e);
     }
 }
 
 // Settings functions
 async function loadSettings() {
     try {
-        const res = await fetch('/api/settings');
-        const data = await res.json();
+        // Load from /api/info for basic config
+        const infoRes = await fetch('/api/info');
+        const info = await infoRes.json();
 
-        const poolHost = data.pool || '';
-        let detectedPreset = 'custom';
-        for (const [key, config] of Object.entries(poolPresets)) {
-            if (poolHost.includes(config.host)) {
-                detectedPreset = key;
-                break;
+        // Load idle state
+        const idleRes = await fetch('/api/idle');
+        const idle = await idleRes.json();
+
+        // Update form fields with available data
+        if (info.pool) {
+            const poolHost = document.getElementById('pool-host');
+            if (poolHost) poolHost.value = info.pool;
+
+            // Detect preset from pool
+            let detectedPreset = 'custom';
+            for (const [key, config] of Object.entries(poolPresets)) {
+                if (info.pool.includes(config.host) && config.host) {
+                    detectedPreset = key;
+                    break;
+                }
             }
+            const presetSelect = document.getElementById('solo-pool-preset');
+            if (presetSelect) presetSelect.value = detectedPreset;
         }
 
-        document.getElementById('solo-pool-preset').value = detectedPreset;
-        document.getElementById('pool-host').value = poolHost;
-        document.getElementById('payout-address').value = data.address || '';
-        document.getElementById('pool-password').value = data.password || 'x';
-        document.getElementById('threads-input').value = data.threads || 0;
-        document.getElementById('stats-interval').value = data.stats_interval || 10;
-        document.getElementById('enable-cpu').checked = data.enable_cpu !== false;
-        document.getElementById('enable-gpu').checked = data.enable_gpu || false;
+        if (info.workers) {
+            const threadsInput = document.getElementById('threads-input');
+            if (threadsInput) threadsInput.value = info.workers;
+        }
 
-        document.getElementById('bitcoind-enabled').checked = data.bitcoind_enabled || false;
-        document.getElementById('bitcoind-managed').checked = data.bitcoind_managed || false;
-        document.getElementById('bitcoind-host').value = data.bitcoind_host || '127.0.0.1';
-        document.getElementById('bitcoind-rpc-port').value = data.bitcoind_rpc_port || 8332;
-        document.getElementById('bitcoind-rpc-user').value = data.bitcoind_rpc_user || '';
-        document.getElementById('bitcoind-rpc-password').value = data.bitcoind_rpc_password || '';
-        document.getElementById('bitcoind-prune').value = data.bitcoind_prune || 10000;
-        document.getElementById('bitcoind-sv2').checked = data.bitcoind_sv2 || false;
+        // Update idle settings
+        if (idle) {
+            const idleEnabled = document.getElementById('idle-enabled-setting');
+            if (idleEnabled) idleEnabled.checked = idle.enabled;
+
+            const idleTimeout = document.getElementById('idle-timeout-setting');
+            if (idleTimeout) idleTimeout.value = Math.floor((idle.timeout || 900) / 60);
+
+            // Also update dashboard idle timeout
+            const dashIdleTimeout = document.getElementById('idle-timeout');
+            if (dashIdleTimeout) dashIdleTimeout.value = Math.floor((idle.timeout || 900) / 60);
+        }
 
         updatePoolPreset();
-        updateCpuStatus(data.enable_cpu !== false);
-        updateGpuStatus(data.enable_gpu || false);
-        updateBitcoindStatus(data.bitcoind_enabled || false);
-        updateBitcoindManagedMode(data.bitcoind_managed || false);
-
-        if (data.address) validateAddress(data.address);
     } catch (e) {
-        addLog('Failed to load settings', 'error');
+        console.error('Failed to load settings:', e);
     }
 }
 
 async function saveSettings() {
-    const address = document.getElementById('payout-address').value;
+    const address = document.getElementById('payout-address')?.value || '';
 
-    if (!validateAddress(address)) {
+    if (address && !validateAddress(address)) {
         addLog('Please fix validation errors before saving', 'error');
         return;
     }
 
-    if (!validateMiningMode()) {
-        addLog('Please fix mining mode errors before saving', 'error');
-        return;
-    }
+    const preset = document.getElementById('solo-pool-preset')?.value;
+    let pool = document.getElementById('pool-host')?.value || '';
 
-    const preset = document.getElementById('solo-pool-preset').value;
-    let pool = document.getElementById('pool-host').value;
-    let stratumVersion = 'v1';
-
-    if (preset !== 'custom' && poolPresets[preset]) {
+    if (preset && preset !== 'custom' && preset !== 'none' && poolPresets[preset]) {
         const config = poolPresets[preset];
         pool = `${config.host}:${config.port}`;
-        stratumVersion = config.stratum;
     }
 
     const settings = {
         pool: pool,
         address: address,
-        password: document.getElementById('pool-password').value,
-        threads: parseInt(document.getElementById('threads-input').value) || 0,
-        stats_interval: parseInt(document.getElementById('stats-interval').value) || 10,
-        enable_cpu: document.getElementById('enable-cpu').checked,
-        enable_gpu: document.getElementById('enable-gpu').checked,
-        stratum_version: stratumVersion,
-        bitcoind_enabled: document.getElementById('bitcoind-enabled').checked,
-        bitcoind_managed: document.getElementById('bitcoind-managed').checked,
-        bitcoind_host: document.getElementById('bitcoind-host').value,
-        bitcoind_rpc_port: parseInt(document.getElementById('bitcoind-rpc-port').value) || 8332,
-        bitcoind_rpc_user: document.getElementById('bitcoind-rpc-user').value,
-        bitcoind_rpc_password: document.getElementById('bitcoind-rpc-password').value,
-        bitcoind_prune: parseInt(document.getElementById('bitcoind-prune').value) || 10000,
-        bitcoind_sv2: document.getElementById('bitcoind-sv2').checked
+        threads: parseInt(document.getElementById('threads-input')?.value) || 0,
+        enable_cpu: document.getElementById('enable-cpu')?.checked ?? true,
+        enable_gpu: document.getElementById('enable-gpu')?.checked ?? false,
     };
 
     try {
@@ -540,33 +467,6 @@ async function saveSettings() {
     }
 }
 
-async function saveAndRestart() {
-    const settings = {
-        pool: document.getElementById('pool-host').value,
-        address: document.getElementById('payout-address').value,
-        password: document.getElementById('pool-password').value,
-        threads: parseInt(document.getElementById('threads-input').value) || 0,
-        stats_interval: parseInt(document.getElementById('stats-interval').value) || 10
-    };
-
-    try {
-        const res = await fetch('/api/control/restart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings)
-        });
-
-        const data = await res.json();
-        if (data.success) {
-            addLog('Settings saved, miner restarting...', 'success');
-        } else {
-            addLog('Failed to restart: ' + (data.message || 'Unknown error'), 'error');
-        }
-    } catch (e) {
-        addLog('Failed to save and restart: ' + e.message, 'error');
-    }
-}
-
 async function fetchMinerState() {
     try {
         const res = await fetch('/api/stats');
@@ -581,76 +481,160 @@ async function fetchMinerState() {
     }
 }
 
+// Floating control panel toggle
+function initFloatingControl() {
+    const toggleBtn = document.getElementById('control-toggle');
+    const floatingControl = document.getElementById('floating-control');
+
+    if (toggleBtn && floatingControl) {
+        toggleBtn.addEventListener('click', () => {
+            floatingControl.classList.toggle('collapsed');
+            toggleBtn.textContent = floatingControl.classList.contains('collapsed') ? '+' : '-';
+        });
+    }
+}
+
 // Initialize event listeners
 function initEventListeners() {
     // Settings buttons
-    document.getElementById('save-settings').addEventListener('click', saveSettings);
-    document.getElementById('save-restart').addEventListener('click', saveAndRestart);
-    document.getElementById('reload-settings').addEventListener('click', loadSettings);
-    document.getElementById('clear-logs').addEventListener('click', () => {
-        if (logOutput) logOutput.innerHTML = '';
-    });
+    const saveBtn = document.getElementById('save-settings');
+    if (saveBtn) saveBtn.addEventListener('click', saveSettings);
+
+    const reloadBtn = document.getElementById('reload-settings');
+    if (reloadBtn) reloadBtn.addEventListener('click', loadSettings);
+
+    const clearLogsBtn = document.getElementById('clear-logs');
+    if (clearLogsBtn) {
+        clearLogsBtn.addEventListener('click', () => {
+            if (logOutput) logOutput.innerHTML = '';
+        });
+    }
+
+    // Log auto-scroll
+    const autoScrollCheckbox = document.getElementById('log-auto-scroll');
+    if (autoScrollCheckbox) {
+        autoScrollCheckbox.addEventListener('change', (e) => {
+            logAutoScroll = e.target.checked;
+        });
+    }
 
     // Pool preset
-    document.getElementById('solo-pool-preset').addEventListener('change', updatePoolPreset);
+    const presetSelect = document.getElementById('solo-pool-preset');
+    if (presetSelect) presetSelect.addEventListener('change', updatePoolPreset);
 
     // CPU/GPU toggles
-    document.getElementById('enable-cpu').addEventListener('change', (e) => updateCpuStatus(e.target.checked));
-    document.getElementById('enable-gpu').addEventListener('change', (e) => updateGpuStatus(e.target.checked));
+    const enableCpu = document.getElementById('enable-cpu');
+    if (enableCpu) enableCpu.addEventListener('change', (e) => updateCpuSettings(e.target.checked));
 
-    // Bitcoin Core
-    document.getElementById('bitcoind-enabled').addEventListener('change', (e) => updateBitcoindStatus(e.target.checked));
-    document.getElementById('btn-test-bitcoind').addEventListener('click', testBitcoindConnection);
-    document.getElementById('bitcoind-managed').addEventListener('change', (e) => updateBitcoindManagedMode(e.target.checked));
-    document.getElementById('btn-bitcoind-install').addEventListener('click', () => bitcoindAction('install'));
-    document.getElementById('btn-bitcoind-start').addEventListener('click', () => bitcoindAction('start'));
-    document.getElementById('btn-bitcoind-stop').addEventListener('click', () => bitcoindAction('stop'));
+    const enableGpu = document.getElementById('enable-gpu');
+    if (enableGpu) enableGpu.addEventListener('change', (e) => updateGpuSettings(e.target.checked));
 
     // Address validation
-    document.getElementById('payout-address').addEventListener('input', (e) => validateAddress(e.target.value));
+    const payoutAddr = document.getElementById('payout-address');
+    if (payoutAddr) payoutAddr.addEventListener('input', (e) => validateAddress(e.target.value));
 
     // Control buttons
-    document.getElementById('btn-start').addEventListener('click', () => controlMiner('start'));
-    document.getElementById('btn-stop').addEventListener('click', () => controlMiner('stop'));
-    document.getElementById('btn-pause').addEventListener('click', () => controlMiner('pause'));
-    document.getElementById('btn-resume').addEventListener('click', () => controlMiner('resume'));
-    document.getElementById('btn-benchmark-start').addEventListener('click', startBenchmark);
-    document.getElementById('btn-benchmark-stop').addEventListener('click', stopBenchmark);
+    const btnStart = document.getElementById('btn-start');
+    if (btnStart) btnStart.addEventListener('click', () => controlMiner('start'));
 
-    // Idle mining
-    document.getElementById('idle-toggle').addEventListener('change', (e) => window.idle?.toggleIdleMining(e.target.checked));
-    document.getElementById('idle-timeout').addEventListener('change', () => {
-        if (window.idle?.isEnabled()) window.idle.updateIdleTimeout();
-    });
+    const btnStop = document.getElementById('btn-stop');
+    if (btnStop) btnStop.addEventListener('click', () => controlMiner('stop'));
+
+    const btnPause = document.getElementById('btn-pause');
+    if (btnPause) btnPause.addEventListener('click', () => controlMiner('pause'));
+
+    const btnResume = document.getElementById('btn-resume');
+    if (btnResume) btnResume.addEventListener('click', () => controlMiner('resume'));
+
+    const btnBenchStart = document.getElementById('btn-benchmark-start');
+    if (btnBenchStart) btnBenchStart.addEventListener('click', startBenchmark);
+
+    const btnBenchStop = document.getElementById('btn-benchmark-stop');
+    if (btnBenchStop) btnBenchStop.addEventListener('click', stopBenchmark);
+
+    // Idle mining (dashboard)
+    const idleToggle = document.getElementById('idle-toggle');
+    if (idleToggle) {
+        idleToggle.addEventListener('change', (e) => window.idle?.toggleIdleMining(e.target.checked));
+    }
+
+    const idleTimeoutInput = document.getElementById('idle-timeout');
+    if (idleTimeoutInput) {
+        idleTimeoutInput.addEventListener('change', () => {
+            if (window.idle?.isEnabled()) window.idle.updateIdleTimeout();
+        });
+    }
+
+    // Notification test
+    const testNotifBtn = document.getElementById('test-notification');
+    if (testNotifBtn) {
+        testNotifBtn.addEventListener('click', () => window.notifications?.testNotification());
+    }
+
+    // Header notification toggle
+    const notifToggle = document.getElementById('notification-toggle');
+    if (notifToggle) {
+        // Initialize state
+        updateNotificationToggleUI();
+
+        notifToggle.addEventListener('click', () => {
+            window.notifications?.toggle();
+            updateNotificationToggleUI();
+        });
+    }
+}
+
+// Update notification toggle button UI
+function updateNotificationToggleUI() {
+    const notifToggle = document.getElementById('notification-toggle');
+    if (!notifToggle) return;
+
+    const enabled = window.notifications?.isEnabled() ?? false;
+    const icon = notifToggle.querySelector('.notification-icon');
+
+    if (enabled) {
+        notifToggle.classList.remove('disabled');
+        notifToggle.title = 'Notifications Enabled - Click to disable';
+        if (icon) icon.textContent = '🔔';
+    } else {
+        notifToggle.classList.add('disabled');
+        notifToggle.title = 'Notifications Disabled - Click to enable';
+        if (icon) icon.textContent = '🔕';
+    }
 }
 
 // Initialize application
 function init() {
     initDom();
     initNavigation();
+    initFloatingControl();
     initEventListeners();
 
     // Initialize notifications
     window.notifications?.init();
 
     // Connect WebSocket
-    window.websocket.connect();
+    window.websocket?.connect();
 
     // Load initial data
     loadSettings();
     fetchMinerState();
+    fetchLogs();
     window.idle?.fetchIdleStatus();
-    window.chart.drawChart();
+    window.chart?.drawChart();
 
     // Resize handler
-    window.addEventListener('resize', window.chart.drawChart);
+    window.addEventListener('resize', () => window.chart?.drawChart());
 
     // Poll miner state periodically
     setInterval(() => {
-        if (window.websocket.isConnected()) {
+        if (window.websocket?.isConnected()) {
             fetchMinerState();
         }
     }, 5000);
+
+    // Poll logs periodically
+    setInterval(fetchLogs, 10000);
 
     // Start idle polling if enabled
     window.idle?.fetchIdleStatus().then(() => {
@@ -658,6 +642,8 @@ function init() {
             window.idle.startIdlePolling();
         }
     });
+
+    addLog('Dashboard initialized', 'info');
 }
 
 // Export functions

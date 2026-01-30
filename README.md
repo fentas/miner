@@ -365,6 +365,25 @@ Dashboard at `http://localhost:8080`:
 - Idle mining toggle
 - Settings management
 - Web notifications (new block, found block, errors)
+- **REST API** with interactive documentation
+
+### REST API
+
+The miner exposes a REST API for programmatic control:
+
+| Endpoint              | Method | Description                                 |
+| --------------------- | ------ | ------------------------------------------- |
+| `/api/stats`          | GET    | Mining statistics (hashrate, shares, uptime) |
+| `/api/info`           | GET    | Miner version and configuration             |
+| `/api/logs`           | GET    | Recent log entries                          |
+| `/api/control/pause`  | GET    | Pause mining                                |
+| `/api/control/resume` | GET    | Resume mining                               |
+| `/api/idle`           | GET    | Idle mining status                          |
+| `/api/idle/enable`    | POST   | Enable idle mining                          |
+| `/api/idle/disable`   | POST   | Disable idle mining                         |
+| `/api/openapi.json`   | GET    | OpenAPI 3.0 specification                   |
+
+**Interactive API Documentation:** Click the **API** tab in the web dashboard to browse the full API with [Scalar](https://github.com/scalar/scalar).
 
 &nbsp;
 

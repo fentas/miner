@@ -243,6 +243,43 @@ function initNotificationListeners() {
     }
 }
 
+// Toggle notifications on/off
+async function toggle() {
+    if (notificationSettings.enabled) {
+        notificationSettings.enabled = false;
+        saveNotificationSettings();
+        updateNotificationUI();
+        window.app?.addLog('Notifications disabled', 'info');
+    } else {
+        const granted = await requestPermission();
+        if (granted) {
+            notificationSettings.enabled = true;
+            saveNotificationSettings();
+            updateNotificationUI();
+            window.app?.addLog('Notifications enabled', 'success');
+        } else {
+            window.app?.addLog('Notification permission denied', 'error');
+        }
+    }
+}
+
+// Check if notifications are enabled
+function isEnabled() {
+    return notificationSettings.enabled && notificationsSupported && Notification.permission === 'granted';
+}
+
+// Test notification
+function testNotification() {
+    if (isEnabled()) {
+        showNotification('Test Notification', {
+            body: 'Notifications are working correctly!',
+            tag: 'test'
+        });
+    } else {
+        window.app?.addLog('Please enable notifications first', 'error');
+    }
+}
+
 // Export functions
 window.notifications = {
     init: () => {
@@ -258,6 +295,9 @@ window.notifications = {
     notifyError,
     notifyConnectionLost,
     notifyIdleMiningStart,
+    toggle,
+    isEnabled,
+    testNotification,
     getSettings: () => notificationSettings,
     setSettings: (settings) => {
         notificationSettings = { ...notificationSettings, ...settings };

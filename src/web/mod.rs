@@ -70,6 +70,35 @@ pub struct IdleState {
     pub mining_due_to_idle: bool,
 }
 
+/// Mining context with block/pool info
+#[derive(Clone, Default, serde::Serialize)]
+pub struct MiningContext {
+    pub block_height: u64,
+    pub difficulty: f64,
+    pub pool_difficulty: f64,
+    pub est_time_to_share: f64,  // seconds
+    pub gpu_enabled: bool,
+    pub gpu_hashrate: f64,
+    pub gpu_device: String,
+    pub peers: u32,  // Number of connected peers (for Bitcoin Core mode)
+    pub network_hashrate: f64,  // Network hashrate estimate
+}
+
+/// Configuration snapshot for API
+#[derive(Clone, Default, serde::Serialize)]
+pub struct ConfigSnapshot {
+    pub pool_preset: String,
+    pub pool_address: String,
+    pub payout_address: String,
+    pub enable_cpu: bool,
+    pub cpu_threads: usize,
+    pub enable_gpu: bool,
+    pub idle_enabled: bool,
+    pub idle_timeout: u64,
+    pub bitcoind_enabled: bool,
+    pub bitcoind_managed: bool,
+}
+
 /// Shared state for the web server
 pub struct WebState {
     pub stats: RwLock<StatsSnapshot>,
@@ -81,6 +110,8 @@ pub struct WebState {
     pub stats_tx: broadcast::Sender<StatsUpdate>,
     pub idle_state: RwLock<IdleState>,
     pub logs: RwLock<Vec<LogEntry>>,
+    pub mining_context: RwLock<MiningContext>,
+    pub config: RwLock<ConfigSnapshot>,
 }
 
 /// Log entry for web dashboard
@@ -107,6 +138,12 @@ pub struct StatsUpdate {
     pub mining_paused: bool,
     pub state: String,
     pub threads: usize,
+    // Mining context
+    pub block_height: u64,
+    pub difficulty: f64,
+    pub est_time_to_share: f64,
+    pub gpu_enabled: bool,
+    pub gpu_hashrate: f64,
 }
 
 impl WebState {
@@ -115,23 +152,31 @@ impl WebState {
         Self {
             stats: RwLock::new(StatsSnapshot::default()),
             hashrate: RwLock::new(0.0),
-            pool_address,
+            pool_address: pool_address.clone(),
             worker_count,
             start_time: std::time::Instant::now(),
             mining_paused: RwLock::new(false),
             stats_tx,
             idle_state: RwLock::new(IdleState::default()),
             logs: RwLock::new(Vec::new()),
+            mining_context: RwLock::new(MiningContext::default()),
+            config: RwLock::new(ConfigSnapshot {
+                pool_address,
+                cpu_threads: worker_count,
+                enable_cpu: true,
+                ..Default::default()
+            }),
         }
     }
 
-    /// Initialize idle state from config
-    pub fn with_idle_config(self, enabled: bool, timeout: u64) -> Self {
-        // Use blocking write since this is during initialization
-        let mut idle = self.idle_state.blocking_write();
-        idle.enabled = enabled;
-        idle.timeout = timeout;
-        drop(idle);
+    /// Initialize idle state from config (call before starting tokio runtime)
+    pub fn with_idle_config(mut self, enabled: bool, timeout: u64) -> Self {
+        // Replace the idle state entirely during construction
+        self.idle_state = RwLock::new(IdleState {
+            enabled,
+            timeout,
+            ..Default::default()
+        });
         self
     }
 
@@ -171,12 +216,56 @@ impl WebState {
         }
     }
 
+    /// Update mining context (block height, difficulty, etc.)
+    pub async fn update_mining_context(&self, ctx: MiningContext) {
+        *self.mining_context.write().await = ctx;
+    }
+
+    /// Update block height
+    pub async fn set_block_height(&self, height: u64) {
+        self.mining_context.write().await.block_height = height;
+    }
+
+    /// Update difficulty
+    pub async fn set_difficulty(&self, difficulty: f64, pool_difficulty: f64) {
+        let mut ctx = self.mining_context.write().await;
+        ctx.difficulty = difficulty;
+        ctx.pool_difficulty = pool_difficulty;
+    }
+
+    /// Update GPU stats
+    pub async fn set_gpu_stats(&self, enabled: bool, hashrate: f64, device: String) {
+        let mut ctx = self.mining_context.write().await;
+        ctx.gpu_enabled = enabled;
+        ctx.gpu_hashrate = hashrate;
+        ctx.gpu_device = device;
+    }
+
+    /// Update Bitcoin Core network info
+    pub async fn set_network_info(&self, peers: u32, network_hashrate: f64) {
+        let mut ctx = self.mining_context.write().await;
+        ctx.peers = peers;
+        ctx.network_hashrate = network_hashrate;
+    }
+
+    /// Update config snapshot
+    pub async fn set_config(&self, config: ConfigSnapshot) {
+        *self.config.write().await = config;
+    }
+
+    /// Initialize config from parsed TOML (call before starting tokio runtime)
+    pub fn with_config(mut self, config: ConfigSnapshot) -> Self {
+        self.config = RwLock::new(config);
+        self
+    }
+
     pub async fn update_stats(&self, stats: StatsSnapshot, hashrate: f64) {
         *self.stats.write().await = stats.clone();
         *self.hashrate.write().await = hashrate;
 
         let uptime = self.start_time.elapsed().as_secs();
         let paused = *self.mining_paused.read().await;
+        let ctx = self.mining_context.read().await.clone();
 
         // Determine miner state
         let state = if paused {
@@ -185,6 +274,14 @@ impl WebState {
             "running"
         } else {
             "stopped"
+        };
+
+        // Calculate estimated time to share based on pool difficulty
+        let est_time = if hashrate > 0.0 && ctx.pool_difficulty > 0.0 {
+            // Time = (2^32 * difficulty) / hashrate
+            (4_294_967_296.0 * ctx.pool_difficulty) / hashrate
+        } else {
+            0.0
         };
 
         let update = StatsUpdate {
@@ -201,6 +298,11 @@ impl WebState {
             mining_paused: paused,
             state: state.to_string(),
             threads: self.worker_count,
+            block_height: ctx.block_height,
+            difficulty: ctx.pool_difficulty,
+            est_time_to_share: est_time,
+            gpu_enabled: ctx.gpu_enabled,
+            gpu_hashrate: ctx.gpu_hashrate,
         };
 
         // Broadcast to all WebSocket clients (ignore errors if no receivers)
@@ -222,6 +324,7 @@ pub fn create_router(state: Arc<WebState>, static_dir: &str, auth: Option<BasicA
         // Stats and info
         .route("/api/stats", get(api_stats))
         .route("/api/info", get(api_info))
+        .route("/api/settings", get(api_settings))
         .route("/api/logs", get(api_logs))
         // Mining control
         .route("/api/control/pause", get(api_pause))
@@ -292,6 +395,8 @@ async fn api_stats(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     let hashrate = *state.hashrate.read().await;
     let uptime = state.start_time.elapsed().as_secs();
     let paused = *state.mining_paused.read().await;
+    let ctx = state.mining_context.read().await.clone();
+    let config = state.config.read().await.clone();
 
     // Determine miner state
     let miner_state = if paused {
@@ -302,31 +407,87 @@ async fn api_stats(State(state): State<Arc<WebState>>) -> impl IntoResponse {
         "stopped"
     };
 
+    // Calculate estimated time to share
+    let est_time = if hashrate > 0.0 && ctx.pool_difficulty > 0.0 {
+        (4_294_967_296.0 * ctx.pool_difficulty) / hashrate
+    } else {
+        0.0
+    };
+
+    let idle = state.idle_state.read().await.clone();
     let hashrate_str = format_hashrate_unit(hashrate);
     Json(serde_json::json!({
         "hashrate": hashrate,
         "hashrate_unit": hashrate_str,
-        "hashrate_formatted": hashrate_str,  // Alias for overlay compatibility
+        "hashrate_formatted": hashrate_str,
         "hashes": stats.hashes,
-        "total_hashes": stats.hashes,  // Alias for web dashboard
+        "total_hashes": stats.hashes,
         "shares_accepted": stats.shares_accepted,
         "shares_rejected": stats.shares_rejected,
         "blocks_found": stats.blocks_found,
         "uptime_seconds": uptime,
-        "uptime": uptime,  // Alias for web dashboard (in seconds)
+        "uptime": uptime,
         "uptime_formatted": format_uptime(uptime),
         "mining_paused": paused,
         "state": miner_state,
         "threads": state.worker_count,
+        "block_height": ctx.block_height,
+        "difficulty": ctx.pool_difficulty,
+        "est_time_to_share": est_time,
+        "gpu_enabled": ctx.gpu_enabled,
+        "gpu_hashrate": ctx.gpu_hashrate,
+        "gpu_device": ctx.gpu_device,
+        "peers": ctx.peers,
+        "network_hashrate": ctx.network_hashrate,
+        "idle_mining_enabled": idle.enabled,
+        "idle_mining_active": idle.mining_due_to_idle,
+        "user_idle": idle.is_idle,
+        "mode": if config.bitcoind_enabled { "solo" } else { "pool" },
+        "pool_preset": config.pool_preset,
     }))
 }
 
 /// API endpoint for miner info
 async fn api_info(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let config = state.config.read().await.clone();
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "pool": state.pool_address,
         "workers": state.worker_count,
+        "pool_preset": config.pool_preset,
+        "payout_address": config.payout_address,
+        "enable_cpu": config.enable_cpu,
+        "enable_gpu": config.enable_gpu,
+    }))
+}
+
+/// API endpoint for settings/configuration
+async fn api_settings(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let config = state.config.read().await.clone();
+    let idle = state.idle_state.read().await.clone();
+    let ctx = state.mining_context.read().await.clone();
+    Json(serde_json::json!({
+        "pool": {
+            "preset": config.pool_preset,
+            "address": config.pool_address,
+            "payout_address": config.payout_address,
+        },
+        "mining": {
+            "enable_cpu": config.enable_cpu,
+            "cpu_threads": config.cpu_threads,
+            "enable_gpu": config.enable_gpu,
+        },
+        "idle": {
+            "enabled": idle.enabled,
+            "timeout": idle.timeout,
+        },
+        "bitcoind": {
+            "enabled": config.bitcoind_enabled,
+            "managed": config.bitcoind_managed,
+            "peers": ctx.peers,
+            "network_hashrate": ctx.network_hashrate,
+        },
+        "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -409,7 +570,7 @@ async fn api_openapi() -> impl IntoResponse {
                     "tags": ["Stats"],
                     "responses": {
                         "200": {
-                            "description": "Mining statistics",
+                            "description": "Mining statistics including hashrate, shares, block info",
                             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Stats" } } }
                         }
                     }
@@ -419,14 +580,21 @@ async fn api_openapi() -> impl IntoResponse {
                 "get": {
                     "summary": "Get miner information",
                     "tags": ["Info"],
-                    "responses": { "200": { "description": "Miner info" } }
+                    "responses": { "200": { "description": "Miner version, pool, and basic config" } }
+                }
+            },
+            "/api/settings": {
+                "get": {
+                    "summary": "Get full configuration",
+                    "tags": ["Settings"],
+                    "responses": { "200": { "description": "Complete miner configuration" } }
                 }
             },
             "/api/logs": {
                 "get": {
                     "summary": "Get recent log entries",
                     "tags": ["Logs"],
-                    "responses": { "200": { "description": "Log entries" } }
+                    "responses": { "200": { "description": "Array of log entries with timestamp and level" } }
                 }
             },
             "/api/control/pause": {
@@ -447,7 +615,7 @@ async fn api_openapi() -> impl IntoResponse {
                 "get": {
                     "summary": "Get idle mining status",
                     "tags": ["Idle"],
-                    "responses": { "200": { "description": "Idle mining status" } }
+                    "responses": { "200": { "description": "Idle mining state including timeout and current idle time" } }
                 }
             },
             "/api/idle/enable": {
@@ -492,13 +660,27 @@ async fn api_openapi() -> impl IntoResponse {
                         "hashrate": { "type": "number", "description": "Current hashrate in H/s" },
                         "hashrate_formatted": { "type": "string", "description": "Human-readable hashrate" },
                         "hashes": { "type": "integer", "description": "Total hashes computed" },
+                        "total_hashes": { "type": "integer", "description": "Alias for hashes" },
                         "shares_accepted": { "type": "integer" },
                         "shares_rejected": { "type": "integer" },
                         "blocks_found": { "type": "integer" },
                         "uptime_seconds": { "type": "integer" },
+                        "uptime": { "type": "integer", "description": "Alias for uptime_seconds" },
                         "mining_paused": { "type": "boolean" },
                         "state": { "type": "string", "enum": ["running", "paused", "stopped"] },
-                        "threads": { "type": "integer" }
+                        "threads": { "type": "integer" },
+                        "block_height": { "type": "integer", "description": "Current network block height" },
+                        "difficulty": { "type": "number", "description": "Pool/share difficulty" },
+                        "est_time_to_share": { "type": "number", "description": "Estimated seconds to find share" },
+                        "gpu_enabled": { "type": "boolean" },
+                        "gpu_hashrate": { "type": "number" },
+                        "gpu_device": { "type": "string" },
+                        "peers": { "type": "integer", "description": "Connected Bitcoin Core peers" },
+                        "mode": { "type": "string", "enum": ["pool", "solo"] },
+                        "pool_preset": { "type": "string" },
+                        "idle_mining_enabled": { "type": "boolean" },
+                        "idle_mining_active": { "type": "boolean" },
+                        "user_idle": { "type": "boolean" }
                     }
                 }
             }
@@ -652,6 +834,11 @@ mod tests {
             mining_paused: false,
             state: "running".to_string(),
             threads: 8,
+            block_height: 800000,
+            difficulty: 1.0,
+            est_time_to_share: 100.0,
+            gpu_enabled: false,
+            gpu_hashrate: 0.0,
         };
 
         let cloned = update.clone();
@@ -660,6 +847,7 @@ mod tests {
         assert!(!cloned.mining_paused);
         assert_eq!(cloned.state, "running");
         assert_eq!(cloned.threads, 8);
+        assert_eq!(cloned.block_height, 800000);
     }
 
     #[test]
@@ -678,6 +866,11 @@ mod tests {
             mining_paused: true,
             state: "paused".to_string(),
             threads: 4,
+            block_height: 850000,
+            difficulty: 2.5,
+            est_time_to_share: 50.0,
+            gpu_enabled: true,
+            gpu_hashrate: 1000.0,
         };
 
         let json = serde_json::to_string(&update).unwrap();
@@ -686,6 +879,50 @@ mod tests {
         assert!(json.contains("\"shares_accepted\":5"));
         assert!(json.contains("\"state\":\"paused\""));
         assert!(json.contains("\"threads\":4"));
+        assert!(json.contains("\"block_height\":850000"));
+        assert!(json.contains("\"gpu_enabled\":true"));
+    }
+
+    #[test]
+    fn test_mining_context_default() {
+        let ctx = MiningContext::default();
+        assert_eq!(ctx.block_height, 0);
+        assert_eq!(ctx.difficulty, 0.0);
+        assert_eq!(ctx.peers, 0);
+        assert!(!ctx.gpu_enabled);
+    }
+
+    #[test]
+    fn test_config_snapshot_default() {
+        let config = ConfigSnapshot::default();
+        assert_eq!(config.pool_preset, "");
+        assert!(!config.enable_cpu);
+        assert!(!config.bitcoind_enabled);
+    }
+
+    #[tokio::test]
+    async fn test_web_state_mining_context() {
+        let state = WebState::new("pool".to_string(), 4);
+
+        // Update mining context
+        state.set_block_height(800000).await;
+        state.set_difficulty(1.5, 2.0).await;
+        state.set_network_info(8, 500e18).await;
+
+        let ctx = state.mining_context.read().await;
+        assert_eq!(ctx.block_height, 800000);
+        assert_eq!(ctx.pool_difficulty, 2.0);
+        assert_eq!(ctx.peers, 8);
+    }
+
+    #[tokio::test]
+    async fn test_web_state_idle_config() {
+        let state = WebState::new("pool".to_string(), 4)
+            .with_idle_config(true, 900);
+
+        let idle = state.idle_state.read().await;
+        assert!(idle.enabled);
+        assert_eq!(idle.timeout, 900);
     }
 
     #[tokio::test]

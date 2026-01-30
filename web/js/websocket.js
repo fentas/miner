@@ -7,38 +7,24 @@ let lastBlockHeight = 0;
 let lastSharesAccepted = 0;
 let lastSharesRejected = 0;
 
-// DOM Elements cache
-let statusDot, statusText;
-
-// Initialize DOM references
-function initDom() {
-    statusDot = document.getElementById('status-dot');
-    statusText = document.getElementById('status-text');
-}
-
 // Connect to WebSocket
 function connectWebSocket() {
-    if (!statusDot) initDom();
-
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
     ws.onopen = () => {
         connected = true;
-        if (statusDot) statusDot.classList.add('connected');
-        if (statusText) statusText.textContent = 'Connected';
+        updateConnectionStatus(true);
         window.app?.addLog('Connected to miner', 'success');
     };
 
     ws.onclose = () => {
         const wasConnected = connected;
         connected = false;
-        if (statusDot) statusDot.classList.remove('connected');
-        if (statusText) statusText.textContent = 'Disconnected';
-        window.app?.addLog('Disconnected from miner', 'error');
+        updateConnectionStatus(false);
 
-        // Notify if was previously connected
         if (wasConnected) {
+            window.app?.addLog('Disconnected from miner', 'error');
             window.notifications?.notifyConnectionLost();
         }
 
@@ -60,19 +46,37 @@ function connectWebSocket() {
     };
 }
 
+// Update connection status in header
+function updateConnectionStatus(isConnected) {
+    const statusEl = document.getElementById('connection-status');
+    if (!statusEl) return;
+
+    const textEl = statusEl.querySelector('.connection-text');
+
+    if (isConnected) {
+        statusEl.classList.add('connected');
+        statusEl.classList.remove('disconnected');
+        if (textEl) textEl.textContent = 'Connected';
+    } else {
+        statusEl.classList.add('disconnected');
+        statusEl.classList.remove('connected');
+        if (textEl) textEl.textContent = 'Disconnected';
+    }
+}
+
 // Handle incoming stats data
 function handleStats(data) {
     // Update hashrate
     if (data.hashrate !== undefined) {
         const hashrateEl = document.getElementById('hashrate');
-        if (hashrateEl) hashrateEl.textContent = window.chart.formatHashrate(data.hashrate);
-        window.chart.addHashrateData(data.hashrate);
+        if (hashrateEl) hashrateEl.textContent = window.chart?.formatHashrate(data.hashrate) || '0 H/s';
+        window.chart?.addHashrateData(data.hashrate);
     }
 
     // Update total hashes
     if (data.total_hashes !== undefined) {
         const el = document.getElementById('total-hashes');
-        if (el) el.textContent = window.app.formatNumber(data.total_hashes);
+        if (el) el.textContent = window.app?.formatNumber(data.total_hashes) || data.total_hashes;
     }
 
     // Update shares
@@ -130,13 +134,13 @@ function handleStats(data) {
     // Update estimated time
     if (data.est_time_to_share !== undefined) {
         const el = document.getElementById('est-time');
-        if (el) el.textContent = data.est_time_to_share > 0 ? '~' + window.app.formatDuration(data.est_time_to_share) : '-';
+        if (el) el.textContent = data.est_time_to_share > 0 ? '~' + window.app?.formatDuration(data.est_time_to_share) : '-';
     }
 
     // Update uptime
     if (data.uptime !== undefined) {
         const el = document.getElementById('uptime');
-        if (el) el.textContent = window.app.formatUptime(data.uptime * 1000);
+        if (el) el.textContent = window.app?.formatUptime(data.uptime * 1000) || '0:00:00';
     }
 
     // GPU stats
@@ -147,10 +151,10 @@ function handleStats(data) {
 
     if (data.gpu_hashrate !== undefined) {
         const gpuHrEl = document.getElementById('gpu-hashrate');
-        if (gpuHrEl) gpuHrEl.textContent = data.gpu_hashrate > 0 ? window.chart.formatHashrate(data.gpu_hashrate) : '-';
+        if (gpuHrEl) gpuHrEl.textContent = data.gpu_hashrate > 0 ? window.chart?.formatHashrate(data.gpu_hashrate) : '-';
 
         const dashGpuHrEl = document.getElementById('dashboard-gpu-hashrate');
-        if (dashGpuHrEl) dashGpuHrEl.textContent = data.gpu_hashrate > 0 ? window.chart.formatHashrate(data.gpu_hashrate) : '0 H/s';
+        if (dashGpuHrEl) dashGpuHrEl.textContent = data.gpu_hashrate > 0 ? window.chart?.formatHashrate(data.gpu_hashrate) : '0 H/s';
     }
 
     if (data.gpu_status !== undefined) {
@@ -160,10 +164,10 @@ function handleStats(data) {
 
     if (data.gpu_device !== undefined) {
         const el = document.getElementById('gpu-device-info');
-        if (el) el.textContent = data.gpu_device || 'GPU device';
+        if (el) el.textContent = data.gpu_device || '-';
     }
 
-    // Log messages
+    // Log messages from backend
     if (data.log) {
         window.app?.addLog(data.log, data.log_type || 'info');
 
@@ -216,5 +220,6 @@ window.websocket = {
     connect: connectWebSocket,
     disconnect,
     isConnected,
-    handleStats
+    handleStats,
+    updateConnectionStatus
 };

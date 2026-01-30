@@ -7,32 +7,36 @@ let idlePollingInterval = null;
 function updateIdleUI(enabled, userIdle, miningActive) {
     idleEnabled = enabled;
     const indicator = document.getElementById('idle-indicator');
-    const visualStatus = document.getElementById('idle-visual-status');
-    const activeStatus = document.getElementById('idle-active-status');
+    const idleDetails = document.getElementById('idle-details');
     const toggle = document.getElementById('idle-toggle');
 
-    toggle.checked = enabled;
+    if (toggle) toggle.checked = enabled;
+
+    if (!indicator) return;
+
+    const iconEl = indicator.querySelector('.idle-icon');
+    const textEl = indicator.querySelector('.idle-text');
 
     if (!enabled) {
-        indicator.className = 'idle-mining-indicator disabled';
-        indicator.innerHTML = '<span class="moon-icon">🌙</span><span class="status-text">Disabled</span>';
-        visualStatus.style.display = 'none';
-        activeStatus.style.display = 'none';
+        indicator.className = 'idle-status-display disabled';
+        if (iconEl) iconEl.textContent = '🌙';
+        if (textEl) textEl.textContent = 'Disabled';
+        if (idleDetails) idleDetails.style.display = 'none';
     } else if (miningActive) {
-        indicator.className = 'idle-mining-indicator active';
-        indicator.innerHTML = '<span class="moon-icon">⛏️</span><span class="status-text" style="color: var(--success);">Mining!</span>';
-        visualStatus.style.display = 'none';
-        activeStatus.style.display = 'flex';
+        indicator.className = 'idle-status-display mining';
+        if (iconEl) iconEl.textContent = '⛏️';
+        if (textEl) textEl.textContent = 'Mining!';
+        if (idleDetails) idleDetails.style.display = 'block';
     } else if (userIdle) {
-        indicator.className = 'idle-mining-indicator active';
-        indicator.innerHTML = '<span class="moon-icon">💤</span><span class="status-text">User idle</span>';
-        visualStatus.style.display = 'none';
-        activeStatus.style.display = 'flex';
+        indicator.className = 'idle-status-display active';
+        if (iconEl) iconEl.textContent = '💤';
+        if (textEl) textEl.textContent = 'User Idle';
+        if (idleDetails) idleDetails.style.display = 'block';
     } else {
-        indicator.className = 'idle-mining-indicator waiting';
-        indicator.innerHTML = '<span class="moon-icon">🌙</span><span class="status-text">Waiting...</span>';
-        visualStatus.style.display = 'flex';
-        activeStatus.style.display = 'none';
+        indicator.className = 'idle-status-display waiting';
+        if (iconEl) iconEl.textContent = '🌙';
+        if (textEl) textEl.textContent = 'Waiting...';
+        if (idleDetails) idleDetails.style.display = 'block';
     }
 }
 
@@ -46,14 +50,25 @@ async function fetchIdleStatus() {
 
         const idleTime = data.idle_time || 0;
         const timeout = data.timeout || 900;
-        document.getElementById('idle-time-display').textContent = formatIdleTime(idleTime);
-        document.getElementById('idle-timeout-display').textContent = formatIdleTime(timeout);
 
-        if (data.is_idle && !data.mining_due_to_idle) {
-            document.getElementById('idle-status-text').textContent = 'User is idle, starting soon...';
-        } else if (!data.is_idle) {
-            document.getElementById('idle-status-text').textContent = 'Waiting for idle...';
+        const idleTimeDisplay = document.getElementById('idle-time-display');
+        if (idleTimeDisplay) idleTimeDisplay.textContent = formatIdleTime(idleTime);
+
+        const idleTimeoutDisplay = document.getElementById('idle-timeout-display');
+        if (idleTimeoutDisplay) idleTimeoutDisplay.textContent = formatIdleTime(timeout);
+
+        // Update the dashboard timeout input with the actual configured value
+        const timeoutInput = document.getElementById('idle-timeout');
+        if (timeoutInput && !timeoutInput.matches(':focus')) {
+            timeoutInput.value = Math.floor(timeout / 60);
         }
+
+        // Update settings page timeout input
+        const settingTimeoutInput = document.getElementById('idle-timeout-setting');
+        if (settingTimeoutInput && !settingTimeoutInput.matches(':focus')) {
+            settingTimeoutInput.value = Math.floor(timeout / 60);
+        }
+
     } catch (e) {
         console.error('Failed to fetch idle status:', e);
     }
@@ -71,7 +86,8 @@ function formatIdleTime(seconds) {
 
 // Toggle idle mining
 async function toggleIdleMining(enable) {
-    const timeout = parseInt(document.getElementById('idle-timeout').value) * 60 || 900;
+    const timeoutInput = document.getElementById('idle-timeout');
+    const timeout = timeoutInput ? (parseInt(timeoutInput.value) * 60) || 900 : 900;
 
     try {
         if (enable) {
@@ -97,7 +113,8 @@ async function toggleIdleMining(enable) {
 
 // Update idle timeout
 async function updateIdleTimeout() {
-    const timeout = parseInt(document.getElementById('idle-timeout').value) * 60 || 900;
+    const timeoutInput = document.getElementById('idle-timeout');
+    const timeout = timeoutInput ? (parseInt(timeoutInput.value) * 60) || 900 : 900;
 
     try {
         const res = await fetch(`/api/idle/timeout?timeout=${timeout}`, { method: 'POST' });

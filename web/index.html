@@ -14,9 +14,14 @@
                 <div class="logo-icon">₿</div>
                 <span>BTC Miner</span>
             </div>
-            <div class="status-badge">
-                <div class="status-dot" id="status-dot"></div>
-                <span id="status-text">Disconnected</span>
+            <div class="header-controls">
+                <button class="header-btn" id="notification-toggle" title="Toggle Notifications">
+                    <span class="notification-icon">🔔</span>
+                </button>
+                <div class="connection-status" id="connection-status">
+                    <div class="connection-dot"></div>
+                    <span class="connection-text">Connecting...</span>
+                </div>
             </div>
         </div>
     </header>
@@ -24,113 +29,19 @@
     <main class="container">
         <nav>
             <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
+            <button class="nav-btn" data-tab="benchmark">Benchmark</button>
             <button class="nav-btn" data-tab="settings">Settings</button>
             <button class="nav-btn" data-tab="logs">Logs</button>
+            <button class="nav-btn" data-tab="api">API</button>
         </nav>
 
         <!-- Dashboard -->
         <section id="dashboard" class="tab-content active">
-            <!-- Control Panel -->
-            <div class="control-panel">
-                <div class="control-header">
-                    <div class="control-title">Miner Control</div>
-                    <div class="miner-state">
-                        <div class="state-indicator" id="state-indicator"></div>
-                        <span id="state-text">Stopped</span>
-                    </div>
-                </div>
-                <div class="control-buttons">
-                    <button class="btn btn-success" id="btn-start">Start Mining</button>
-                    <button class="btn btn-danger" id="btn-stop" disabled>Stop Mining</button>
-                    <button class="btn btn-warning" id="btn-pause" disabled>Pause</button>
-                    <button class="btn btn-primary" id="btn-resume" disabled>Resume</button>
-                </div>
-
-                <div class="control-section">
-                    <h4>Benchmark Mode</h4>
-                    <div class="benchmark-controls">
-                        <div class="benchmark-input">
-                            <label>Duration (sec):</label>
-                            <input type="number" id="benchmark-duration" min="0" value="30" placeholder="0 = unlimited">
-                        </div>
-                        <button class="btn btn-primary" id="btn-benchmark-start">Start Benchmark</button>
-                        <button class="btn btn-danger" id="btn-benchmark-stop" disabled>Stop Benchmark</button>
-                    </div>
-                    <div class="benchmark-results" id="benchmark-results">
-                        <div class="benchmark-stat">
-                            <span class="benchmark-stat-label">Total Hashrate</span>
-                            <span class="benchmark-stat-value" id="benchmark-hashrate">0 H/s</span>
-                        </div>
-                        <div class="benchmark-stat">
-                            <span class="benchmark-stat-label">CPU Hashrate</span>
-                            <span class="benchmark-stat-value" id="benchmark-cpu-hashrate">0 H/s</span>
-                        </div>
-                        <div class="benchmark-stat" id="benchmark-gpu-row" style="display: none;">
-                            <span class="benchmark-stat-label">GPU Hashrate</span>
-                            <span class="benchmark-stat-value" id="benchmark-gpu-hashrate">0 H/s</span>
-                        </div>
-                        <div class="benchmark-stat">
-                            <span class="benchmark-stat-label">Total Hashes</span>
-                            <span class="benchmark-stat-value" id="benchmark-hashes">0</span>
-                        </div>
-                        <div class="benchmark-stat">
-                            <span class="benchmark-stat-label">Duration</span>
-                            <span class="benchmark-stat-value" id="benchmark-time">0s</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="control-section">
-                    <h4>Idle Mining (Screensaver Mode)</h4>
-                    <div class="idle-section">
-                        <div class="idle-toggle">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="idle-toggle">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span>Enable idle mining</span>
-                        </div>
-                        <div class="benchmark-input">
-                            <label>Timeout (min):</label>
-                            <input type="number" id="idle-timeout" min="1" value="15" style="width: 80px;">
-                        </div>
-                        <div class="idle-status" id="idle-status">
-                            <div class="idle-mining-indicator disabled" id="idle-indicator">
-                                <span class="moon-icon">🌙</span>
-                                <span class="status-text">Disabled</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="idle-status" id="idle-visual-status" style="margin-top: 15px; display: none;">
-                        <div class="zzz-animation" id="zzz-animation">
-                            <span>z</span><span>z</span><span>z</span>
-                        </div>
-                        <div class="idle-info">
-                            <span id="idle-status-text">Waiting for idle...</span><br>
-                            <small>Idle time: <strong id="idle-time-display">0s</strong> / <strong id="idle-timeout-display">15m</strong></small>
-                        </div>
-                    </div>
-                    <div class="idle-status" id="idle-active-status" style="margin-top: 15px; display: none;">
-                        <div class="starting-animation">
-                            <span></span><span></span><span></span>
-                        </div>
-                        <div class="idle-info">
-                            <span style="color: var(--success);">Mining while you're away!</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Hashrate (CPU)</div>
+                <div class="stat-card primary">
+                    <div class="stat-label">Hashrate</div>
                     <div class="stat-value accent" id="hashrate">0 H/s</div>
-                    <div class="stat-subtitle">CPU mining speed</div>
-                </div>
-                <div class="stat-card" id="gpu-hashrate-card" style="display: none;">
-                    <div class="stat-label">Hashrate (GPU)</div>
-                    <div class="stat-value accent" id="dashboard-gpu-hashrate">0 H/s</div>
-                    <div class="stat-subtitle" id="gpu-device-info">GPU device</div>
+                    <div class="stat-subtitle">Combined CPU + GPU</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Total Hashes</div>
@@ -140,7 +51,7 @@
                 <div class="stat-card">
                     <div class="stat-label">Shares</div>
                     <div class="stat-value" id="shares">0</div>
-                    <div class="stat-subtitle"><span id="shares-accepted" style="color: var(--success)">0</span> accepted / <span id="shares-rejected" style="color: var(--danger)">0</span> rejected</div>
+                    <div class="stat-subtitle"><span id="shares-accepted" class="text-success">0</span> accepted / <span id="shares-rejected" class="text-danger">0</span> rejected</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Uptime</div>
@@ -169,283 +80,254 @@
                 </div>
             </div>
 
+            <!-- GPU Stats Card (shown when GPU enabled) -->
+            <div class="gpu-card" id="gpu-hashrate-card" style="display: none;">
+                <h4>GPU Mining</h4>
+                <div class="gpu-stats-grid">
+                    <div class="gpu-stat">
+                        <span class="gpu-stat-label">Device</span>
+                        <span class="gpu-stat-value" id="gpu-device-info">-</span>
+                    </div>
+                    <div class="gpu-stat">
+                        <span class="gpu-stat-label">Hashrate</span>
+                        <span class="gpu-stat-value accent" id="dashboard-gpu-hashrate">0 H/s</span>
+                    </div>
+                    <div class="gpu-stat">
+                        <span class="gpu-stat-label">Status</span>
+                        <span class="gpu-stat-value" id="gpu-status-text">-</span>
+                    </div>
+                </div>
+            </div>
+
             <div class="chart-container">
                 <div class="chart-header">
                     <div class="chart-title">Hashrate History</div>
                 </div>
                 <canvas id="hashrate-chart"></canvas>
             </div>
+
+            <!-- Idle Mining Section -->
+            <div class="idle-card">
+                <div class="idle-header">
+                    <h4>Idle Mining (Screensaver Mode)</h4>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="idle-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="idle-content">
+                    <div class="idle-config">
+                        <label>Timeout:</label>
+                        <input type="number" id="idle-timeout" min="1" value="15" class="input-small">
+                        <span>minutes</span>
+                    </div>
+                    <div class="idle-status-display" id="idle-indicator">
+                        <span class="idle-icon">🌙</span>
+                        <span class="idle-text">Disabled</span>
+                    </div>
+                    <div class="idle-details" id="idle-details" style="display: none;">
+                        <span>Idle: <strong id="idle-time-display">0s</strong> / <strong id="idle-timeout-display">15m</strong></span>
+                    </div>
+                </div>
+            </div>
         </section>
 
-        <!-- Settings -->
-        <section id="settings" class="tab-content settings-panel">
-            <div class="settings-card">
-                <div class="settings-group">
-                    <h3>Pool Configuration</h3>
-                    <div class="form-row">
-                        <label>Solo Pool Preset</label>
-                        <div>
-                            <select id="solo-pool-preset">
-                                <option value="ckpool">CKPool (V1, 2% fee)</option>
-                                <option value="braiins">Braiins (V1, 0.5% fee)</option>
-                                <option value="ocean">Ocean (V1, 0% fee)</option>
-                                <option value="custom">Custom Pool</option>
-                            </select>
-                            <div id="pool-preset-info" class="pool-preset-info"></div>
-                        </div>
+        <!-- Benchmark Tab -->
+        <section id="benchmark" class="tab-content" style="display: none;">
+            <div class="benchmark-panel">
+                <h3>CPU/GPU Benchmark</h3>
+                <p class="benchmark-description">Run a benchmark to measure your mining performance without connecting to a pool.</p>
+
+                <div class="benchmark-config">
+                    <div class="form-row inline">
+                        <label>Duration (seconds):</label>
+                        <input type="number" id="benchmark-duration" min="0" value="30" placeholder="0 = unlimited" class="input-medium">
                     </div>
-                    <div class="form-row" id="pool-host-row">
-                        <label>Pool Address <span class="stratum-badge v1" id="stratum-badge">V1</span></label>
-                        <div>
-                            <input type="text" id="pool-host" placeholder="solo.ckpool.org:3333">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <label>Payout Address</label>
-                        <div>
-                            <input type="text" id="payout-address" placeholder="Your Bitcoin address">
-                            <div id="address-validation" class="validation-message"></div>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <label>Password</label>
-                        <input type="password" id="pool-password" placeholder="x">
+                    <div class="benchmark-buttons">
+                        <button class="btn btn-primary" id="btn-benchmark-start">Start Benchmark</button>
+                        <button class="btn btn-danger" id="btn-benchmark-stop" disabled>Stop Benchmark</button>
                     </div>
                 </div>
 
-                <div class="settings-group">
-                    <h3>Mining Configuration</h3>
-                    <div id="mining-mode-validation" class="validation-message" style="margin-bottom: 15px;"></div>
-                    <div class="form-row-toggle">
+                <div class="benchmark-results" id="benchmark-results">
+                    <h4>Results</h4>
+                    <div class="benchmark-stats-grid">
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Total Hashrate</span>
+                            <span class="benchmark-stat-value accent" id="benchmark-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">CPU Hashrate</span>
+                            <span class="benchmark-stat-value" id="benchmark-cpu-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat" id="benchmark-gpu-row" style="display: none;">
+                            <span class="benchmark-stat-label">GPU Hashrate</span>
+                            <span class="benchmark-stat-value" id="benchmark-gpu-hashrate">0 H/s</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Total Hashes</span>
+                            <span class="benchmark-stat-value" id="benchmark-hashes">0</span>
+                        </div>
+                        <div class="benchmark-stat">
+                            <span class="benchmark-stat-label">Duration</span>
+                            <span class="benchmark-stat-value" id="benchmark-time">0s</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings -->
+        <section id="settings" class="tab-content" style="display: none;">
+            <div class="settings-grid">
+                <!-- Pool Configuration -->
+                <div class="settings-card">
+                    <h3>Pool Configuration</h3>
+                    <div class="form-group">
+                        <label>Pool Preset</label>
+                        <select id="solo-pool-preset">
+                            <option value="ckpool">CKPool (V1, 2% fee)</option>
+                            <option value="braiins">Braiins (V1, 0.5% fee)</option>
+                            <option value="ocean">Ocean (V1, 0% fee)</option>
+                            <option value="none">None - Solo Mode</option>
+                            <option value="custom">Custom Pool</option>
+                        </select>
+                        <div id="pool-preset-info" class="form-hint"></div>
+                    </div>
+                    <div class="form-group" id="pool-host-row">
+                        <label>Pool Address</label>
+                        <input type="text" id="pool-host" placeholder="solo.ckpool.org:3333">
+                    </div>
+                    <div class="form-group">
+                        <label>Payout Address</label>
+                        <input type="text" id="payout-address" placeholder="Your Bitcoin address (bc1q...)">
+                        <div id="address-validation" class="form-validation"></div>
+                    </div>
+                </div>
+
+                <!-- Mining Configuration -->
+                <div class="settings-card">
+                    <h3>Mining</h3>
+                    <div class="form-group toggle-row">
                         <div>
-                            <label>Enable CPU Mining</label>
-                            <div class="toggle-description">Use CPU threads for mining</div>
+                            <label>CPU Mining</label>
+                            <span class="form-hint">Use CPU threads for mining</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="enable-cpu" checked>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div id="cpu-threads-row" class="form-row" style="margin-left: 20px;">
+                    <div class="form-group" id="cpu-threads-row">
                         <label>CPU Threads</label>
-                        <input type="number" id="threads-input" min="0" placeholder="0 = auto">
+                        <input type="number" id="threads-input" min="0" placeholder="0 = auto-detect">
+                        <span class="form-hint">0 = use all available cores</span>
                     </div>
-                    <div class="form-row-toggle">
+                    <div class="form-group toggle-row">
                         <div>
-                            <label>Enable GPU Mining</label>
-                            <div class="toggle-description">Use CUDA/OpenCL for additional hashrate</div>
+                            <label>GPU Mining</label>
+                            <span class="form-hint">OpenCL/CUDA acceleration</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="enable-gpu">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div id="gpu-status" class="gpu-stats" style="display: none;">
-                        <div class="gpu-stats-row">
-                            <span class="gpu-stats-label">GPU Status</span>
-                            <span class="gpu-stats-value" id="gpu-status-text">Detecting...</span>
+                    <div id="gpu-settings" style="display: none;">
+                        <div class="form-group">
+                            <label>GPU Intensity</label>
+                            <input type="number" id="gpu-intensity" min="1" max="100" value="100">
+                            <span class="form-hint">1-100, higher = more GPU usage</span>
                         </div>
-                        <div class="gpu-stats-row">
-                            <span class="gpu-stats-label">GPU Hashrate</span>
-                            <span class="gpu-stats-value" id="gpu-hashrate">-</span>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <label>Stats Interval (sec)</label>
-                        <input type="number" id="stats-interval" min="1" value="10">
                     </div>
                 </div>
 
-                <div class="settings-group">
-                    <h3>Web Interface</h3>
-                    <div class="form-row">
-                        <label>Web Port</label>
-                        <input type="number" id="web-port" value="8080" disabled>
-                    </div>
-                </div>
-
-                <div class="settings-group">
-                    <h3>Bitcoin Core Integration <span class="stratum-badge v2">ADVANCED</span></h3>
-                    <div class="pool-preset-info visible" style="margin-bottom: 15px;">
-                        Run your own pruned Bitcoin Core node (~10GB) for true decentralization with custom block templates.
-                        This bypasses pool template control and gives you sovereignty over transaction selection.
-                    </div>
-                    <div class="form-row-toggle">
+                <!-- Idle Mining -->
+                <div class="settings-card">
+                    <h3>Idle Mining</h3>
+                    <div class="form-group toggle-row">
                         <div>
-                            <label>Enable Bitcoin Core</label>
-                            <div class="toggle-description">Connect to local bitcoind for block templates</div>
+                            <label>Enable Idle Mining</label>
+                            <span class="form-hint">Mine when computer is idle</span>
                         </div>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="bitcoind-enabled">
+                            <input type="checkbox" id="idle-enabled-setting">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div id="bitcoind-settings" style="display: none;">
-                        <div class="form-row-toggle">
-                            <div>
-                                <label>Managed Mode</label>
-                                <div class="toggle-description">Auto download, install, and manage Bitcoin Core</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="bitcoind-managed">
-                                <span class="toggle-slider"></span>
-                            </label>
+                    <div class="form-group">
+                        <label>Idle Timeout (minutes)</label>
+                        <input type="number" id="idle-timeout-setting" min="1" value="15">
+                        <span class="form-hint">Start mining after this many minutes of inactivity</span>
+                    </div>
+                    <div class="form-group toggle-row">
+                        <div>
+                            <label>Pause on Activity</label>
+                            <span class="form-hint">Stop mining when user returns</span>
                         </div>
-                        <div id="bitcoind-managed-controls" style="display: none; margin-bottom: 15px;">
-                            <div class="pool-preset-info visible" style="background: rgba(0, 208, 132, 0.1); border-color: rgba(0, 208, 132, 0.3);">
-                                Managed mode will automatically download Bitcoin Core v28.0, configure it with optimal settings, and start/stop it with the miner.
-                            </div>
-                            <div class="button-group" style="margin-top: 10px;">
-                                <button class="btn btn-primary" id="btn-bitcoind-install">Install Bitcoin Core</button>
-                                <button class="btn btn-success" id="btn-bitcoind-start">Start</button>
-                                <button class="btn btn-danger" id="btn-bitcoind-stop">Stop</button>
-                            </div>
-                        </div>
-                        <div id="bitcoind-manual-settings">
-                            <div class="form-row">
-                                <label>RPC Host</label>
-                                <input type="text" id="bitcoind-host" value="127.0.0.1" placeholder="127.0.0.1">
-                            </div>
-                            <div class="form-row">
-                                <label>RPC Port</label>
-                                <input type="number" id="bitcoind-rpc-port" value="8332" placeholder="8332">
-                            </div>
-                            <div class="form-row">
-                                <label>RPC Username</label>
-                                <input type="text" id="bitcoind-rpc-user" placeholder="From bitcoin.conf">
-                            </div>
-                            <div class="form-row">
-                                <label>RPC Password</label>
-                                <input type="password" id="bitcoind-rpc-password" placeholder="From bitcoin.conf">
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <label>Prune Size (MB)</label>
-                            <div>
-                                <input type="number" id="bitcoind-prune" value="10000" min="0" placeholder="10000">
-                                <div class="toggle-description">0 = full node, 550 = minimum, 10000 = recommended (~10GB)</div>
-                            </div>
-                        </div>
-                        <div class="form-row-toggle">
-                            <div>
-                                <label>Enable Stratum V2</label>
-                                <div class="toggle-description">Experimental - requires Bitcoin Core v30+</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="bitcoind-sv2">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div id="bitcoind-status" class="gpu-stats">
-                            <div class="gpu-stats-row">
-                                <span class="gpu-stats-label">Status</span>
-                                <span class="gpu-stats-value" id="bitcoind-status-text">Not connected</span>
-                            </div>
-                            <div class="gpu-stats-row">
-                                <span class="gpu-stats-label">Block Height</span>
-                                <span class="gpu-stats-value" id="bitcoind-block-height">-</span>
-                            </div>
-                            <div class="gpu-stats-row">
-                                <span class="gpu-stats-label">Sync Progress</span>
-                                <span class="gpu-stats-value" id="bitcoind-sync-progress">-</span>
-                            </div>
-                        </div>
-                        <button class="btn btn-secondary" id="btn-test-bitcoind" style="margin-top: 10px;">Test Connection</button>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="idle-pause-on-active" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
 
-                <div class="settings-group">
-                    <h3>Web Notifications</h3>
-                    <div class="pool-preset-info visible" style="margin-bottom: 15px;">
-                        Get browser notifications for important mining events. Permission must be granted.
-                        <span id="notification-status" style="float: right; font-weight: 600;">-</span>
+                <!-- Web Interface -->
+                <div class="settings-card">
+                    <h3>Web Interface</h3>
+                    <div class="form-group">
+                        <label>Web Port</label>
+                        <input type="number" id="web-port" value="8080" disabled>
+                        <span class="form-hint">Requires restart to change</span>
                     </div>
-                    <div class="form-row-toggle">
+                    <div class="form-group toggle-row">
                         <div>
-                            <label>Enable Notifications</label>
-                            <div class="toggle-description">Master switch for all notifications</div>
+                            <label>Authentication</label>
+                            <span class="form-hint">Require login for web access</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="auth-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Notifications -->
+                <div class="settings-card">
+                    <h3>Notifications</h3>
+                    <div class="form-group toggle-row">
+                        <div>
+                            <label>Browser Notifications</label>
+                            <span class="form-hint" id="notification-status">-</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="notify-enabled">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>New Block Detected</label>
-                            <div class="toggle-description">Network found a new block</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-new-block" checked>
-                            <span class="toggle-slider"></span>
+                    <div class="notification-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notify-new-block" checked> New block detected
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notify-found-block" checked> Block found
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notify-share-accepted"> Share accepted
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notify-share-rejected" checked> Share rejected
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="notify-error" checked> Errors
                         </label>
                     </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Block Found!</label>
-                            <div class="toggle-description">You found a block (always recommended)</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-found-block" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Share Accepted</label>
-                            <div class="toggle-description">Pool accepted your share</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-share-accepted">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Share Rejected</label>
-                            <div class="toggle-description">Pool rejected your share</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-share-rejected" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Errors</label>
-                            <div class="toggle-description">Mining errors and warnings</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-error" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Connection Lost</label>
-                            <div class="toggle-description">Lost connection to miner</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-connection-lost" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div class="form-row-toggle">
-                        <div>
-                            <label>Idle Mining Started</label>
-                            <div class="toggle-description">Mining started due to user idle</div>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="notify-idle-mining">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <button class="btn btn-secondary" id="test-notification" style="margin-top: 10px;">Test Notification</button>
+                    <button class="btn btn-secondary btn-sm" id="test-notification">Test Notification</button>
                 </div>
 
-                <div class="button-group">
+                <!-- Actions -->
+                <div class="settings-actions">
                     <button class="btn btn-primary" id="save-settings">Save Settings</button>
-                    <button class="btn btn-success" id="save-restart">Save & Restart</button>
                     <button class="btn btn-secondary" id="reload-settings">Reload</button>
                 </div>
             </div>
@@ -453,15 +335,71 @@
 
         <!-- Logs -->
         <section id="logs" class="tab-content" style="display: none;">
-            <div class="log-container">
+            <div class="log-panel">
                 <div class="log-header">
-                    <div class="log-title">Mining Log</div>
-                    <button class="btn btn-secondary" id="clear-logs">Clear</button>
+                    <h3>Mining Log</h3>
+                    <div class="log-controls">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="log-auto-scroll" checked> Auto-scroll
+                        </label>
+                        <button class="btn btn-secondary btn-sm" id="clear-logs">Clear</button>
+                    </div>
                 </div>
-                <div id="log-output"></div>
+                <div class="log-output" id="log-output"></div>
+            </div>
+        </section>
+
+        <!-- API Documentation -->
+        <section id="api" class="tab-content" style="display: none;">
+            <div class="api-panel">
+                <div class="api-header">
+                    <h3>REST API</h3>
+                    <a href="/api/openapi.json" class="btn btn-secondary btn-sm" target="_blank">OpenAPI JSON</a>
+                </div>
+                <p class="api-description">Base URL: <code id="api-base-url"></code></p>
+                <div id="scalar-container"></div>
             </div>
         </section>
     </main>
+
+    <!-- Floating Control Panel -->
+    <div class="floating-control" id="floating-control">
+        <div class="control-header">
+            <div class="miner-state">
+                <div class="state-dot" id="state-indicator"></div>
+                <span id="state-text">Stopped</span>
+            </div>
+            <button class="control-toggle" id="control-toggle">−</button>
+        </div>
+        <div class="control-body" id="control-body">
+            <div class="control-buttons">
+                <button class="btn btn-success btn-sm" id="btn-start">Start</button>
+                <button class="btn btn-danger btn-sm" id="btn-stop" disabled>Stop</button>
+                <button class="btn btn-warning btn-sm" id="btn-pause" disabled>Pause</button>
+                <button class="btn btn-primary btn-sm" id="btn-resume" disabled>Resume</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scalar API Documentation -->
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+        let scalarInitialized = false;
+        document.querySelector('[data-tab="api"]').addEventListener('click', function() {
+            document.getElementById('api-base-url').textContent = window.location.origin;
+            if (!scalarInitialized) {
+                scalarInitialized = true;
+                Scalar.createApiReference('#scalar-container', {
+                    url: '/api/openapi.json',
+                    theme: 'purple',
+                    darkMode: true,
+                    hideModels: false,
+                    hideDownloadButton: true,
+                    customCss: '.scalar-app { background: transparent !important; }'
+                });
+            }
+        });
+    </script>
 
     <!-- Load JavaScript modules -->
     <script src="js/chart.js"></script>
