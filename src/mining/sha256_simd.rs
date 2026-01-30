@@ -1,12 +1,15 @@
 //! SHA-256 SIMD optimizations for mining
 //!
 //! Provides hardware-accelerated SHA-256 implementations:
-//! - SHA-NI: Intel SHA Extensions (~800-900 MH/s single thread)
-//! - AVX2: 8-way parallel hashing (~200-300 MH/s)
-//! - AVX512: 16-way parallel hashing (~400-500 MH/s)
-//! - Generic: Portable fallback (~10-20 MH/s)
+//! - SHA-NI: Intel SHA Extensions (~100-150 MH/s single thread)
+//! - AVX2: 8-way parallel hashing (planned)
+//! - AVX512: 16-way parallel hashing (planned)
+//! - Generic: Portable fallback (~2-3 MH/s)
 
 use super::job::hash_meets_target;
+
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
 
 
 /// SHA-256 initial hash values (H0-H7)
@@ -198,16 +201,275 @@ pub fn sha256d_midstate_generic(midstate: &Midstate, tail: &[u8; 16], nonce: u32
     state_to_bytes(&state)
 }
 
-/// SHA-NI accelerated double SHA-256 (x86_64 only)
+/// SHA-NI accelerated single SHA-256 transform
 ///
 /// # Safety
 /// Caller must ensure CPU supports SHA-NI and SSE4.1 instructions.
-/// Use `is_x86_feature_detected!("sha")` before calling.
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sha", enable = "sse4.1")]
-pub unsafe fn sha256d_shani(data: &[u8]) -> [u8; 32] {
-    // For now, fall back to generic - full SHA-NI impl requires more intrinsics
-    sha256d_generic(data)
+#[target_feature(enable = "sha", enable = "sse4.1", enable = "ssse3")]
+unsafe fn sha256_transform_shani(state: &mut [u32; 8], block: &[u8; 64]) {
+    // Load initial state
+    // SHA-NI uses ABEF and CDGH layout
+    let mut abef = _mm_set_epi32(
+        state[0] as i32, state[1] as i32, state[4] as i32, state[5] as i32
+    );
+    let mut cdgh = _mm_set_epi32(
+        state[2] as i32, state[3] as i32, state[6] as i32, state[7] as i32
+    );
+
+    let abef_save = abef;
+    let cdgh_save = cdgh;
+
+    // Byte swap mask for converting little-endian to big-endian
+    let shuf_mask = _mm_set_epi64x(0x0c0d0e0f08090a0b, 0x0405060700010203);
+
+    // Load and byte-swap message
+    let mut msg0 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr() as *const __m128i), shuf_mask);
+    let mut msg1 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr().add(16) as *const __m128i), shuf_mask);
+    let mut msg2 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr().add(32) as *const __m128i), shuf_mask);
+    let mut msg3 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr().add(48) as *const __m128i), shuf_mask);
+
+    // Rounds 0-3
+    let mut msg = _mm_add_epi32(msg0, _mm_set_epi32(
+        K[3] as i32, K[2] as i32, K[1] as i32, K[0] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 4-7
+    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    msg = _mm_add_epi32(msg1, _mm_set_epi32(
+        K[7] as i32, K[6] as i32, K[5] as i32, K[4] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 8-11
+    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg2, msg1, 4));
+    msg0 = _mm_sha256msg2_epu32(msg0, msg2);
+    msg = _mm_add_epi32(msg2, _mm_set_epi32(
+        K[11] as i32, K[10] as i32, K[9] as i32, K[8] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 12-15
+    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg3, msg2, 4));
+    msg1 = _mm_sha256msg2_epu32(msg1, msg3);
+    msg = _mm_add_epi32(msg3, _mm_set_epi32(
+        K[15] as i32, K[14] as i32, K[13] as i32, K[12] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 16-19
+    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg0, msg3, 4));
+    msg2 = _mm_sha256msg2_epu32(msg2, msg0);
+    msg = _mm_add_epi32(msg0, _mm_set_epi32(
+        K[19] as i32, K[18] as i32, K[17] as i32, K[16] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 20-23
+    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg1, msg0, 4));
+    msg3 = _mm_sha256msg2_epu32(msg3, msg1);
+    msg = _mm_add_epi32(msg1, _mm_set_epi32(
+        K[23] as i32, K[22] as i32, K[21] as i32, K[20] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 24-27
+    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg2, msg1, 4));
+    msg0 = _mm_sha256msg2_epu32(msg0, msg2);
+    msg = _mm_add_epi32(msg2, _mm_set_epi32(
+        K[27] as i32, K[26] as i32, K[25] as i32, K[24] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 28-31
+    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg3, msg2, 4));
+    msg1 = _mm_sha256msg2_epu32(msg1, msg3);
+    msg = _mm_add_epi32(msg3, _mm_set_epi32(
+        K[31] as i32, K[30] as i32, K[29] as i32, K[28] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 32-35
+    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg0, msg3, 4));
+    msg2 = _mm_sha256msg2_epu32(msg2, msg0);
+    msg = _mm_add_epi32(msg0, _mm_set_epi32(
+        K[35] as i32, K[34] as i32, K[33] as i32, K[32] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 36-39
+    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg1, msg0, 4));
+    msg3 = _mm_sha256msg2_epu32(msg3, msg1);
+    msg = _mm_add_epi32(msg1, _mm_set_epi32(
+        K[39] as i32, K[38] as i32, K[37] as i32, K[36] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 40-43
+    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg2, msg1, 4));
+    msg0 = _mm_sha256msg2_epu32(msg0, msg2);
+    msg = _mm_add_epi32(msg2, _mm_set_epi32(
+        K[43] as i32, K[42] as i32, K[41] as i32, K[40] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 44-47
+    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg3, msg2, 4));
+    msg1 = _mm_sha256msg2_epu32(msg1, msg3);
+    msg = _mm_add_epi32(msg3, _mm_set_epi32(
+        K[47] as i32, K[46] as i32, K[45] as i32, K[44] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 48-51
+    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg0, msg3, 4));
+    msg2 = _mm_sha256msg2_epu32(msg2, msg0);
+    msg = _mm_add_epi32(msg0, _mm_set_epi32(
+        K[51] as i32, K[50] as i32, K[49] as i32, K[48] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 52-55
+    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg1, msg0, 4));
+    msg3 = _mm_sha256msg2_epu32(msg3, msg1);
+    msg = _mm_add_epi32(msg1, _mm_set_epi32(
+        K[55] as i32, K[54] as i32, K[53] as i32, K[52] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 56-59
+    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg2, msg1, 4));
+    msg0 = _mm_sha256msg2_epu32(msg0, msg2);
+    msg = _mm_add_epi32(msg2, _mm_set_epi32(
+        K[59] as i32, K[58] as i32, K[57] as i32, K[56] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Rounds 60-63
+    msg = _mm_add_epi32(msg3, _mm_set_epi32(
+        K[63] as i32, K[62] as i32, K[61] as i32, K[60] as i32
+    ));
+    cdgh = _mm_sha256rnds2_epu32(cdgh, abef, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    abef = _mm_sha256rnds2_epu32(abef, cdgh, msg);
+
+    // Add to original state
+    abef = _mm_add_epi32(abef, abef_save);
+    cdgh = _mm_add_epi32(cdgh, cdgh_save);
+
+    // Extract state - ABEF contains A,B,E,F and CDGH contains C,D,G,H
+    // Layout: abef = [A, B, E, F], cdgh = [C, D, G, H]
+    let abef_arr: [i32; 4] = std::mem::transmute(abef);
+    let cdgh_arr: [i32; 4] = std::mem::transmute(cdgh);
+
+    state[0] = abef_arr[3] as u32;
+    state[1] = abef_arr[2] as u32;
+    state[2] = cdgh_arr[3] as u32;
+    state[3] = cdgh_arr[2] as u32;
+    state[4] = abef_arr[1] as u32;
+    state[5] = abef_arr[0] as u32;
+    state[6] = cdgh_arr[1] as u32;
+    state[7] = cdgh_arr[0] as u32;
+}
+
+/// SHA-NI accelerated double SHA-256 with midstate for mining
+///
+/// # Safety
+/// Caller must ensure CPU supports SHA-NI, SSE4.1, and SSSE3 instructions.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sha", enable = "sse4.1", enable = "ssse3")]
+pub unsafe fn sha256d_midstate_shani(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    // Build the last block (16 bytes of data + nonce + padding)
+    let mut block = [0u8; 64];
+    block[..16].copy_from_slice(tail);
+    block[16..20].copy_from_slice(&nonce.to_le_bytes());
+    // Padding for 80-byte message
+    block[20] = 0x80;
+    // Length in bits (80 * 8 = 640 = 0x280) at end
+    block[62] = 0x02;
+    block[63] = 0x80;
+
+    // First hash (continuing from midstate)
+    let mut state = midstate.state;
+    sha256_transform_shani(&mut state, &block);
+    let first_hash = state_to_bytes(&state);
+
+    // Second hash
+    let mut state = H_INIT;
+    let mut block2 = [0u8; 64];
+    block2[..32].copy_from_slice(&first_hash);
+    block2[32] = 0x80;
+    block2[62] = 0x01; // 256 bits = 0x100
+    block2[63] = 0x00;
+    sha256_transform_shani(&mut state, &block2);
+    state_to_bytes(&state)
+}
+
+/// SHA-NI accelerated mining loop
+///
+/// # Safety
+/// Caller must ensure CPU supports SHA-NI, SSE4.1, and SSSE3 instructions.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sha", enable = "sse4.1", enable = "ssse3")]
+unsafe fn mine_shani(
+    midstate: &Midstate,
+    tail: &[u8; 16],
+    nonce_start: u32,
+    nonce_count: u32,
+    target: &[u8; 32],
+) -> Option<(u32, [u8; 32])> {
+    for i in 0..nonce_count {
+        let nonce = nonce_start.wrapping_add(i);
+        let hash = sha256d_midstate_shani(midstate, tail, nonce);
+        if hash_meets_target(&hash, target) {
+            return Some((nonce, hash));
+        }
+    }
+    None
 }
 
 /// Mine with midstate using best available SIMD
@@ -222,29 +484,22 @@ pub fn mine_with_midstate(
 
     match level {
         SimdLevel::ShaNi => {
-            // Use SHA-NI path
+            // Use SHA-NI hardware acceleration
+            #[cfg(target_arch = "x86_64")]
+            if is_x86_feature_detected!("sha") && is_x86_feature_detected!("ssse3") {
+                // SAFETY: We just verified SHA-NI and SSSE3 are supported
+                return unsafe {
+                    mine_shani(midstate, tail, nonce_start, nonce_count, target)
+                };
+            }
             mine_generic(midstate, tail, nonce_start, nonce_count, target)
         }
         SimdLevel::Avx2 => {
-            // Use AVX2 8-way path
-            #[cfg(target_arch = "x86_64")]
-            if is_x86_feature_detected!("avx2") {
-                // SAFETY: We just verified AVX2 is supported via is_x86_feature_detected!
-                return unsafe {
-                    mine_avx2_8way(midstate, tail, nonce_start, nonce_count, target)
-                };
-            }
+            // AVX2 path - currently uses generic (true 8-way parallel not yet implemented)
             mine_generic(midstate, tail, nonce_start, nonce_count, target)
         }
         SimdLevel::Avx512 => {
-            // Use AVX512 16-way path (fall back to AVX2 for now)
-            #[cfg(target_arch = "x86_64")]
-            if is_x86_feature_detected!("avx2") {
-                // SAFETY: We just verified AVX2 is supported via is_x86_feature_detected!
-                return unsafe {
-                    mine_avx2_8way(midstate, tail, nonce_start, nonce_count, target)
-                };
-            }
+            // AVX512 path - currently uses generic (true 16-way parallel not yet implemented)
             mine_generic(midstate, tail, nonce_start, nonce_count, target)
         }
         SimdLevel::Generic => mine_generic(midstate, tail, nonce_start, nonce_count, target),

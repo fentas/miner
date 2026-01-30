@@ -229,7 +229,7 @@ impl Profiler {
 
     /// Benchmark hasher with different thread counts (simulated via iterations)
     pub fn bench_hasher_throughput(&self) -> BenchmarkResult {
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let header = [0u8; 76];
         let target = [0xFF; 32];
         let batch_size = 65536u32;
@@ -275,7 +275,7 @@ impl Profiler {
                 let run = Arc::clone(&running);
 
                 let handle = thread::spawn(move || {
-                    let hasher = Hasher::new();
+                    let mut hasher = Hasher::new();
                     let header = [0u8; 76];
                     let target = [0xFF; 32];
                     let mut nonce = 0u32;

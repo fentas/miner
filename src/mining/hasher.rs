@@ -61,17 +61,21 @@ impl Hasher {
     ///
     /// This uses the midstate optimization and SIMD (AVX2/SHA-NI) for maximum performance.
     /// The header_prefix contains 76 bytes: first 64 bytes for midstate, bytes 64-76 for tail.
+    ///
+    /// The midstate is cached and only recomputed when the first 64 bytes change.
     pub fn hash_nonce_range(
-        &self,
+        &mut self,
         header_prefix: &[u8; 76],
         start_nonce: u32,
         count: u32,
         target: &[u8; 32],
     ) -> Option<(u32, [u8; 32])> {
-        // Compute midstate from first 64 bytes of header
-        let mut prefix_64 = [0u8; 64];
-        prefix_64.copy_from_slice(&header_prefix[..64]);
-        let midstate = Midstate::from_header_prefix(&prefix_64);
+        // Check if we need to recompute midstate (first 64 bytes changed)
+        let prefix_64: &[u8; 64] = header_prefix[..64].try_into().unwrap();
+        if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
+            self.midstate_header_prefix = *prefix_64;
+            self.midstate = Some(Midstate::from_header_prefix(prefix_64));
+        }
 
         // Extract tail (bytes 64-76, padded to 16 bytes - nonce goes in last 4)
         let mut tail = [0u8; 16];
@@ -79,7 +83,7 @@ impl Hasher {
         // Note: tail[12..16] will be filled with nonce by mine_with_midstate
 
         // Use SIMD-optimized mining function (AVX2 8-way or SHA-NI)
-        mine_with_midstate(&midstate, &tail, start_nonce, count, target)
+        mine_with_midstate(self.midstate.as_ref().unwrap(), &tail, start_nonce, count, target)
     }
 }
 
@@ -262,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_hash_nonce_range_no_match() {
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let mut header_prefix = [0u8; 76];
         // Set some data
         header_prefix[0] = 0x01;
@@ -279,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_hash_nonce_range_easy_target() {
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let header_prefix = [0u8; 76];
 
         // Very easy target - everything passes
@@ -313,7 +317,7 @@ mod tests {
     fn test_hash_nonce_range_uses_midstate_optimization() {
         use std::time::Instant;
 
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let header_prefix = [0u8; 76];
 
         // Very hard target - we don't want to find a match, just measure speed
@@ -367,7 +371,7 @@ mod tests {
     fn test_hash_nonce_range_correctness() {
         use crate::mining::sha256_simd::{Midstate, sha256d_midstate_generic};
 
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let header_prefix = [0xABu8; 76];
 
         // Use easy target so we get a result

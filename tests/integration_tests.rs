@@ -52,7 +52,7 @@ fn test_mining_flow_job_to_share() {
 /// Test that the hasher correctly identifies shares meeting target
 #[test]
 fn test_hasher_finds_share_with_easy_target() {
-    let hasher = Hasher::new();
+    let mut hasher = Hasher::new();
     let mut header_prefix = [0u8; 76];
 
     // Set version (little-endian)
@@ -246,7 +246,7 @@ fn test_merkle_root_computation() {
 /// Test that headers with different nonces produce different hashes
 #[test]
 fn test_nonce_produces_different_hashes() {
-    let hasher = Hasher::new();
+    let mut hasher = Hasher::new();
 
     let mut header1 = [0u8; 80];
     let mut header2 = [0u8; 80];
@@ -883,7 +883,7 @@ fn test_block_meets_network_target_integration() {
 /// Test hasher correctly validates blocks against network target
 #[test]
 fn test_hasher_block_validation() {
-    let hasher = Hasher::new();
+    let mut hasher = Hasher::new();
 
     // Create a header that might produce a hash meeting target
     let mut header_prefix = [0u8; 76];

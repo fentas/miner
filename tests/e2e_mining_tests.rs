@@ -389,7 +389,7 @@ fn e2e_mine_multiple_blocks() {
 fn e2e_hasher_computes_valid_hash() {
     println!("\n=== E2E Test: Hasher Computes Valid Hash ===\n");
 
-    let hasher = Hasher::new();
+    let mut hasher = Hasher::new();
 
     // Create a deterministic header
     let mut header = [0u8; 80];

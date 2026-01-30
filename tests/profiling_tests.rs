@@ -180,7 +180,7 @@ fn profile_hasher_performance() {
     let batch_sizes = [16384, 32768, 65536, 131072, 262144];
 
     for &batch_size in &batch_sizes {
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let header = [0u8; 76];
         let target = [0xFF; 32];
 
@@ -247,7 +247,7 @@ fn profile_sustained_mining() {
         let run = Arc::clone(&running);
 
         let handle = thread::spawn(move || {
-            let hasher = Hasher::new();
+            let mut hasher = Hasher::new();
             let header = [0u8; 76];
             let target = [0xFF; 32];
             let mut nonce = 0u32;
