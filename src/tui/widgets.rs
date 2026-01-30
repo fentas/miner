@@ -494,7 +494,7 @@ fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
                 Span::styled(format!(" {}", scroll_status), desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<C>", key_style),
+                Span::styled("<shift+c>", key_style),
                 Span::styled(" Clear", desc_style),
             ]),
         ];

@@ -370,15 +370,53 @@ web/
 ## Testing
 
 ```bash
-# Run tests
+# Run unit tests
 cargo test
 
-# With verbose output
+# Run with verbose output
 cargo test -- --nocapture
 
 # Specific test
 cargo test test_sha256d
+
+# E2E integration tests (mock RPC server)
+cargo test --test e2e_mining_tests
+
+# Binary E2E tests (spawns actual btcminer binary)
+cargo test --test binary_e2e_tests --release
 ```
+
+### Test Categories
+
+| Test Suite          | Description                                  |
+| ------------------- | -------------------------------------------- |
+| Unit tests          | Fast tests for individual functions          |
+| `e2e_mining_tests`  | Integration tests with mock Bitcoin RPC      |
+| `binary_e2e_tests`  | True E2E tests spawning the compiled binary  |
+
+&nbsp;
+
+## Profiling
+
+CPU profiling support for performance analysis:
+
+```bash
+# Run profiler (default 10 seconds)
+cargo run --release -- --profile
+
+# Custom duration
+cargo run --release -- --profile --profile-duration 30
+
+# Output to specific file
+cargo run --release -- --profile --profile-output results.json
+```
+
+**Output formats:**
+
+- JSON file with per-thread stats
+- Console summary with hashrate breakdown
+
+See [Profiling Documentation](docs/profiling.md) for detailed usage and visualization.
 
 &nbsp;
 
