@@ -15,17 +15,15 @@ Implemented `sha256_transform_shani` and `sha256d_midstate_shani` using Intel SH
 
 Reference: [noloader/SHA-Intrinsics](https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c)
 
-### 2. [ ] Implement AVX2 8-way Parallel Hashing
-**File:** `src/mining/sha256_simd.rs:279-303`
-**Current:** Loops serially despite "8-way" name
-**Expected:** Additional 2-4x speedup on AVX2 CPUs
+### 2. [N/A] AVX2 8-way Parallel Hashing
 
-**Required:** Use `_mm256_*` intrinsics to process 8 hashes in parallel
+**Status:** Not needed - SHA-NI provides better performance on modern CPUs
+**Reason:** SHA-NI gives ~530x speedup with hardware acceleration. AVX2 8-way would only help legacy CPUs (Haswell/Broadwell) that lack SHA-NI. Modern AMD (Zen+) and Intel (Ice Lake+) all have SHA-NI.
 
-### 3. [ ] Implement AVX512 16-way Parallel Hashing
-**File:** `src/mining/sha256_simd.rs:239-248`
-**Current:** Falls back to generic
-**Expected:** Additional 2-4x on AVX512 CPUs
+### 3. [N/A] AVX512 16-way Parallel Hashing
+
+**Status:** Not needed - SHA-NI provides better performance on modern CPUs
+**Reason:** Same as AVX2 - SHA-NI is faster than SIMD-only approaches on SHA-NI capable CPUs.
 
 ---
 
@@ -61,10 +59,10 @@ Changed watch channel from `Option<Job>` to `Option<Arc<Job>>`. Workers now only
 **Fix:** Use condition variables or proper channel blocking
 **Note:** This reduces idle CPU usage, not hashrate. Low priority.
 
-### 7. [ ] Avoid Merkle Recomputation Per Nonce
-**File:** `src/mining/job.rs:96, 113`
-**Current:** Computes merkle root for every nonce without override
-**Fix:** Cache merkle root after first computation
+### 7. [N/A] Avoid Merkle Recomputation Per Nonce
+
+**Status:** Already optimized in current implementation
+**Reason:** Worker calls `build_header()` once per job to get header_prefix (first 76 bytes), then iterates nonces. Merkle root is computed once per job per extranonce2, not per nonce.
 
 ---
 
@@ -78,10 +76,16 @@ Changed watch channel from `Option<Job>` to `Option<Arc<Job>>`. Workers now only
 Added `cpu_batch_exp` config option (default: 18 = 256K nonces).
 Profiling showed: 65K → 820 GH/s, 256K → 3.29 TH/s, 1M → 12.87 TH/s
 
-### 9. [ ] Improve Thread Spawn Error Handling
-**File:** `src/mining/worker.rs:60-63`
-**Current:** Silent failure with dummy thread
-**Fix:** Propagate error, warn user about reduced worker count
+### 9. [x] Improve Thread Spawn Error Handling - COMPLETED
+
+**File:** `src/mining/worker.rs`, `src/mining/mod.rs`
+**Result:** Proper error handling with tracing warnings
+
+Changed `Worker::spawn` to return `Result<WorkerHandle, std::io::Error>` and updated Coordinator to:
+
+- Handle spawn failures gracefully
+- Log warnings via tracing when workers fail to spawn
+- Report actual vs requested worker count
 
 ---
 

@@ -104,9 +104,27 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
+### 5. Thread Spawn Error Handling (2026-01-30)
+
+**Problem:** Worker thread spawn failures were handled silently with a dummy thread.
+
+**Solution:** Changed `Worker::spawn` to return `Result<WorkerHandle, std::io::Error>` and updated Coordinator to handle failures gracefully with proper logging.
+
+**Changes:**
+
+- `Worker::spawn` now returns `Result` instead of always returning a handle
+- Coordinator logs warnings via tracing when workers fail to spawn
+- Reports actual vs requested worker count when spawns fail
+
+**Impact:** Improved debuggability and transparency when system resources are constrained.
+
+**Files changed:** `src/mining/worker.rs`, `src/mining/mod.rs`
+
+---
+
 ## Pending Optimizations
 
-### 5. Fix Busy-Wait on Startup (Low Priority)
+### 6. Fix Busy-Wait on Startup (Low Priority)
 
 **Problem:** Workers poll every 10ms with `thread::sleep` waiting for first job.
 
@@ -118,27 +136,31 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
-### 6. AVX2 8-way Parallel Hashing
+### 7. AVX2 8-way Parallel Hashing (Fallback)
 
-**Problem:** Current implementation loops serially despite "8-way" name.
+**Problem:** On CPUs without SHA-NI, falls back to slow generic implementation.
 
-**Location:** `src/mining/sha256_simd.rs:279-303`
+**Location:** `src/mining/sha256_simd.rs`
 
-**Solution:** Use `_mm256_*` intrinsics to process 8 hashes in parallel.
+**Solution:** Implement AVX2 8-way parallel SHA-256 as fallback for non-SHA-NI CPUs.
 
-**Expected improvement:** 2-4x on AVX2 CPUs
+**Expected improvement:** 4-8x over generic on AVX2 CPUs without SHA-NI (e.g., Haswell, Broadwell)
+
+**Note:** SHA-NI is prioritized when available. AVX2 is only used as fallback.
 
 ---
 
-### 7. AVX512 16-way Parallel Hashing
+### 8. AVX512 16-way Parallel Hashing (Fallback)
 
-**Problem:** Falls back to generic on AVX512 CPUs.
+**Problem:** On CPUs without SHA-NI but with AVX512, falls back to generic.
 
-**Location:** `src/mining/sha256_simd.rs:239-248`
+**Location:** `src/mining/sha256_simd.rs`
 
-**Solution:** Implement AVX512 intrinsics for 16-way parallel processing.
+**Solution:** Implement AVX512 16-way parallel SHA-256 as fallback.
 
-**Expected improvement:** 2-4x on AVX512 CPUs
+**Expected improvement:** 8-16x over generic on AVX512 CPUs without SHA-NI
+
+**Note:** SHA-NI is prioritized when available. AVX512 is only used as fallback.
 
 ---
 

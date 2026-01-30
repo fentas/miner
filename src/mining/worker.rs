@@ -36,6 +36,8 @@ pub struct Worker {
 
 impl Worker {
     /// Spawn a new worker thread
+    ///
+    /// Returns `Ok(WorkerHandle)` on success, or an error if thread creation fails.
     pub fn spawn(
         id: usize,
         stats: Arc<Stats>,
@@ -43,7 +45,7 @@ impl Worker {
         job_rx: watch::Receiver<Option<Arc<Job>>>,
         share_tx: mpsc::Sender<Share>,
         batch_size: u32,
-    ) -> WorkerHandle {
+    ) -> Result<WorkerHandle, std::io::Error> {
         let handle = thread::Builder::new()
             .name(format!("miner-{}", id))
             .spawn(move || {
@@ -59,13 +61,9 @@ impl Worker {
                     batch_size,
                 };
                 worker.run();
-            })
-            .unwrap_or_else(|e| {
-                eprintln!("Failed to spawn worker thread {}: {}", id, e);
-                thread::spawn(|| {}) // Return dummy handle
-            });
+            })?;
 
-        WorkerHandle { id, handle }
+        Ok(WorkerHandle { id, handle })
     }
 
     /// Set extranonce parameters

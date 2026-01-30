@@ -130,16 +130,31 @@ impl Coordinator {
         let (share_tx, share_rx) = mpsc::channel(100);
 
         let mut workers = Vec::with_capacity(thread_count);
+        let mut failed_count = 0;
         for id in 0..thread_count {
-            let handle = Worker::spawn(
+            match Worker::spawn(
                 id,
                 Arc::clone(&stats),
                 Arc::clone(&running),
                 job_tx.subscribe(),
                 share_tx.clone(),
                 batch_size,
+            ) {
+                Ok(handle) => workers.push(handle),
+                Err(e) => {
+                    tracing::warn!("Failed to spawn worker thread {}: {}", id, e);
+                    failed_count += 1;
+                }
+            }
+        }
+
+        if failed_count > 0 {
+            tracing::warn!(
+                "Started {}/{} worker threads ({} failed)",
+                workers.len(),
+                thread_count,
+                failed_count
             );
-            workers.push(handle);
         }
 
         Self {
