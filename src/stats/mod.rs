@@ -197,4 +197,102 @@ mod tests {
         let time = expected_time_to_find(1e12, -1.0);
         assert_eq!(time, Duration::MAX);
     }
+
+    #[test]
+    fn test_format_hashrate_zero() {
+        assert_eq!(format_hashrate(0.0), "0.00 H/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_very_small() {
+        assert_eq!(format_hashrate(0.001), "0.00 H/s");
+        assert_eq!(format_hashrate(0.5), "0.50 H/s");
+    }
+
+    #[test]
+    fn test_format_hashrate_negative() {
+        // Negative hashrate should still format (even if semantically invalid)
+        let result = format_hashrate(-100.0);
+        assert!(result.contains("H/s"));
+    }
+
+    #[test]
+    fn test_format_hashrate_boundary_values() {
+        // Just under 1 KH/s
+        assert_eq!(format_hashrate(999.99), "999.99 H/s");
+        // Exactly 1 KH/s
+        assert_eq!(format_hashrate(1000.0), "1.00 KH/s");
+        // Just under 1 MH/s
+        let result = format_hashrate(999_999.0);
+        assert!(result.contains("KH/s"));
+    }
+
+    #[test]
+    fn test_format_duration_zero() {
+        assert_eq!(format_duration(Duration::ZERO), "0s");
+    }
+
+    #[test]
+    fn test_format_duration_exact_boundaries() {
+        // Exactly 1 minute
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m 0s");
+        // Exactly 1 hour
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h 0m 0s");
+        // Exactly 1 day
+        assert_eq!(format_duration(Duration::from_secs(86400)), "1d 0h 0m");
+    }
+
+    #[test]
+    fn test_expected_time_very_high_difficulty() {
+        // Very high difficulty should not overflow
+        let hr = 1e15; // 1 PH/s
+        let diff = 1e18; // Extremely high difficulty
+        let time = expected_time_to_find(hr, diff);
+        // Should still be a valid duration
+        assert!(time > Duration::ZERO);
+    }
+
+    #[test]
+    fn test_hashrate_calculator_window_expiry() {
+        // Create a calculator with 1 second window
+        let mut calc = HashrateCalculator::new(1);
+        calc.add_sample(0);
+
+        // Sleep longer than the window
+        std::thread::sleep(Duration::from_millis(1100));
+
+        // Old sample should be expired, this should be the only sample
+        calc.add_sample(1000);
+
+        // With only one sample after expiry, hashrate should be 0
+        assert_eq!(calc.hashrate(), 0.0);
+    }
+
+    #[test]
+    fn test_hashrate_calculator_many_samples() {
+        let mut calc = HashrateCalculator::new(60);
+
+        // Add many samples
+        for i in 0..100 {
+            calc.add_sample(i * 1000);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let hr = calc.hashrate();
+        assert!(hr > 0.0, "Hashrate should be positive with many samples");
+    }
+
+    #[test]
+    fn test_hashrate_calculator_saturating_sub() {
+        let mut calc = HashrateCalculator::new(60);
+
+        // Add samples where last < first (shouldn't happen normally, but test the safety)
+        calc.samples.push((Instant::now(), 1000));
+        std::thread::sleep(Duration::from_millis(10));
+        calc.samples.push((Instant::now(), 500));
+
+        // Should return 0 due to saturating_sub
+        let hr = calc.hashrate();
+        assert_eq!(hr, 0.0);
+    }
 }

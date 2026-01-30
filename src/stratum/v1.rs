@@ -275,12 +275,15 @@ impl StratumV1Client {
 
         let mut job = Job::new(job_id.to_string());
 
-        // Parse previous hash
+        // Parse previous hash (must be exactly 32 bytes)
         let prev_hash_bytes = hex::decode(prev_hash)
-            .map_err(|_| StratumError::ProtocolError("Invalid prev_hash".into()))?;
-        if prev_hash_bytes.len() == 32 {
-            job.prev_hash.copy_from_slice(&prev_hash_bytes);
+            .map_err(|_| StratumError::ProtocolError("Invalid prev_hash hex".into()))?;
+        if prev_hash_bytes.len() != 32 {
+            return Err(StratumError::ProtocolError(
+                format!("Invalid prev_hash length: expected 32 bytes, got {}", prev_hash_bytes.len())
+            ));
         }
+        job.prev_hash.copy_from_slice(&prev_hash_bytes);
 
         // Parse coinbase parts
         job.coinbase1 = hex::decode(coinbase1)
@@ -288,17 +291,21 @@ impl StratumV1Client {
         job.coinbase2 = hex::decode(coinbase2)
             .map_err(|_| StratumError::ProtocolError("Invalid coinbase2".into()))?;
 
-        // Parse merkle branches
-        for branch in merkle_branches {
-            if let Some(s) = branch.as_str() {
-                let bytes = hex::decode(s)
-                    .map_err(|_| StratumError::ProtocolError("Invalid merkle branch".into()))?;
-                if bytes.len() == 32 {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&bytes);
-                    job.merkle_branches.push(arr);
-                }
+        // Parse merkle branches (each must be exactly 32 bytes)
+        for (i, branch) in merkle_branches.iter().enumerate() {
+            let s = branch.as_str().ok_or_else(|| {
+                StratumError::ProtocolError(format!("Merkle branch {} is not a string", i))
+            })?;
+            let bytes = hex::decode(s)
+                .map_err(|_| StratumError::ProtocolError(format!("Invalid merkle branch {} hex", i)))?;
+            if bytes.len() != 32 {
+                return Err(StratumError::ProtocolError(
+                    format!("Invalid merkle branch {} length: expected 32 bytes, got {}", i, bytes.len())
+                ));
             }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            job.merkle_branches.push(arr);
         }
 
         // Parse version, nbits, ntime
@@ -606,5 +613,117 @@ mod tests {
 
         assert_eq!(id2, id1 + 1);
         assert_eq!(id3, id2 + 1);
+    }
+
+    #[test]
+    fn test_parse_job_invalid_prev_hash_length() {
+        let client = StratumV1Client::new();
+
+        // prev_hash too short (only 16 bytes instead of 32)
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(32)),  // 16 bytes = 32 hex chars
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!([]),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(format!("{:?}", err).contains("prev_hash length"));
+    }
+
+    #[test]
+    fn test_parse_job_invalid_merkle_branch_length() {
+        let client = StratumV1Client::new();
+
+        // merkle branch too short (16 bytes instead of 32)
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),  // Valid 32 bytes
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!(["a".repeat(32)]),  // 16 bytes = invalid
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(format!("{:?}", err).contains("merkle branch"));
+    }
+
+    #[test]
+    fn test_parse_job_merkle_branch_not_string() {
+        let client = StratumV1Client::new();
+
+        // merkle branch is a number, not a string
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!([12345]),  // Number instead of string
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(format!("{:?}", err).contains("not a string"));
+    }
+
+    #[test]
+    fn test_parse_job_multiple_valid_merkle_branches() {
+        let client = StratumV1Client::new();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!(["a".repeat(64), "b".repeat(64), "c".repeat(64)]),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let job = client.parse_job(&params).unwrap();
+        assert_eq!(job.merkle_branches.len(), 3);
+    }
+
+    #[test]
+    fn test_disconnect() {
+        let mut client = StratumV1Client::new();
+        // Client is not connected initially
+        assert!(!client.is_connected());
+
+        // Disconnect should work even when not connected
+        client.disconnect();
+        assert!(!client.is_connected());
+    }
+
+    #[test]
+    fn test_get_extranonce1_empty() {
+        let client = StratumV1Client::new();
+        assert!(client.get_extranonce1().is_empty());
+    }
+
+    #[test]
+    fn test_get_extranonce2_size_default() {
+        let client = StratumV1Client::new();
+        assert_eq!(client.get_extranonce2_size(), 4);
     }
 }

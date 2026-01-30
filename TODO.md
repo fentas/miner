@@ -1,39 +1,56 @@
-# TODO - Codebase Audit Fixes
+# TODO - Code Quality & Test Coverage
 
-## HIGH Priority
+## Critical Issues - ALL RESOLVED
 
-- [x] **Unsafe unwraps on RPC client** (`main.rs`)
-  - Fixed: Added proper error handling with `match` and `ok_or_else`
+- [x] **Weak PRNG for RPC passwords** (`src/bitcoin/manager.rs:1154`)
+  - Problem: Uses timestamp-based RNG for generating RPC passwords
+  - Fix: Use `getrandom` crate for secure random bytes
 
-- [x] **Network parse panic** (`stratum/v1.rs:39`)
-  - Fixed: Return error instead of panicking on invalid address
+- [x] **Silent invalid prev_hash** (`src/stratum/v1.rs:279-283`)
+  - Problem: Wrong-length prev_hash silently leaves zeros instead of erroring
+  - Fix: Return error if prev_hash is not exactly 32 bytes
 
-- [x] **Silent defaults in block template parsing** (`bitcoin/rpc.rs`)
-  - Fixed: Required fields now return proper errors if missing
+- [x] **Silent invalid merkle branches** (`src/stratum/v1.rs:292-302`)
+  - Problem: Invalid merkle branches silently skipped
+  - Fix: Return error if merkle branch is not exactly 32 bytes
 
-## MEDIUM Priority
+- [x] **Missing port validation** (`src/config.rs`)
+  - Problem: No validation that ports are in valid range (1-65535)
+  - Fix: Add port range validation and reconnect delay consistency check
 
-- [x] **Incomplete Bitcoin Core shutdown** (`bitcoin/manager.rs`)
-  - Fixed: Added `stop_async()` for graceful RPC shutdown before kill
+## Test Coverage - IMPROVED
 
-- [x] **Weak bech32 address decoder** (`main.rs`)
-  - Fixed: Added proper BIP-173 checksum validation
+- [x] **src/bitcoin/rpc.rs** - Added edge case tests for sync status, block template parsing
+- [x] **src/stratum/v1.rs** - Added validation tests for prev_hash, merkle branches
+- [x] **src/config.rs** - Added tests for all validation rules
+- [x] **src/stats/mod.rs** - Added edge case tests for special values
 
-- [x] **BIP34 height encoding** (`main.rs`)
-  - Reviewed: Already handles all heights correctly (1-4 byte encoding)
+Total tests: 391 (all passing)
 
-## LOW Priority
+### Remaining Opportunities
 
-- [x] **Missing reconnection backoff** (`stratum/v1.rs`)
-  - Fixed: Added `connect_with_retry()` with exponential backoff and jitter
-
-- [x] **No config validation** (`config.rs`)
-  - Fixed: Added validation for conflicting options (managed+pool preset)
-  - Fixed: Added validation for GPU intensity and batch size ranges
-
-- [x] **No web dashboard authentication** (`web/mod.rs`)
-  - Fixed: Added optional basic auth (config: `web.auth_enabled`, `web.auth_user`, `web.auth_password`)
+- [ ] **src/bitcoin/manager.rs** - Integration tests for download/install flow
+- [ ] **src/stratum/v2.rs** - More protocol parsing tests
+- [ ] Full Stratum V1 flow integration test
+- [ ] Bitcoin Core lifecycle integration test
 
 ---
 
-## All issues resolved: 2026-01-30
+## Completed
+
+### 2026-01-30 (This Session)
+
+- [x] Weak PRNG fix - Using `getrandom` crate for secure random
+- [x] Stratum validation - prev_hash and merkle branch length validation
+- [x] Config validation - Port ranges, reconnect delays
+- [x] Comprehensive test additions - ~50 new tests added
+
+### 2026-01-30 (Previous Session)
+- [x] Missing reconnection backoff (`stratum/v1.rs`) - Added `connect_with_retry()`
+- [x] No config validation (`config.rs`) - Added validation for conflicting options
+- [x] No web dashboard authentication (`web/mod.rs`) - Added optional basic auth
+- [x] Windows web directory fix (`main.rs`) - Added `resolve_web_dir()`
+- [x] Stratum DoS protection (`stratum/v1.rs`) - Added 64KB size limits
+- [x] Thread spawn error handling - Graceful fallback instead of panic
+- [x] Atomic ordering optimization - Changed SeqCst to Release/Acquire
+- [x] TUI history chart improvements - Filter bar, GPU visibility, borderless

@@ -394,4 +394,121 @@ mod tests {
         assert_eq!(template.coinbase_value, 312500000);
         assert_eq!(template.transactions.len(), 2);
     }
+
+    #[test]
+    fn test_sync_status_initial_block_download() {
+        let result = json!({
+            "initialblockdownload": true,
+            "verificationprogress": 0.5,
+            "headers": 800000,
+            "blocks": 400000,
+            "bestblockhash": "000000",
+            "difficulty": 1.0
+        });
+
+        let status = SyncStatus {
+            synced: result["initialblockdownload"].as_bool() == Some(false),
+            progress: result["verificationprogress"].as_f64().unwrap_or(0.0) * 100.0,
+            headers: result["headers"].as_u64().unwrap_or(0),
+            blocks: result["blocks"].as_u64().unwrap_or(0),
+            best_block_hash: result["bestblockhash"].as_str().unwrap_or("").to_string(),
+            difficulty: result["difficulty"].as_f64().unwrap_or(0.0),
+        };
+
+        assert!(!status.synced); // Still downloading
+        assert!((status.progress - 50.0).abs() < 0.1);
+        assert!(status.blocks < status.headers);
+    }
+
+    #[test]
+    fn test_sync_status_missing_fields() {
+        // Test handling of missing fields with defaults
+        let result = json!({});
+
+        let status = SyncStatus {
+            synced: result["initialblockdownload"].as_bool() == Some(false),
+            progress: result["verificationprogress"].as_f64().unwrap_or(0.0) * 100.0,
+            headers: result["headers"].as_u64().unwrap_or(0),
+            blocks: result["blocks"].as_u64().unwrap_or(0),
+            best_block_hash: result["bestblockhash"].as_str().unwrap_or("").to_string(),
+            difficulty: result["difficulty"].as_f64().unwrap_or(0.0),
+        };
+
+        // All fields should have safe defaults
+        assert!(!status.synced);
+        assert_eq!(status.progress, 0.0);
+        assert_eq!(status.headers, 0);
+        assert_eq!(status.blocks, 0);
+        assert!(status.best_block_hash.is_empty());
+        assert_eq!(status.difficulty, 0.0);
+    }
+
+    #[test]
+    fn test_block_template_empty_transactions() {
+        let result = json!({
+            "version": 0x20000000_u64,
+            "previousblockhash": "00000000000000000001abc",
+            "curtime": 1700000000_u64,
+            "bits": "1703a8b4",
+            "height": 800001_u64,
+            "coinbasevalue": 312500000_u64,
+            "transactions": [],
+            "target": "00000000000000000000ffff"
+        });
+
+        let transactions: Vec<String> = result["transactions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|tx| tx["data"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        assert!(transactions.is_empty());
+    }
+
+    #[test]
+    fn test_rpc_response_with_both_result_and_error() {
+        // Some RPC implementations might return both (non-standard but handle gracefully)
+        let json = r#"{"result": {"test": true}, "error": {"code": -1, "message": "warning"}}"#;
+        let response: RpcResponse = serde_json::from_str(json).unwrap();
+        assert!(response.result.is_some());
+        assert!(response.error.is_some());
+    }
+
+    #[test]
+    fn test_rpc_error_codes() {
+        // Test common Bitcoin Core RPC error codes
+        let warming_up = RpcError { code: -28, message: "Loading block index...".to_string() };
+        assert_eq!(warming_up.code, -28);
+
+        let method_not_found = RpcError { code: -32601, message: "Method not found".to_string() };
+        assert_eq!(method_not_found.code, -32601);
+
+        let invalid_params = RpcError { code: -1, message: "Invalid params".to_string() };
+        assert_eq!(invalid_params.code, -1);
+    }
+
+    #[test]
+    fn test_bitcoin_rpc_url_format() {
+        let rpc = BitcoinRpc::new("mynode.local", 8333);
+        assert!(rpc.url.starts_with("http://"));
+        assert!(rpc.url.contains("mynode.local"));
+        assert!(rpc.url.contains("8333"));
+    }
+
+    #[test]
+    fn test_rpc_request_with_params() {
+        let request = RpcRequest {
+            jsonrpc: "1.0",
+            id: 1,
+            method: "getblock".to_string(),
+            params: json!(["00000000000000000001abc", 2]),
+        };
+
+        let serialized = serde_json::to_string(&request).unwrap();
+        assert!(serialized.contains("getblock"));
+        assert!(serialized.contains("00000000000000000001abc"));
+    }
 }

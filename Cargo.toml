@@ -58,6 +58,9 @@ dirs = "6.0"
 thiserror = "2.0"
 anyhow = "1.0"
 
+# Secure random
+getrandom = "0.2"
+
 # Colored output
 colored = "3.1"
 

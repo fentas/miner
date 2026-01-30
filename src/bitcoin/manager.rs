@@ -1151,29 +1151,30 @@ fn get_platform() -> &'static str {
     compile_error!("Unsupported platform for Bitcoin Core");
 }
 
-/// Generate a random alphanumeric string
+/// Generate a cryptographically secure random alphanumeric string
 fn generate_random_string(len: usize) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        .chars()
-        .collect();
-
-    let mut result = String::with_capacity(len);
-    let mut state = seed;
-
-    for _ in 0..len {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let idx = ((state >> 33) as usize) % chars.len();
-        result.push(chars[idx]);
+    let mut bytes = vec![0u8; len];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        // Fallback to timestamp-based if OS RNG fails (should not happen)
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut state = seed;
+        for byte in &mut bytes {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *byte = ((state >> 33) as usize % CHARSET.len()) as u8;
+        }
+        return bytes.iter().map(|&i| CHARSET[i as usize] as char).collect();
     }
 
-    result
+    bytes
+        .iter()
+        .map(|&b| CHARSET[(b as usize) % CHARSET.len()] as char)
+        .collect()
 }
 
 #[cfg(test)]

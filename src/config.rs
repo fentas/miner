@@ -481,6 +481,27 @@ impl Config {
             }
         }
 
+        // Validate port ranges (web.port 0 means disabled, others must be > 0)
+        // Note: u16 max is 65535, so no upper bound check needed
+        if self.bitcoind.rpc_port == 0 {
+            return Err(ConfigError::ValidationError(
+                "bitcoind.rpc_port must be between 1 and 65535".to_string(),
+            ));
+        }
+
+        if self.sv2.proxy_port == 0 {
+            return Err(ConfigError::ValidationError(
+                "sv2.proxy_port must be between 1 and 65535".to_string(),
+            ));
+        }
+
+        // Validate reconnect delay consistency
+        if self.network.max_reconnect_delay < self.network.reconnect_delay {
+            return Err(ConfigError::ValidationError(
+                "network.max_reconnect_delay must be >= network.reconnect_delay".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -1055,14 +1076,210 @@ mod tests {
     fn test_config_with_custom_datadir() {
         let toml_content = r#"
             [pool]
-            preset = "none"
+            preset = "ckpool"
             payout_address = "bc1qtest"
 
             [bitcoind]
-            enabled = true
+            enabled = false
             datadir = "/custom/bitcoin/path"
         "#;
         let config: Config = toml::from_str(toml_content).unwrap();
         assert_eq!(config.bitcoind.datadir, Some("/custom/bitcoin/path".to_string()));
+    }
+
+    #[test]
+    fn test_config_validation_rpc_port_zero() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            rpc_port = 0
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("rpc_port"));
+    }
+
+    #[test]
+    fn test_config_validation_sv2_port_zero() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [sv2]
+            proxy_port = 0
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("proxy_port"));
+    }
+
+    #[test]
+    fn test_config_validation_reconnect_delay_invalid() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [network]
+            reconnect_delay = 100
+            max_reconnect_delay = 50
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("reconnect_delay"));
+    }
+
+    #[test]
+    fn test_config_validation_gpu_batch_exp_too_low() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            gpu_batch_exp = 19
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("gpu_batch_exp"));
+    }
+
+    #[test]
+    fn test_config_validation_gpu_batch_exp_too_high() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            gpu_batch_exp = 29
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("gpu_batch_exp"));
+    }
+
+    #[test]
+    fn test_config_validation_gpu_intensity_zero() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            gpu_intensity = 0
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("gpu_intensity"));
+    }
+
+    #[test]
+    fn test_config_validation_gpu_intensity_too_high() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            gpu_intensity = 101
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("gpu_intensity"));
+    }
+
+    #[test]
+    fn test_config_validation_web_auth_missing_user() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [web]
+            auth_enabled = true
+            auth_password = "secret"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("auth_user"));
+    }
+
+    #[test]
+    fn test_config_validation_web_auth_missing_password() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [web]
+            auth_enabled = true
+            auth_user = "admin"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("auth_password"));
+    }
+
+    #[test]
+    fn test_config_validation_web_auth_valid() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [web]
+            auth_enabled = true
+            auth_user = "admin"
+            auth_password = "secret123"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_managed_with_pool() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [bitcoind]
+            enabled = true
+            managed = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let err = config.validate();
+        assert!(err.is_err());
+        assert!(format!("{:?}", err).contains("managed"));
+    }
+
+    #[test]
+    fn test_web_port_zero_disabled() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [web]
+            port = 0
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.web.port, 0);
+        // Port 0 should be valid (means disabled)
+        assert!(config.validate().is_ok());
     }
 }
