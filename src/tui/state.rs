@@ -959,9 +959,14 @@ impl TuiState {
         } else {
             // Overlay is not running, try to start it
             // Look for btcminer-overlay in same directory as current executable
+            let overlay_name = if cfg!(windows) {
+                "btcminer-overlay.exe"
+            } else {
+                "btcminer-overlay"
+            };
             let overlay_path = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|d| d.join("btcminer-overlay")));
+                .and_then(|p| p.parent().map(|d| d.join(overlay_name)));
 
             if let Some(path) = overlay_path {
                 if path.exists() {
@@ -983,9 +988,14 @@ impl TuiState {
 
     /// Check if overlay binary exists (for showing shortcut in TUI)
     pub fn overlay_available(&self) -> bool {
+        let overlay_name = if cfg!(windows) {
+            "btcminer-overlay.exe"
+        } else {
+            "btcminer-overlay"
+        };
         std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.join("btcminer-overlay")))
+            .and_then(|p| p.parent().map(|d| d.join(overlay_name)))
             .is_some_and(|p| p.exists())
     }
 }
