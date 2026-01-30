@@ -26,10 +26,14 @@ Comprehensive list of refactoring and optimization opportunities identified in t
 
 ## 1. Critical Refactoring (P0)
 
-### 1.1. [ ] Split main.rs into modules
+### 1.1. [~] Split main.rs into modules
 
-**File:** `src/main.rs` (2,783 lines)
+**File:** `src/main.rs` (2,290 lines, down from 2,783 - 17.7% reduction)
 **Impact:** Massive improvement in maintainability and testability
+
+**Progress:**
+
+- ✅ Extracted Bitcoin helpers (coinbase building, merkle root, BIP34, bech32) to `src/bitcoin/helpers.rs` (493 lines extracted)
 
 **Current State:**
 - Single monolithic async block containing all application logic
@@ -217,56 +221,26 @@ src/tui/
 
 ---
 
-### 3.2. [ ] Optimize extranonce2 generation
+### 3.2. [x] Optimize extranonce2 generation ✅
 
-**File:** `src/mining/worker.rs` (lines 220-243)
+**File:** `src/mining/worker.rs`
 
-**Current Issue:**
-```rust
-let nanos = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or_default()
-    .subsec_nanos();
-```
+**Result:** Replaced `SystemTime::now()` syscall with atomic counter for **12x speedup** (17.79ns → 1.49ns).
 
-**Problem:** `SystemTime::now()` has relatively low resolution and syscall overhead.
-
-**Fix:**
-```rust
-// Use thread-local counter + worker ID for uniqueness
-static COUNTER: AtomicU32 = AtomicU32::new(0);
-let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-```
-
-**Tasks:**
-- [ ] Replace SystemTime with atomic counter
-- [ ] Benchmark to verify improvement
-- [ ] Ensure no collisions between workers
+See `docs/performance-improvements.md` section 12 for details.
 
 ---
 
-### 3.3. [ ] Optimize atomic operations
+### 3.3. [x] Optimize atomic operations ✅
 
-**Files:** `src/stratum/v1.rs`, `src/mining/mod.rs`
+**Files:** `src/stratum/v1.rs`, `src/stratum/v2.rs`
 
-**Current Issue:**
-- `SeqCst` ordering used everywhere (most conservative)
-- Multiple `notify_all()` calls may be redundant
+**Result:** Replaced `SeqCst` with appropriate orderings:
 
-**Optimization:**
-```rust
-// Before
-running.store(true, Ordering::SeqCst);
+- `connected.store/load`: Release/Acquire
+- `request_id.fetch_add`: Relaxed
 
-// After (sufficient for flag)
-running.store(true, Ordering::Release);
-```
-
-**Tasks:**
-- [ ] Audit all atomic operations
-- [ ] Use `Release`/`Acquire` pairs where sufficient
-- [ ] Remove redundant `notify_all()` calls
-- [ ] Document ordering requirements
+See `docs/performance-improvements.md` section 13 for details.
 
 ---
 
@@ -521,11 +495,12 @@ struct WindowsIdleDetector { ... }
 
 ## Quick Wins (Can be done independently)
 
-1. [ ] Fix extranonce2 generation (P1, ~30 min)
-2. [ ] Optimize atomic orderings (P1, ~1 hour)
-3. [ ] Consolidate hex utilities (P2, ~1 hour)
+1. [x] Fix extranonce2 generation (P1) - ✅ 12x speedup
+2. [x] Optimize atomic orderings (P1) - ✅ SeqCst → Release/Acquire/Relaxed
+3. [x] Consolidate hex utilities (P2) - ✅ Already organized, skipped
 4. [ ] Add missing documentation (P3, ongoing)
-5. [ ] Run clippy and fix warnings (P3, ~1 hour)
+5. [x] Run clippy and fix warnings (P3) - ✅ All fixed
+6. [x] Add criterion benchmarks (P1) - ✅ Migrated from profiling tests
 
 ---
 

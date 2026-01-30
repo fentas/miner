@@ -1,9 +1,15 @@
 mod rpc;
 mod manager;
 mod metadata_fetcher;
+mod helpers;
 
 pub use rpc::BitcoinRpc;
 pub use manager::BitcoindManager;
+pub use helpers::{
+    bits_to_difficulty,
+    build_coinbase_tx,
+    compute_merkle_root,
+};
 
 use thiserror::Error;
 
