@@ -265,6 +265,7 @@ auto_open = true  # Auto-launch overlay on startup
 - Draggable by clicking anywhere
 - Shows: hashrate, status (Mining/Paused/Idle), shares count
 - Start/Pause button and close button
+- Toggle with `o` key in TUI (when overlay binary is available)
 
 &nbsp;
 
@@ -315,6 +316,7 @@ proxy_port = 34255
 | `Shift+L` | Toggle Bitcoin Core logs                |
 | `h`       | Toggle hashrate display (Total/CPU/GPU) |
 | `Shift+H` | Hashrate history chart (expanded)       |
+| `o`       | Toggle desktop overlay window           |
 | `p`       | Pause/Resume mining                     |
 | `j/k`     | Scroll logs (vim-style)                 |
 | `0-6`     | Time filter (tail, 1m-1h, all)          |
