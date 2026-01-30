@@ -1,5 +1,6 @@
 #![allow(dead_code)] // Allow unused code during development
 
+mod app;
 mod config;
 mod mining;
 mod stratum;
@@ -20,9 +21,13 @@ use tracing_subscriber::FmtSubscriber;
 use config::{Config, LogFormat};
 use mining::{Coordinator, SimdLevel, GpuCoordinator};
 use idle::IdleMonitor;
-use stats::{HashrateCalculator, format_hashrate, format_duration};
+use stats::{HashrateCalculator, format_hashrate};
 use tui::{TuiState, TuiRunner, TuiCommand};
 use bitcoin::{bits_to_difficulty, build_coinbase_tx, compute_merkle_root};
+use app::{
+    print_banner, print_mining_started, print_mode, print_new_job,
+    print_share_accepted, print_share_rejected, print_stats, tail_bitcoin_log,
+};
 
 /// BTC Miner - Bitcoin solo mining with Stratum V1/V2 support
 #[derive(Parser, Debug)]
@@ -1262,85 +1267,6 @@ async fn run_pool_mode_with_tui(
     Ok(())
 }
 
-fn print_mode(mode: &str, detail: &str) {
-    println!(
-        "{} {} {}",
-        "Mode:".bright_white(),
-        mode.bright_green().bold(),
-        format!("({})", detail).dimmed()
-    );
-}
-
-/// Tail Bitcoin Core debug.log and send entries to TUI
-async fn tail_bitcoin_log(path: std::path::PathBuf, tui: Arc<TuiState>) {
-    use std::io::{BufRead, BufReader, Seek, SeekFrom};
-    use tui::{LogEntry, LogLevel};
-
-    // Wait for file to exist
-    while !path.exists() {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    // Start from ~50KB back to show recent history
-    let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    let mut position = file_size.saturating_sub(50 * 1024);
-
-    // If starting mid-file, skip to next newline to avoid partial line
-    if position > 0 {
-        if let Ok(file) = std::fs::File::open(&path) {
-            let mut reader = BufReader::new(file);
-            if reader.seek(SeekFrom::Start(position)).is_ok() {
-                let mut discard = String::new();
-                if reader.read_line(&mut discard).is_ok() {
-                    position = reader.stream_position().unwrap_or(position);
-                }
-            }
-        }
-    }
-
-    loop {
-        if let Ok(file) = std::fs::File::open(&path) {
-            let mut reader = BufReader::new(file);
-            if reader.seek(SeekFrom::Start(position)).is_ok() {
-                loop {
-                    let mut line = String::new();
-                    match reader.read_line(&mut line) {
-                        Ok(0) => break, // EOF
-                        Ok(_) => {
-                            let line = line.trim();
-                            if !line.is_empty() {
-                                // Parse Bitcoin Core format: "2026-01-29T17:54:45Z [category] message"
-                                let (timestamp, msg) = if line.len() > 21 && line.chars().nth(10) == Some('T') {
-                                    // Extract time part (HH:MM:SS) from ISO timestamp
-                                    let time = &line[11..19];
-                                    (time, &line[21..])
-                                } else {
-                                    ("??:??:??", line)
-                                };
-
-                                // Parse log level from Bitcoin Core format
-                                let level = if line.contains("error") || line.contains("Error") {
-                                    LogLevel::Error
-                                } else if line.contains("warning") || line.contains("Warning") {
-                                    LogLevel::Warn
-                                } else {
-                                    LogLevel::Info
-                                };
-
-                                let entry = LogEntry::with_timestamp(level, msg, timestamp);
-                                tui.log_bitcoin(entry);
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-                position = reader.stream_position().unwrap_or(position);
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-}
-
 /// Run in true solo mode (no pool, direct to Bitcoin network)
 async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     use bitcoin::BitcoindManager;
@@ -1923,7 +1849,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                     stats.hashes + stats.gpu_hashes
                 );
             } else {
-                print_stats(&coordinator, &mut hashrate_calc, start_time, &cfg);
+                print_stats(&coordinator, &mut hashrate_calc, start_time);
             }
             last_stats = Instant::now();
         }
@@ -1990,7 +1916,7 @@ async fn run_sv2_mode(cfg: Config) -> anyhow::Result<()> {
 
         // Print stats
         if last_stats.elapsed() >= stats_interval {
-            print_stats(&coordinator, &mut hashrate_calc, start_time, &cfg);
+            print_stats(&coordinator, &mut hashrate_calc, start_time);
             last_stats = Instant::now();
         }
     }
@@ -2168,7 +2094,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
 
         // Print stats
         if last_stats.elapsed() >= stats_interval {
-            let hashrate = print_stats(&coordinator, &mut hashrate_calc, start_time, &cfg);
+            let hashrate = print_stats(&coordinator, &mut hashrate_calc, start_time);
 
             // Update web state
             if let Some(ref state) = web_state {
@@ -2205,86 +2131,6 @@ fn setup_idle_monitor(cfg: &Config) -> Option<IdleMonitor> {
     } else {
         None
     }
-}
-
-/// Print stats with colors
-fn print_stats(
-    coordinator: &Coordinator,
-    hashrate_calc: &mut HashrateCalculator,
-    start_time: Instant,
-    _cfg: &Config,
-) -> f64 {
-    let stats = coordinator.stats().snapshot();
-    hashrate_calc.add_sample(stats.hashes);
-    let hashrate = hashrate_calc.hashrate();
-
-    let hr_str = format_hashrate(hashrate);
-    let uptime = format_duration(start_time.elapsed());
-
-    println!(
-        "{} | {} {} {} {} | {}",
-        hr_str.bright_cyan().bold(),
-        "Shares:".dimmed(),
-        stats.shares_accepted.to_string().bright_green(),
-        "/".dimmed(),
-        stats.shares_rejected.to_string().bright_red(),
-        uptime.dimmed()
-    );
-
-    hashrate
-}
-
-fn print_mining_started() {
-    println!(
-        "\n{} {}\n",
-        "⛏".bright_yellow(),
-        "Mining started".bright_green().bold()
-    );
-}
-
-fn print_new_job(job_id: &str) {
-    println!(
-        "{} {}",
-        "New job:".dimmed(),
-        job_id.bright_blue()
-    );
-}
-
-fn print_share_accepted() {
-    println!(
-        "{} {}",
-        "✓".bright_green(),
-        "Share accepted".bright_green()
-    );
-}
-
-fn print_share_rejected() {
-    println!(
-        "{} {}",
-        "✗".bright_red(),
-        "Share rejected".bright_red()
-    );
-}
-
-fn print_banner() {
-    println!(
-        "{}",
-        r#"
- ____  _____ ____    __  __ _
-| __ )|_   _/ ___|  |  \/  (_)_ __   ___ _ __
-|  _ \  | || |      | |\/| | | '_ \ / _ \ '__|
-| |_) | | || |___   | |  | | | | | |  __/ |
-|____/  |_| \____|  |_|  |_|_|_| |_|\___|_|
-"#
-        .bright_yellow()
-    );
-    println!(
-        "{}",
-        format!("             Bitcoin Solo Miner v{}", env!("CARGO_PKG_VERSION"))
-            .bright_white()
-            .bold()
-    );
-    println!();
 }
 
 // Tests for bitcoin helpers have been moved to src/bitcoin/helpers.rs

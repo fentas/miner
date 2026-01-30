@@ -4,8 +4,8 @@ mod logs;
 mod history;
 
 pub use state::TuiState;
-pub use logs::{LogEntry, LogLevel, LogTimeFilter};
-pub use history::{HashrateSample, HashrateDisplayMode};
+pub use logs::{LogEntry, LogLevel};
+pub use history::HashrateDisplayMode;
 pub use widgets::draw_ui;
 
 use std::io;
