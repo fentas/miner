@@ -6,14 +6,15 @@ This document tracks performance optimizations implemented in btcminer, with bef
 
 | Optimization | Status | Speedup | Files Changed |
 |--------------|--------|---------|---------------|
-| SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd.rs` |
+| SHA-NI Intrinsics | ✅ Completed | ~330x | `src/mining/sha256_simd/shani.rs` |
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
 | Arc Job (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
 | Configurable Batch Size | ✅ Completed | ~4x (256K default) | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
-| AVX2 8-way Hashing | ✅ Completed | ~4-8x (fallback) | `src/mining/sha256_simd.rs` |
-| AVX512 16-way Hashing | ✅ Completed | ~2x over AVX2 | `src/mining/sha256_simd.rs` |
+| AVX2 8-way Hashing | ✅ Completed | ~4-8x (fallback) | `src/mining/sha256_simd/avx2.rs` |
+| AVX512 16-way Hashing | ✅ Completed | ~2x over AVX2 | `src/mining/sha256_simd/avx512.rs` |
 | SIMD Level Config | ✅ Completed | N/A | `src/config.rs` |
 | Fix Busy-Wait (Condvar) | ✅ Completed | N/A (CPU usage) | `src/mining/worker.rs`, `mod.rs` |
+| SIMD Code Refactoring | ✅ Completed | N/A (maintainability) | `src/mining/sha256_simd/` |
 
 ---
 
@@ -214,6 +215,37 @@ simd_level = "auto"  # auto, sha-ni, avx2, avx512, generic
 **Impact:** Significantly reduced CPU usage when miner is paused or waiting for jobs.
 
 **Files changed:** `src/mining/worker.rs`, `src/mining/mod.rs`
+
+---
+
+### 10. SIMD Code Refactoring (2026-01-30)
+
+**Problem:** The `sha256_simd.rs` file was 1646 lines long, mixing generic, SHA-NI, AVX2, and AVX512 implementations in a single file.
+
+**Solution:** Refactored into a module directory with separate files for each implementation.
+
+**Structure:**
+
+```text
+src/mining/sha256_simd/
+├── mod.rs      # 752 lines - public API, types, constants, tests
+├── generic.rs  # 134 lines - portable fallback
+├── shani.rs    # 284 lines - SHA-NI implementation
+├── avx2.rs     # 243 lines - AVX2 8-way parallel
+└── avx512.rs   # 283 lines - AVX512 16-way parallel
+```
+
+**Benchmark Results:**
+
+| Configuration | Before    | After     |
+|---------------|-----------|-----------|
+| 24 threads    | 3.16 TH/s | 3.12 TH/s |
+
+*Note: Within normal variance; no performance regression.*
+
+**Impact:** Improved code maintainability and readability. Each SIMD implementation is now in its own focused file.
+
+**Files changed:** `src/mining/sha256_simd/` (directory replaces single file)
 
 ---
 
