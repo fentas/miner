@@ -28,7 +28,7 @@ Comprehensive list of refactoring and optimization opportunities identified in t
 
 ### 1.1. [~] Split main.rs into modules
 
-**File:** `src/main.rs` (2,136 lines, down from 2,783 - 23.3% reduction)
+**File:** `src/main.rs` (2,100 lines, down from 2,783 - 24.5% reduction)
 **Impact:** Massive improvement in maintainability and testability
 
 **Progress:**
@@ -319,16 +319,20 @@ macro_rules! sha256_round {
 
 ---
 
-### 4.2. [ ] Consolidate config snapshot structs
+### 4.2. [~] Consolidate config snapshot structs
 
 **Files:** `src/config.rs`, `src/web/mod.rs`, `src/tui/state.rs`
 
 **Issue:** Multiple similar structs for config snapshots with overlapping fields.
 
-**Tasks:**
-- [ ] Create unified `ConfigSnapshot` in config.rs
-- [ ] Re-export and use in web and TUI modules
-- [ ] Remove duplicate struct definitions
+**Progress:**
+
+- ✅ Added `ConfigSnapshot::for_solo()` and `for_pool()` constructors
+- ✅ Reduced inline ConfigSnapshot creation in main.rs (36 lines saved)
+
+**Remaining Tasks:**
+
+- [ ] Further unify config snapshot patterns if needed
 
 ---
 
