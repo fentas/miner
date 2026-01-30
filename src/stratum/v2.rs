@@ -8,7 +8,7 @@ use crate::mining::Job;
 /// Stratum V2 binary protocol client
 ///
 /// Implements the Stratum V2 Mining Protocol as per:
-/// https://stratumprotocol.org/specification/
+/// <https://stratumprotocol.org/specification/>
 ///
 /// Connects through SRI (Stratum Reference Implementation) proxy
 /// which handles Bitcoin Core IPC Mining Interface communication.
