@@ -1,18 +1,61 @@
 use axum::{
+    body::Body,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    response::IntoResponse,
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 
 use crate::mining::StatsSnapshot;
+
+/// Basic authentication credentials
+#[derive(Clone)]
+pub struct BasicAuthConfig {
+    pub username: String,
+    pub password: String,
+}
+
+/// Basic authentication middleware
+async fn basic_auth_middleware(
+    State(auth): State<BasicAuthConfig>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    // Check for Authorization header
+    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if auth_str.starts_with("Basic ") {
+                let encoded = &auth_str[6..];
+                if let Ok(decoded) = BASE64.decode(encoded) {
+                    if let Ok(credentials) = String::from_utf8(decoded) {
+                        if let Some((user, pass)) = credentials.split_once(':') {
+                            if user == auth.username && pass == auth.password {
+                                return next.run(request).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Return 401 Unauthorized with WWW-Authenticate header
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header(header::WWW_AUTHENTICATE, "Basic realm=\"btcminer\"")
+        .body(Body::from("Unauthorized"))
+        .unwrap()
+}
 
 /// Shared state for the web server
 pub struct WebState {
@@ -86,15 +129,22 @@ impl WebState {
 }
 
 /// Create the web server router
-pub fn create_router(state: Arc<WebState>, static_dir: &str) -> Router {
-    Router::new()
+pub fn create_router(state: Arc<WebState>, static_dir: &str, auth: Option<BasicAuthConfig>) -> Router {
+    let router = Router::new()
         .route("/api/stats", get(api_stats))
         .route("/api/info", get(api_info))
         .route("/api/control/pause", get(api_pause))
         .route("/api/control/resume", get(api_resume))
         .route("/ws", get(ws_handler))
         .fallback_service(ServeDir::new(static_dir))
-        .with_state(state)
+        .with_state(state);
+
+    // Apply basic auth middleware if credentials are provided
+    if let Some(auth_config) = auth {
+        router.layer(middleware::from_fn_with_state(auth_config, basic_auth_middleware))
+    } else {
+        router
+    }
 }
 
 /// WebSocket handler for real-time updates
@@ -218,8 +268,9 @@ pub async fn start_server(
     state: Arc<WebState>,
     static_dir: &str,
     port: u16,
+    auth: Option<BasicAuthConfig>,
 ) -> Result<(), std::io::Error> {
-    let router = create_router(state, static_dir);
+    let router = create_router(state, static_dir, auth);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
     tracing::info!("Web interface available at http://localhost:{}", port);

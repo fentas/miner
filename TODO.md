@@ -31,9 +31,9 @@
   - Fixed: Added validation for conflicting options (managed+pool preset)
   - Fixed: Added validation for GPU intensity and batch size ranges
 
-- [ ] **No web dashboard authentication** (`web/mod.rs`)
-  - Note: Deferred - would require additional dependencies and user configuration
+- [x] **No web dashboard authentication** (`web/mod.rs`)
+  - Fixed: Added optional basic auth (config: `web.auth_enabled`, `web.auth_user`, `web.auth_password`)
 
 ---
 
-## Completed: 2026-01-30
+## All issues resolved: 2026-01-30

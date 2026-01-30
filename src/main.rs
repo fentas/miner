@@ -1186,9 +1186,17 @@ async fn run_pool_mode_with_tui(
         let state_clone = Arc::clone(&state);
         let web_dir = cfg.web.dir.clone();
         let web_port = cfg.web.port;
+        let web_auth = if cfg.web.auth_enabled {
+            Some(web::BasicAuthConfig {
+                username: cfg.web.auth_user.clone().unwrap_or_default(),
+                password: cfg.web.auth_password.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        };
 
         tokio::spawn(async move {
-            if let Err(e) = web::start_server(state_clone, &web_dir, web_port).await {
+            if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
                 eprintln!("Web server error: {}", e);
             }
         });
@@ -2098,9 +2106,17 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
         let state_clone = Arc::clone(&state);
         let web_dir = cfg.web.dir.clone();
         let web_port = cfg.web.port;
+        let web_auth = if cfg.web.auth_enabled {
+            Some(web::BasicAuthConfig {
+                username: cfg.web.auth_user.clone().unwrap_or_default(),
+                password: cfg.web.auth_password.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        };
 
         tokio::spawn(async move {
-            if let Err(e) = web::start_server(state_clone, &web_dir, web_port).await {
+            if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
                 error!("Web server error: {}", e);
             }
         });

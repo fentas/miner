@@ -68,6 +68,7 @@ chrono = "0.4"
 
 # GPU (optional)
 ocl = { version = "0.19", optional = true }
+base64 = "0.22.1"
 
 [dev-dependencies]
 tempfile = "3.24"

@@ -122,6 +122,15 @@ port = 8080
 # Static files directory
 dir = "web"
 
+# Enable basic authentication (recommended when exposed to network)
+auth_enabled = false
+
+# Username for basic auth (required if auth_enabled = true)
+# auth_user = "admin"
+
+# Password for basic auth (required if auth_enabled = true)
+# auth_password = "changeme"
+
 # ============================================
 # LOGGING
 # ============================================

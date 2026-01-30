@@ -234,6 +234,13 @@ pub struct WebConfig {
     pub port: u16,
     #[serde(default = "default_web_dir")]
     pub dir: String,
+    /// Enable basic authentication (recommended when exposed to network)
+    #[serde(default)]
+    pub auth_enabled: bool,
+    /// Username for basic auth (required if auth_enabled)
+    pub auth_user: Option<String>,
+    /// Password for basic auth (required if auth_enabled)
+    pub auth_password: Option<String>,
 }
 
 fn default_web_port() -> u16 {
@@ -249,6 +256,9 @@ impl Default for WebConfig {
         Self {
             port: default_web_port(),
             dir: default_web_dir(),
+            auth_enabled: false,
+            auth_user: None,
+            auth_password: None,
         }
     }
 }
@@ -460,6 +470,15 @@ impl Config {
             return Err(ConfigError::ValidationError(
                 "gpu_intensity must be between 1 and 100".to_string(),
             ));
+        }
+
+        // Validate web auth config
+        if self.web.auth_enabled {
+            if self.web.auth_user.is_none() || self.web.auth_password.is_none() {
+                return Err(ConfigError::ValidationError(
+                    "web.auth_user and web.auth_password must be set when web.auth_enabled=true".to_string(),
+                ));
+            }
         }
 
         Ok(())
