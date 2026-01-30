@@ -97,15 +97,5 @@ pub fn print_stats(
     hashrate
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_print_functions_exist() {
-        // Just verify the functions compile and can be called
-        // These functions print to stdout which we don't want to test output
-        // but we verify they don't panic
-        assert!(true);
-    }
-}
+// Note: Print functions write to stdout and are tested implicitly through integration tests.
+// Unit testing would require capturing stdout which adds complexity without much value.

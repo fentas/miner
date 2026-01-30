@@ -23,7 +23,7 @@ use mining::{Coordinator, SimdLevel, GpuCoordinator};
 use idle::IdleMonitor;
 use stats::{HashrateCalculator, format_hashrate};
 use tui::{TuiState, TuiRunner, TuiCommand};
-use bitcoin::{bits_to_difficulty, build_coinbase_tx, compute_merkle_root};
+use bitcoin::{bits_to_difficulty, build_coinbase_tx, compute_merkle_root, parse_prev_hash, parse_nbits, parse_target};
 use app::{
     print_banner, print_mining_started, print_mode, print_new_job,
     print_share_accepted, print_share_rejected, print_stats, tail_bitcoin_log,
@@ -531,29 +531,15 @@ async fn run_solo_mode_with_tui(
                 job.version = template.version;
                 job.ntime = template.timestamp as u32;
 
-                // Parse prev_block_hash
-                if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
-                    if hash_bytes.len() == 32 {
-                        let mut prev_hash = [0u8; 32];
-                        prev_hash.copy_from_slice(&hash_bytes);
-                        prev_hash.reverse();
-                        job.prev_hash = prev_hash;
-                    }
+                if let Some(prev_hash) = parse_prev_hash(&template.prev_block_hash) {
+                    job.prev_hash = prev_hash;
                 }
-
-                // Parse nbits
-                if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                if let Some(bits) = parse_nbits(&template.bits) {
                     job.nbits = bits;
                 }
-
-                // Parse target
-                if let Ok(target_bytes) = hex::decode(&template.target) {
-                    if target_bytes.len() == 32 {
-                        let mut target = [0u8; 32];
-                        target.copy_from_slice(&target_bytes);
-                        job.target = target;
-                        job.network_target = Some(target);
-                    }
+                if let Some(target) = parse_target(&template.target) {
+                    job.target = target;
+                    job.network_target = Some(target);
                 }
 
                 // Build coinbase and compute merkle root for solo mining
@@ -750,29 +736,15 @@ async fn run_solo_mode_with_tui(
                     job.version = template.version;
                     job.ntime = template.timestamp as u32;
 
-                    // Parse prev_block_hash (hex string to bytes, reversed for little-endian)
-                    if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
-                        if hash_bytes.len() == 32 {
-                            let mut prev_hash = [0u8; 32];
-                            prev_hash.copy_from_slice(&hash_bytes);
-                            prev_hash.reverse(); // Bitcoin uses little-endian
-                            job.prev_hash = prev_hash;
-                        }
+                    if let Some(prev_hash) = parse_prev_hash(&template.prev_block_hash) {
+                        job.prev_hash = prev_hash;
                     }
-
-                    // Parse nbits (compact difficulty target)
-                    if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                    if let Some(bits) = parse_nbits(&template.bits) {
                         job.nbits = bits;
                     }
-
-                    // Parse target (hex string to bytes)
-                    if let Ok(target_bytes) = hex::decode(&template.target) {
-                        if target_bytes.len() == 32 {
-                            let mut target = [0u8; 32];
-                            target.copy_from_slice(&target_bytes);
-                            job.target = target;
-                            job.network_target = Some(target);
-                        }
+                    if let Some(target) = parse_target(&template.target) {
+                        job.target = target;
+                        job.network_target = Some(target);
                     }
 
                     // Only update job if template changed (new block)
@@ -1580,29 +1552,15 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                 job.version = template.version;
                 job.ntime = template.timestamp as u32;
 
-                // Parse prev_block_hash (hex string to bytes, reversed for little-endian)
-                if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
-                    if hash_bytes.len() == 32 {
-                        let mut prev_hash = [0u8; 32];
-                        prev_hash.copy_from_slice(&hash_bytes);
-                        prev_hash.reverse(); // Bitcoin uses little-endian
-                        job.prev_hash = prev_hash;
-                    }
+                if let Some(prev_hash) = parse_prev_hash(&template.prev_block_hash) {
+                    job.prev_hash = prev_hash;
                 }
-
-                // Parse nbits (compact difficulty target)
-                if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+                if let Some(bits) = parse_nbits(&template.bits) {
                     job.nbits = bits;
                 }
-
-                // Parse target (hex string to bytes)
-                if let Ok(target_bytes) = hex::decode(&template.target) {
-                    if target_bytes.len() == 32 {
-                        let mut target = [0u8; 32];
-                        target.copy_from_slice(&target_bytes);
-                        job.target = target;
-                        job.network_target = Some(target);
-                    }
+                if let Some(target) = parse_target(&template.target) {
+                    job.target = target;
+                    job.network_target = Some(target);
                 }
 
                 // Build coinbase and compute merkle root for solo mining
@@ -1715,29 +1673,15 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         job.version = template.version;
         job.ntime = template.timestamp as u32;
 
-        // Parse prev_block_hash
-        if let Ok(hash_bytes) = hex::decode(&template.prev_block_hash) {
-            if hash_bytes.len() == 32 {
-                let mut prev_hash = [0u8; 32];
-                prev_hash.copy_from_slice(&hash_bytes);
-                prev_hash.reverse();
-                job.prev_hash = prev_hash;
-            }
+        if let Some(prev_hash) = parse_prev_hash(&template.prev_block_hash) {
+            job.prev_hash = prev_hash;
         }
-
-        // Parse nbits
-        if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
+        if let Some(bits) = parse_nbits(&template.bits) {
             job.nbits = bits;
         }
-
-        // Parse target
-        if let Ok(target_bytes) = hex::decode(&template.target) {
-            if target_bytes.len() == 32 {
-                let mut target = [0u8; 32];
-                target.copy_from_slice(&target_bytes);
-                job.target = target;
-                job.network_target = Some(target);
-            }
+        if let Some(target) = parse_target(&template.target) {
+            job.target = target;
+            job.network_target = Some(target);
         }
 
         // Only update job if template changed (new block)

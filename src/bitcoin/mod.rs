@@ -12,6 +12,9 @@ pub use helpers::{
     bits_to_difficulty,
     build_coinbase_tx,
     compute_merkle_root,
+    parse_prev_hash,
+    parse_nbits,
+    parse_target,
 };
 
 use thiserror::Error;

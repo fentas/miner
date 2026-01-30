@@ -285,6 +285,37 @@ pub fn compute_merkle_root(coinbase_tx: &[u8], tx_hashes: &[String]) -> [u8; 32]
     hashes.first().copied().unwrap_or([0u8; 32])
 }
 
+/// Parse a hex-encoded previous block hash into bytes (reversed for Bitcoin's little-endian format)
+///
+/// Bitcoin block headers store the previous block hash in little-endian order.
+/// This function handles the hex decoding and byte reversal.
+pub fn parse_prev_hash(hex_str: &str) -> Option<[u8; 32]> {
+    let hash_bytes = hex::decode(hex_str).ok()?;
+    if hash_bytes.len() != 32 {
+        return None;
+    }
+    let mut prev_hash = [0u8; 32];
+    prev_hash.copy_from_slice(&hash_bytes);
+    prev_hash.reverse();
+    Some(prev_hash)
+}
+
+/// Parse a hex-encoded nbits (compact difficulty target) value
+pub fn parse_nbits(bits_hex: &str) -> Option<u32> {
+    u32::from_str_radix(bits_hex, 16).ok()
+}
+
+/// Parse a hex-encoded target into bytes
+pub fn parse_target(hex_str: &str) -> Option<[u8; 32]> {
+    let target_bytes = hex::decode(hex_str).ok()?;
+    if target_bytes.len() != 32 {
+        return None;
+    }
+    let mut target = [0u8; 32];
+    target.copy_from_slice(&target_bytes);
+    Some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,5 +549,61 @@ mod tests {
         let hard_diff = bits_to_difficulty(hard_bits);
 
         assert!(hard_diff > easy_diff, "Harder target should have higher difficulty");
+    }
+
+    #[test]
+    fn test_parse_prev_hash_valid() {
+        // 32-byte hash in hex (64 characters)
+        let hex = "0000000000000000000000000000000000000000000000000000000000001234";
+        let result = parse_prev_hash(hex);
+        assert!(result.is_some());
+        let hash = result.unwrap();
+        // Should be reversed (little-endian)
+        assert_eq!(hash[0], 0x34);
+        assert_eq!(hash[1], 0x12);
+    }
+
+    #[test]
+    fn test_parse_prev_hash_invalid_length() {
+        // Too short
+        let hex = "0000000000001234";
+        assert!(parse_prev_hash(hex).is_none());
+    }
+
+    #[test]
+    fn test_parse_prev_hash_invalid_hex() {
+        // Invalid hex characters
+        let hex = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg";
+        assert!(parse_prev_hash(hex).is_none());
+    }
+
+    #[test]
+    fn test_parse_nbits_valid() {
+        assert_eq!(parse_nbits("1d00ffff"), Some(0x1d00ffff));
+        assert_eq!(parse_nbits("170c69e6"), Some(0x170c69e6));
+    }
+
+    #[test]
+    fn test_parse_nbits_invalid() {
+        assert!(parse_nbits("invalid").is_none());
+        assert!(parse_nbits("gggg").is_none());
+    }
+
+    #[test]
+    fn test_parse_target_valid() {
+        // 32-byte target in hex
+        let hex = "00000000ffff0000000000000000000000000000000000000000000000000000";
+        let result = parse_target(hex);
+        assert!(result.is_some());
+        let target = result.unwrap();
+        assert_eq!(target[0], 0x00);
+        assert_eq!(target[4], 0xff);
+        assert_eq!(target[5], 0xff);
+    }
+
+    #[test]
+    fn test_parse_target_invalid_length() {
+        let hex = "00000000ffff";
+        assert!(parse_target(hex).is_none());
     }
 }
