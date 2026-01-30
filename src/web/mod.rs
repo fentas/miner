@@ -197,9 +197,11 @@ async fn api_stats(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     let uptime = state.start_time.elapsed().as_secs();
     let paused = *state.mining_paused.read().await;
 
+    let hashrate_str = format_hashrate_unit(hashrate);
     Json(serde_json::json!({
         "hashrate": hashrate,
-        "hashrate_unit": format_hashrate_unit(hashrate),
+        "hashrate_unit": hashrate_str,
+        "hashrate_formatted": hashrate_str,  // Alias for overlay compatibility
         "hashes": stats.hashes,
         "shares_accepted": stats.shares_accepted,
         "shares_rejected": stats.shares_rejected,

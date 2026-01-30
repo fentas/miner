@@ -44,6 +44,7 @@ async fn test_api_stats_endpoint() {
     // Verify response structure
     assert!(json.get("hashrate").is_some());
     assert!(json.get("hashrate_unit").is_some());
+    assert!(json.get("hashrate_formatted").is_some()); // Overlay compatibility
     assert!(json.get("hashes").is_some());
     assert!(json.get("shares_accepted").is_some());
     assert!(json.get("shares_rejected").is_some());
@@ -51,6 +52,12 @@ async fn test_api_stats_endpoint() {
     assert!(json.get("uptime_seconds").is_some());
     assert!(json.get("uptime_formatted").is_some());
     assert!(json.get("mining_paused").is_some());
+
+    // Verify hashrate_unit and hashrate_formatted are the same
+    assert_eq!(
+        json["hashrate_unit"].as_str(),
+        json["hashrate_formatted"].as_str()
+    );
 }
 
 /// Test GET /api/info endpoint

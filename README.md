@@ -249,9 +249,21 @@ A transparent floating window showing hashrate and controls:
 # Build the overlay
 cargo build --release --features overlay
 
-# Run (requires btcminer running with web API on port 8080)
+# Run (requires btcminer running with web API)
 ./target/release/btcminer-overlay
+
+# Custom port (if web API is not on default 8080)
+./target/release/btcminer-overlay --port 9000
+# Or use environment variable
+BTCMINER_WEB_PORT=9000 ./target/release/btcminer-overlay
 ```
+
+**Port Detection Priority:**
+
+1. `--port` CLI argument
+2. `BTCMINER_WEB_PORT` environment variable
+3. `port` value from `btcminer.toml` (in current or exe directory)
+4. Default: 8080
 
 **Configuration:**
 

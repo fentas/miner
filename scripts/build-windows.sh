@@ -20,7 +20,7 @@ $env:LIB = "$env:LIB;$env:USERPROFILE\OpenCL-SDK\OpenCL-SDK-v2025.07.23-Win-x64\
 $env:INCLUDE = "$env:INCLUDE;$env:USERPROFILE\OpenCL-SDK\OpenCL-SDK-v2025.07.23-Win-x64\include"
 cd C:\Users\fentas\miner
 cargo clean -p btcminer
-cargo build --release --features opencl
+cargo build --release --all-features
 '
 
 echo "Done! Binary at: C:\Users\fentas\miner\target\release\btcminer.exe"

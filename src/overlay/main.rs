@@ -2,15 +2,22 @@
 //!
 //! A minimal overlay that shows mining stats on top of other windows.
 //! Connects to the btcminer web API to fetch real-time statistics.
+//!
+//! Usage: btcminer-overlay [--port PORT]
+//!
+//! The port can also be read from btcminer.toml if present.
 
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const API_URL: &str = "http://127.0.0.1:8080/api/stats";
+const DEFAULT_PORT: u16 = 8080;
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 fn main() -> eframe::Result<()> {
+    let port = get_api_port();
+    let api_base = format!("http://127.0.0.1:{}", port);
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([180.0, 80.0])
@@ -24,8 +31,68 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "btcminer-overlay",
         options,
-        Box::new(|cc| Ok(Box::new(OverlayApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(OverlayApp::new(cc, api_base.clone())))),
     )
+}
+
+/// Get API port from CLI args, environment, config file, or default
+fn get_api_port() -> u16 {
+    // 1. Check CLI args: --port PORT
+    let args: Vec<String> = std::env::args().collect();
+    for i in 0..args.len() {
+        if args[i] == "--port" || args[i] == "-p" {
+            if let Some(port_str) = args.get(i + 1) {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    return port;
+                }
+            }
+        }
+    }
+
+    // 2. Check environment variable
+    if let Ok(port_str) = std::env::var("BTCMINER_WEB_PORT") {
+        if let Ok(port) = port_str.parse::<u16>() {
+            return port;
+        }
+    }
+
+    // 3. Try to read from btcminer.toml in current directory or exe directory
+    if let Some(port) = read_port_from_config() {
+        return port;
+    }
+
+    DEFAULT_PORT
+}
+
+/// Try to read web port from btcminer.toml config file
+fn read_port_from_config() -> Option<u16> {
+    // Try current directory first
+    let paths = [
+        std::path::PathBuf::from("btcminer.toml"),
+        std::env::current_exe()
+            .ok()?
+            .parent()?
+            .join("btcminer.toml"),
+    ];
+
+    for path in &paths {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                // Simple TOML parsing for [web] port = N
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with("port") && line.contains('=') {
+                        if let Some(value) = line.split('=').nth(1) {
+                            if let Ok(port) = value.trim().parse::<u16>() {
+                                return Some(port);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Default, Clone)]
@@ -43,15 +110,17 @@ struct OverlayApp {
     last_fetch: Instant,
     dragging: bool,
     drag_start: egui::Pos2,
+    api_base: String,
 }
 
 impl OverlayApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>, api_base: String) -> Self {
         Self {
             stats: Arc::new(Mutex::new(MinerStats::default())),
             last_fetch: Instant::now() - POLL_INTERVAL,
             dragging: false,
             drag_start: egui::Pos2::ZERO,
+            api_base,
         }
     }
 
@@ -62,10 +131,11 @@ impl OverlayApp {
         self.last_fetch = Instant::now();
 
         let stats = Arc::clone(&self.stats);
+        let url = format!("{}/api/stats", self.api_base);
 
         // Non-blocking fetch using a thread
         std::thread::spawn(move || {
-            if let Ok(response) = ureq::get(API_URL).timeout(Duration::from_secs(2)).call() {
+            if let Ok(response) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
                 if let Ok(json) = response.into_json::<serde_json::Value>() {
                     let mut s = stats.lock().unwrap();
                     s.hashrate = json["hashrate"].as_f64().unwrap_or(0.0);
@@ -85,8 +155,9 @@ impl OverlayApp {
     }
 
     fn toggle_pause(&self) {
-        std::thread::spawn(|| {
-            let _ = ureq::post("http://127.0.0.1:8080/api/control")
+        let url = format!("{}/api/control", self.api_base);
+        std::thread::spawn(move || {
+            let _ = ureq::post(&url)
                 .send_json(serde_json::json!({"action": "toggle"}));
         });
     }
