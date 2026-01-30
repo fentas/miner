@@ -29,6 +29,15 @@ Thumbs.db
 tarpaulin-report.html
 lcov.info
 
+# Benchmark outputs
+benchmark_results.json
+benchmark_results.csv
+batch_sizes.csv
+thread_scaling.csv
+sustained_mining.csv
+hasher_performance.csv
+comparison_report.json
+
 # Bitcoin Core data (managed mode)
 .bitcoin/
 
