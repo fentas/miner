@@ -280,15 +280,17 @@ proxy_port = 34255
 
 ## TUI Keyboard Shortcuts (k9s-style)
 
-| Key           | Action                               |
-| ------------- | ------------------------------------ |
-| `?`           | Help overlay (shows all shortcuts)   |
-| `:`           | Command mode (`:q` quit, `:clear`)   |
-| `l`           | Focus logs (full screen)             |
-| `Shift+L`     | Toggle Bitcoin Core logs             |
-| `p`           | Pause/Resume mining                  |
-| `j/k`         | Scroll logs (vim-style)              |
-| `0-6`         | Time filter (tail, 1m-1h, all)       |
+| Key       | Action                                  |
+| --------- | --------------------------------------- |
+| `?`       | Help overlay (shows all shortcuts)      |
+| `:`       | Command mode (`:q` quit, `:clear`)      |
+| `l`       | Focus logs (full screen)                |
+| `Shift+L` | Toggle Bitcoin Core logs                |
+| `h`       | Toggle hashrate display (Total/CPU/GPU) |
+| `Shift+H` | Hashrate history chart (expanded)       |
+| `p`       | Pause/Resume mining                     |
+| `j/k`     | Scroll logs (vim-style)                 |
+| `0-6`     | Time filter (tail, 1m-1h, all)          |
 
 See [TUI Reference](docs/TUI.md) for all shortcuts.
 

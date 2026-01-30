@@ -8,15 +8,17 @@ Press `?` at any time to see the help overlay with all available shortcuts.
 
 ## General
 
-| Key           | Action                          |
-| ------------- | ------------------------------- |
-| `?`           | Toggle help overlay             |
-| `:`           | Enter command mode              |
-| `Ctrl+C`      | Quit immediately                |
-| `p`           | Pause/Resume mining             |
-| `Space`       | Pause/Resume mining             |
-| `l`           | Focus logs (full screen)        |
-| `Shift+L`     | Toggle Bitcoin Core logs        |
+| Key       | Action                                  |
+| --------- | --------------------------------------- |
+| `?`       | Toggle help overlay                     |
+| `:`       | Enter command mode                      |
+| `Ctrl+C`  | Quit immediately                        |
+| `p`       | Pause/Resume mining                     |
+| `Space`   | Pause/Resume mining                     |
+| `l`       | Focus logs (full screen)                |
+| `Shift+L` | Toggle Bitcoin Core logs                |
+| `h`       | Toggle hashrate display (Total/CPU/GPU) |
+| `Shift+H` | Focus hashrate history (expanded chart) |
 
 ## Navigation
 
@@ -57,6 +59,32 @@ Filter logs by time (k9s-style):
 | `6` | All logs       |
 
 The active filter is shown in the title bar: `Logs (123) [5m]`
+
+## Hashrate History Mode
+
+Press `Shift+H` to enter hashrate history mode (expanded line chart).
+
+| Key   | Action                        |
+| ----- | ----------------------------- |
+| `Esc` | Unfocus (return to dashboard) |
+| `0-6` | Time filter (same as logs)    |
+
+### Features
+
+- **Line Chart**: Shows hashrate over time using Braille markers
+- **Multiple Lines**: Total (white), CPU (cyan), GPU (green)
+- **Block Markers**: Yellow vertical lines show where new blocks arrived
+- **Time Filters**: Same 0-6 filters as logs (tail, 1m, 5m, 15m, 30m, 1h, all)
+- **Storage**: Stores up to 1 hour of hashrate samples
+
+### Chart Legend
+
+```
+Total:White  CPU:Cyan  GPU:Green  │  Blocks:Yellow
+```
+
+The chart title shows sample count and block markers:
+`Hashrate History (120 samples, 2 blocks) [tail]`
 
 ## Command Mode
 

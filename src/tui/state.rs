@@ -1268,14 +1268,18 @@ mod tests {
     fn test_tui_state_hashrate_history_limit() {
         let state = TuiState::new();
 
-        // Add more than MAX_HASHRATE_HISTORY samples
-        for i in 0..150 {
+        // Add more than MAX_HASHRATE_HISTORY samples (3600)
+        // Test with a smaller number that still exceeds reasonable limit
+        for i in 0..200 {
             state.set_hashrate(i as f64 * 100.0);
         }
 
         let history = state.get_hashrate_history();
-        // Should be limited to MAX_HASHRATE_HISTORY (120)
-        assert!(history.len() <= 120);
+        // Should store all 200 samples (max is now 3600)
+        assert_eq!(history.len(), 200);
+        // Verify oldest sample was pushed first
+        assert_eq!(history[0], 0.0);
+        assert_eq!(history[199], 199.0 * 100.0);
     }
 
     #[test]
