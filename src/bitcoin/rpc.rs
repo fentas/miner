@@ -132,17 +132,43 @@ impl BitcoinRpc {
         let rules = json!({"rules": ["segwit"]});
         let result = self.call("getblocktemplate", json!([rules])).await?;
 
-        // Parse coinbase transaction
-        let coinbasevalue = result["coinbasevalue"].as_u64().unwrap_or(0);
+        // Validate required fields
+        let prev_block_hash = result["previousblockhash"]
+            .as_str()
+            .ok_or_else(|| BitcoinError::RpcError("Missing previousblockhash in template".into()))?
+            .to_string();
+
+        let bits = result["bits"]
+            .as_str()
+            .ok_or_else(|| BitcoinError::RpcError("Missing bits in template".into()))?
+            .to_string();
+
+        let height = result["height"]
+            .as_u64()
+            .ok_or_else(|| BitcoinError::RpcError("Missing height in template".into()))?;
+
+        let timestamp = result["curtime"]
+            .as_u64()
+            .ok_or_else(|| BitcoinError::RpcError("Missing curtime in template".into()))?;
+
+        let coinbase_value = result["coinbasevalue"]
+            .as_u64()
+            .ok_or_else(|| BitcoinError::RpcError("Missing coinbasevalue in template".into()))?;
+
+        // Target is required for difficulty calculation
+        let target = result["target"]
+            .as_str()
+            .ok_or_else(|| BitcoinError::RpcError("Missing target in template".into()))?
+            .to_string();
 
         Ok(BlockTemplate {
             version: result["version"].as_u64().unwrap_or(0x20000000) as u32,
-            prev_block_hash: result["previousblockhash"].as_str().unwrap_or("").to_string(),
+            prev_block_hash,
             merkle_root: String::new(), // Computed from transactions
-            timestamp: result["curtime"].as_u64().unwrap_or(0),
-            bits: result["bits"].as_str().unwrap_or("").to_string(),
-            height: result["height"].as_u64().unwrap_or(0),
-            coinbase_value: coinbasevalue,
+            timestamp,
+            bits,
+            height,
+            coinbase_value,
             transactions: result["transactions"]
                 .as_array()
                 .map(|arr| {
@@ -151,7 +177,7 @@ impl BitcoinRpc {
                         .collect()
                 })
                 .unwrap_or_default(),
-            target: result["target"].as_str().unwrap_or("").to_string(),
+            target,
         })
     }
 
@@ -208,6 +234,13 @@ impl BitcoinRpc {
             }
         }
 
+        Ok(())
+    }
+
+    /// Request graceful shutdown of Bitcoin Core
+    pub async fn stop(&self) -> Result<(), BitcoinError> {
+        // The stop RPC returns a message like "Bitcoin Core stopping"
+        let _ = self.call("stop", json!([])).await?;
         Ok(())
     }
 }

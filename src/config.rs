@@ -435,6 +435,33 @@ impl Config {
             ));
         }
 
+        // Check for conflicting bitcoind settings
+        if self.bitcoind.enabled && self.bitcoind.managed && self.pool.preset != PoolPreset::None {
+            return Err(ConfigError::ValidationError(
+                "bitcoind.managed=true only works with pool.preset=\"none\" (solo mining)".to_string(),
+            ));
+        }
+
+        // Check external RPC credentials when not managed
+        if self.bitcoind.enabled && !self.bitcoind.managed {
+            // External bitcoind requires credentials (unless connecting to localhost without auth)
+            // This is a warning-worthy case but we allow it for flexibility
+        }
+
+        // Validate GPU batch exponent range
+        if self.mining.gpu_batch_exp < 20 || self.mining.gpu_batch_exp > 28 {
+            return Err(ConfigError::ValidationError(
+                "gpu_batch_exp must be between 20 and 28".to_string(),
+            ));
+        }
+
+        // Validate GPU intensity range
+        if self.mining.gpu_intensity == 0 || self.mining.gpu_intensity > 100 {
+            return Err(ConfigError::ValidationError(
+                "gpu_intensity must be between 1 and 100".to_string(),
+            ));
+        }
+
         Ok(())
     }
 

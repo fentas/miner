@@ -35,8 +35,12 @@ impl StratumV1Client {
     pub fn connect(&mut self, address: &str) -> Result<(), StratumError> {
         let (host, port) = parse_pool_address(address)?;
 
+        let socket_addr = format!("{}:{}", host, port)
+            .parse()
+            .map_err(|e| StratumError::ConnectionError(format!("Invalid address: {}", e)))?;
+
         let stream = TcpStream::connect_timeout(
-            &format!("{}:{}", host, port).parse().unwrap(),
+            &socket_addr,
             Duration::from_secs(30),
         )
         .map_err(|e| StratumError::ConnectionError(e.to_string()))?;
@@ -51,6 +55,42 @@ impl StratumV1Client {
         self.connected.store(true, Ordering::SeqCst);
 
         Ok(())
+    }
+
+    /// Connect to pool with exponential backoff retry
+    /// Retries up to `max_retries` times with exponentially increasing delay
+    pub fn connect_with_retry(&mut self, address: &str, max_retries: u32) -> Result<(), StratumError> {
+        let mut delay = Duration::from_secs(1);
+        let max_delay = Duration::from_secs(60);
+
+        for attempt in 0..=max_retries {
+            match self.connect(address) {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt < max_retries => {
+                    // Add jitter (±25% of delay)
+                    let jitter_range = delay.as_millis() as u64 / 4;
+                    let jitter = if jitter_range > 0 {
+                        (std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos() as u64) % (jitter_range * 2)
+                    } else {
+                        0
+                    };
+                    let actual_delay = Duration::from_millis(
+                        delay.as_millis() as u64 - jitter_range + jitter
+                    );
+
+                    std::thread::sleep(actual_delay);
+
+                    // Exponential backoff (double each time, capped at max_delay)
+                    delay = std::cmp::min(delay * 2, max_delay);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(StratumError::ConnectionError("Max retries exceeded".into()))
     }
 
     /// Disconnect from pool

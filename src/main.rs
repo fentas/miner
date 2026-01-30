@@ -159,27 +159,76 @@ fn address_to_script(address: &str) -> Vec<u8> {
     script
 }
 
-/// Decode bech32 P2WPKH address to script
+/// Decode bech32 P2WPKH address to script with checksum validation (BIP-173)
 fn decode_bech32_p2wpkh(address: &str) -> Option<Vec<u8>> {
-    // Simple bech32 decoder for P2WPKH
-    let hrp_end = address.find('1')?;
-    let data_part = &address[hrp_end + 1..];
-
     // Bech32 charset
     const CHARSET: &str = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+    // BIP-173 generator polynomial coefficients
+    const GEN: [u32; 5] = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+
+    // Polymod function for checksum verification
+    fn polymod(values: &[u8]) -> u32 {
+        let mut chk: u32 = 1;
+        for &v in values {
+            let top = chk >> 25;
+            chk = ((chk & 0x1ffffff) << 5) ^ (v as u32);
+            for (i, &g) in GEN.iter().enumerate() {
+                if (top >> i) & 1 == 1 {
+                    chk ^= g;
+                }
+            }
+        }
+        chk
+    }
+
+    // Expand HRP for checksum calculation
+    fn hrp_expand(hrp: &str) -> Vec<u8> {
+        let mut ret: Vec<u8> = hrp.chars().map(|c| (c as u8) >> 5).collect();
+        ret.push(0);
+        ret.extend(hrp.chars().map(|c| (c as u8) & 31));
+        ret
+    }
+
+    // Find separator
+    let hrp_end = address.rfind('1')?; // Use rfind per BIP-173
+    if hrp_end < 1 {
+        return None;
+    }
+
+    let hrp = &address[..hrp_end];
+    let data_part = &address[hrp_end + 1..];
+
+    // Validate HRP (must be bc or tb for Bitcoin)
+    if hrp != "bc" && hrp != "tb" {
+        return None;
+    }
 
     // Convert characters to 5-bit values
     let mut values: Vec<u8> = Vec::new();
     for c in data_part.chars() {
-        let idx = CHARSET.find(c)? as u8;
+        let idx = CHARSET.find(c.to_ascii_lowercase())? as u8;
         values.push(idx);
     }
 
-    // Skip version byte and checksum (last 6 values)
-    if values.len() < 7 {
+    // Minimum length check (version + data + 6 checksum)
+    if values.len() < 8 {
         return None;
     }
-    let _version = values[0]; // Witness version (0 for P2WPKH)
+
+    // Verify checksum (polymod should be 1 for valid bech32)
+    let mut checksum_data = hrp_expand(hrp);
+    checksum_data.extend_from_slice(&values);
+    if polymod(&checksum_data) != 1 {
+        return None; // Invalid checksum
+    }
+
+    // Extract witness version and data (excluding 6-byte checksum)
+    let version = values[0];
+    if version != 0 {
+        return None; // Only support witness version 0 (P2WPKH/P2WSH)
+    }
+
     let data = &values[1..values.len() - 6];
 
     // Convert from 5-bit to 8-bit
@@ -566,7 +615,13 @@ async fn run_solo_mode_with_tui(
 
     // Wait for peer connections before starting to mine
     tui_state.log_info("Waiting for peer connections...");
-    let rpc = bitcoind.rpc().unwrap();
+    let rpc = match bitcoind.rpc() {
+        Some(r) => r,
+        None => {
+            tui_state.log_error("Bitcoin RPC not initialized - check connection settings");
+            return Err(anyhow::anyhow!("Bitcoin RPC not initialized"));
+        }
+    };
     loop {
         match rpc.get_connection_count().await {
             Ok(count) if count > 0 => {
@@ -792,7 +847,14 @@ async fn run_solo_mode_with_tui(
         }
 
         // Check peer count before attempting block template
-        let rpc = bitcoind.rpc().unwrap();
+        let rpc = match bitcoind.rpc() {
+            Some(r) => r,
+            None => {
+                tui_state.log_error("Lost connection to Bitcoin RPC");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
         let peer_count = rpc.get_connection_count().await.unwrap_or(0);
         tui_state.set_peer_count(peer_count);
 
@@ -917,7 +979,10 @@ async fn run_solo_mode_with_tui(
 
                     // Build the full block and submit
                     if let Some(block_hex) = job.build_block(share.nonce) {
-                        let rpc = bitcoind.rpc().unwrap();
+                        let Some(rpc) = bitcoind.rpc() else {
+                            tui_state.log_error("Cannot submit block - RPC not available");
+                            continue;
+                        };
                         match rpc.submit_block(&block_hex).await {
                             Ok(()) => {
                                 coordinator.stats().accept_share();
@@ -1599,7 +1664,8 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         "⏳".bright_yellow(),
         "Waiting for peer connections...".bright_white()
     );
-    let rpc = bitcoind.rpc().unwrap();
+    let rpc = bitcoind.rpc()
+        .ok_or_else(|| anyhow::anyhow!("Bitcoin RPC not initialized - check connection settings"))?;
     loop {
         match rpc.get_connection_count().await {
             Ok(count) if count > 0 => {

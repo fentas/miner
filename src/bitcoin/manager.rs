@@ -421,18 +421,58 @@ blockmaxweight=4000000
         Ok(())
     }
 
-    /// Stop Bitcoin Core daemon
-    pub fn stop(&mut self) -> Result<(), BitcoinError> {
+    /// Stop Bitcoin Core daemon gracefully (async version)
+    /// Sends RPC stop command first, then waits for process to exit
+    pub async fn stop_async(&mut self) -> Result<(), BitcoinError> {
         if let Some(mut process) = self.process.take() {
             info!("Stopping Bitcoin Core...");
 
             // Try graceful shutdown via RPC first
-            if self.rpc.is_some() {
-                // Note: Graceful shutdown would use RPC stop command
-                // For now, just kill the process
+            if let Some(ref rpc) = self.rpc {
+                match rpc.stop().await {
+                    Ok(_) => {
+                        info!("Sent stop command to Bitcoin Core");
+                        // Wait for process to exit gracefully (up to 30 seconds)
+                        let start = std::time::Instant::now();
+                        while start.elapsed() < Duration::from_secs(30) {
+                            match process.try_wait() {
+                                Ok(Some(_)) => {
+                                    info!("Bitcoin Core stopped gracefully");
+                                    self.rpc = None;
+                                    return Ok(());
+                                }
+                                Ok(None) => {
+                                    sleep(Duration::from_millis(500)).await;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        warn!("Graceful shutdown timed out, force killing...");
+                    }
+                    Err(e) => {
+                        warn!("RPC stop failed: {}, force killing...", e);
+                    }
+                }
             }
 
-            // Kill process
+            // Force kill if graceful shutdown failed
+            let _ = process.kill();
+            let _ = process.wait();
+
+            info!("Bitcoin Core stopped");
+        }
+
+        self.rpc = None;
+        Ok(())
+    }
+
+    /// Stop Bitcoin Core daemon (sync version, used for Drop)
+    /// Only force-kills the process without graceful RPC shutdown
+    pub fn stop(&mut self) -> Result<(), BitcoinError> {
+        if let Some(mut process) = self.process.take() {
+            info!("Stopping Bitcoin Core (force)...");
+
+            // Force kill - for async graceful shutdown use stop_async()
             let _ = process.kill();
             let _ = process.wait();
 
