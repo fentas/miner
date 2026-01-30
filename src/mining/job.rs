@@ -195,29 +195,57 @@ fn encode_varint(value: u64, out: &mut Vec<u8>) {
     }
 }
 
-/// Convert difficulty to target bytes
+/// Convert pool difficulty to target bytes (big-endian)
+///
+/// Pool diff1 target = 0x00000000FFFF0000...0000 (32 bytes)
+/// This is the standard stratum pool difficulty base.
+/// Target = diff1 / difficulty
+///
+/// For difficulty d:
+/// - d = 1: target = 0x00000000FFFF0000...
+/// - d = 2: target = 0x000000007FFF8000...
+/// - d = 0.5: target = 0x00000001FFFE0000...
 pub fn difficulty_to_target(difficulty: f64) -> [u8; 32] {
-    // Bitcoin difficulty 1 target
-    const DIFF1_TARGET: [u8; 32] = [
-        0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ];
-
     if difficulty <= 0.0 {
         return [0xff; 32];
     }
 
-    // target = diff1_target / difficulty
-    let mut target = [0u8; 32];
-    let mut carry: u64 = 0;
+    // diff1 value: 0xFFFF shifted left by 208 bits (26 bytes)
+    // As a float: 0xFFFF * 2^208 ≈ 2.695953529e67
+    // We calculate: target = diff1 / difficulty = (0xFFFF * 2^208) / d
 
-    for i in 0..32 {
-        let val = (DIFF1_TARGET[i] as f64 / difficulty) + carry as f64;
-        target[i] = (val as u64 % 256) as u8;
-        carry = val as u64 / 256;
+    let mut target = [0u8; 32];
+
+    // Compute target as u64: (0xFFFF << 48) / difficulty
+    // This gives us 8 bytes of precision starting at byte offset 4
+    let target_scaled = 0xFFFF_0000_0000_0000_u64 as f64 / difficulty;
+
+    if target_scaled >= (1_u128 << 96) as f64 {
+        // Overflows our placement, fill with 0xFF from appropriate byte
+        let overflow_bytes = ((target_scaled.log2() - 64.0) / 8.0).ceil() as usize;
+        let start = 4_usize.saturating_sub(overflow_bytes);
+        for i in start..32 {
+            target[i] = 0xff;
+        }
+        return target;
     }
+
+    if target_scaled < 1.0 {
+        return [0x00; 32];
+    }
+
+    // Place the value at bytes 4-11 (8 bytes)
+    let target_u64 = target_scaled as u64;
+
+    // Big-endian placement
+    target[4] = ((target_u64 >> 56) & 0xff) as u8;
+    target[5] = ((target_u64 >> 48) & 0xff) as u8;
+    target[6] = ((target_u64 >> 40) & 0xff) as u8;
+    target[7] = ((target_u64 >> 32) & 0xff) as u8;
+    target[8] = ((target_u64 >> 24) & 0xff) as u8;
+    target[9] = ((target_u64 >> 16) & 0xff) as u8;
+    target[10] = ((target_u64 >> 8) & 0xff) as u8;
+    target[11] = (target_u64 & 0xff) as u8;
 
     target
 }
