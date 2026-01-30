@@ -103,7 +103,7 @@ pub struct Coordinator {
     workers: Vec<WorkerHandle>,
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
-    job_tx: watch::Sender<Option<Job>>,
+    job_tx: watch::Sender<Option<Arc<Job>>>,
     share_rx: mpsc::Receiver<Share>,
 }
 
@@ -165,7 +165,7 @@ impl Coordinator {
 
     /// Update the current job
     pub fn update_job(&self, job: Job) {
-        let _ = self.job_tx.send(Some(job));
+        let _ = self.job_tx.send(Some(Arc::new(job)));
     }
 
     /// Clear the current job

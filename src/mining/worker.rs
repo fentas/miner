@@ -26,7 +26,7 @@ pub struct Worker {
     id: usize,
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
-    job_rx: watch::Receiver<Option<Job>>,
+    job_rx: watch::Receiver<Option<Arc<Job>>>,
     share_tx: mpsc::Sender<Share>,
     hasher: Hasher,
     extranonce1: Vec<u8>,
@@ -39,7 +39,7 @@ impl Worker {
         id: usize,
         stats: Arc<Stats>,
         running: Arc<AtomicBool>,
-        job_rx: watch::Receiver<Option<Job>>,
+        job_rx: watch::Receiver<Option<Arc<Job>>>,
         share_tx: mpsc::Sender<Share>,
     ) -> WorkerHandle {
         let handle = thread::Builder::new()
@@ -151,7 +151,7 @@ impl Worker {
     }
 
     /// Wait for a valid job
-    fn wait_for_job(&mut self) -> Option<Job> {
+    fn wait_for_job(&mut self) -> Option<Arc<Job>> {
         loop {
             // Check if we should stop
             if !self.running.load(Ordering::Acquire) {
@@ -160,6 +160,7 @@ impl Worker {
 
             // Check current job using borrow_and_update to clear the "changed" flag
             // This ensures has_changed() only returns true for actual new jobs
+            // Arc::clone is cheap - just increments reference count
             let job = self.job_rx.borrow_and_update().clone();
             if job.is_some() {
                 return job;
@@ -218,7 +219,7 @@ mod tests {
     fn test_generate_extranonce2_length() {
         // Create a minimal worker for testing extranonce2 generation
         let (_share_tx, _share_rx) = mpsc::channel(10);
-        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
 
@@ -246,7 +247,7 @@ mod tests {
     #[test]
     fn test_generate_extranonce2_small_size() {
         let (_share_tx, _share_rx) = mpsc::channel(10);
-        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
 
@@ -268,7 +269,7 @@ mod tests {
     #[test]
     fn test_set_extranonce() {
         let (_share_tx, _share_rx) = mpsc::channel(10);
-        let (_job_tx, job_rx) = watch::channel(None::<Job>);
+        let (_job_tx, job_rx) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
 
@@ -294,8 +295,8 @@ mod tests {
     fn test_worker_different_ids_different_extranonce() {
         let (_share_tx1, _) = mpsc::channel(10);
         let (_share_tx2, _) = mpsc::channel(10);
-        let (_, job_rx1) = watch::channel(None::<Job>);
-        let (_, job_rx2) = watch::channel(None::<Job>);
+        let (_, job_rx1) = watch::channel(None::<Arc<Job>>);
+        let (_, job_rx2) = watch::channel(None::<Arc<Job>>);
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
 
