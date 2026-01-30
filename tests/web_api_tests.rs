@@ -24,7 +24,7 @@ fn create_test_state() -> Arc<WebState> {
 #[tokio::test]
 async fn test_api_stats_endpoint() {
     let state = create_test_state();
-    let app = create_router(state.clone(), "web");
+    let app = create_router(state.clone(), "web", None);
 
     let response = app
         .oneshot(
@@ -57,7 +57,7 @@ async fn test_api_stats_endpoint() {
 #[tokio::test]
 async fn test_api_info_endpoint() {
     let state = create_test_state();
-    let app = create_router(state.clone(), "web");
+    let app = create_router(state.clone(), "web", None);
 
     let response = app
         .oneshot(
@@ -88,7 +88,7 @@ async fn test_api_info_endpoint() {
 #[tokio::test]
 async fn test_api_pause_endpoint() {
     let state = create_test_state();
-    let app = create_router(state.clone(), "web");
+    let app = create_router(state.clone(), "web", None);
 
     // Initially not paused
     assert!(!state.is_paused().await);
@@ -123,7 +123,7 @@ async fn test_api_resume_endpoint() {
     state.set_paused(true).await;
     assert!(state.is_paused().await);
 
-    let app = create_router(state.clone(), "web");
+    let app = create_router(state.clone(), "web", None);
 
     let response = app
         .oneshot(
@@ -263,7 +263,7 @@ async fn test_api_stats_returns_updated_values() {
     };
     state.update_stats(stats, 2_500_000.0).await;
 
-    let app = create_router(state, "web");
+    let app = create_router(state, "web", None);
 
     let response = app
         .oneshot(
@@ -289,7 +289,7 @@ async fn test_api_stats_returns_updated_values() {
 #[tokio::test]
 async fn test_unknown_route_404() {
     let state = create_test_state();
-    let app = create_router(state, "web");
+    let app = create_router(state, "web", None);
 
     let response = app
         .oneshot(
