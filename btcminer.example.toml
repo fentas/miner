@@ -38,6 +38,14 @@ threads = 0
 # 16 = 64K, 17 = 128K, 18 = 256K, 19 = 512K, 20 = 1M
 # cpu_batch_exp = 18
 
+# SIMD level for CPU hashing (auto, sha-ni, avx2, avx512, generic)
+# auto    = auto-detect best available (recommended)
+# sha-ni  = Intel SHA Extensions (fastest, requires 2016+ Intel or AMD Zen+)
+# avx2    = 8-way parallel (fallback for Haswell/Broadwell era CPUs)
+# avx512  = 16-way parallel (fallback for AVX512 CPUs without SHA-NI)
+# generic = portable implementation (slowest, always works)
+# simd_level = "auto"
+
 # Enable GPU mining (requires CUDA/OpenCL build)
 enable_gpu = false
 

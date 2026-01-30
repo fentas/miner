@@ -10,9 +10,10 @@ This document tracks performance optimizations implemented in btcminer, with bef
 | Midstate Caching | ✅ Completed | ~5-10% | `src/mining/hasher.rs` |
 | Arc<Job> (avoid cloning) | ✅ Completed | ~1.7% | `src/mining/mod.rs`, `worker.rs` |
 | Configurable Batch Size | ✅ Completed | ~4x (256K default) | `src/mining/mod.rs`, `worker.rs`, `config.rs` |
-| Fix Busy-Wait | ⏳ Low Priority | ~2-5% | `src/mining/worker.rs` |
-| AVX2 8-way Hashing | ⏳ Pending | ~2-4x | `src/mining/sha256_simd.rs` |
-| AVX512 16-way Hashing | ⏳ Pending | ~2-4x | `src/mining/sha256_simd.rs` |
+| AVX2 8-way Hashing | ✅ Completed | ~4-8x (fallback) | `src/mining/sha256_simd.rs` |
+| AVX512 16-way Hashing | ✅ Completed | ~2x over AVX2 | `src/mining/sha256_simd.rs` |
+| SIMD Level Config | ✅ Completed | N/A | `src/config.rs` |
+| Fix Busy-Wait | ⏳ Low Priority | N/A (CPU usage) | `src/mining/worker.rs` |
 
 ---
 
@@ -122,20 +123,6 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
-## Pending Optimizations
-
-### 6. Fix Busy-Wait on Startup (Low Priority)
-
-**Problem:** Workers poll every 10ms with `thread::sleep` waiting for first job.
-
-**Location:** `src/mining/worker.rs:81-83`
-
-**Solution:** Use condition variables or proper channel blocking.
-
-**Expected improvement:** Reduces idle CPU usage, not hashrate improvement.
-
----
-
 ### 6. AVX2 8-way Parallel Hashing (2026-01-30)
 
 **Problem:** On CPUs without SHA-NI, falls back to slow generic implementation.
@@ -157,19 +144,63 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
+### 7. AVX512 16-way Parallel Hashing (2026-01-30)
+
+**Problem:** On CPUs without SHA-NI but with AVX512, falls back to AVX2 (8-way).
+
+**Solution:** Implemented AVX512 16-way parallel SHA-256 using 512-bit registers.
+
+**Implementation:**
+
+- `sha256_transform_avx512_16way` processes 16 SHA-256 blocks in parallel
+- Each `__m512i` register holds one word from 16 different hashes
+- Message schedule expansion and compression loop parallelized
+- Automatic fallback from SHA-NI when AVX512 is available but SHA-NI is not
+
+**Expected improvement:** ~2x over AVX2 on AVX512 CPUs without SHA-NI
+
+**Note:** SHA-NI is prioritized when available. AVX512 is only used as fallback on CPUs with AVX512F+AVX512VL but without SHA-NI.
+
+**Files changed:** `src/mining/sha256_simd.rs`
+
+---
+
+### 8. SIMD Level Config Option (2026-01-30)
+
+**Problem:** Users couldn't override automatic SIMD detection for testing or troubleshooting.
+
+**Solution:** Added `simd_level` configuration option.
+
+**Configuration:**
+
+```toml
+[mining]
+simd_level = "auto"  # auto, sha-ni, avx2, avx512, generic
+```
+
+**Options:**
+
+- `auto` - Automatically detect best available (default)
+- `sha-ni` - Force Intel SHA Extensions
+- `avx2` - Force AVX2 8-way parallel
+- `avx512` - Force AVX512 16-way parallel
+- `generic` - Force portable implementation
+
+**Files changed:** `src/config.rs`, `btcminer.example.toml`
+
+---
+
 ## Pending Optimizations
 
-### 7. AVX512 16-way Parallel Hashing (Fallback)
+### 9. Fix Busy-Wait on Startup (Low Priority)
 
-**Problem:** On CPUs without SHA-NI but with AVX512, falls back to generic.
+**Problem:** Workers poll every 10ms with `thread::sleep` waiting for first job.
 
-**Location:** `src/mining/sha256_simd.rs`
+**Location:** `src/mining/worker.rs:81-83`
 
-**Solution:** Implement AVX512 16-way parallel SHA-256 as fallback.
+**Solution:** Use condition variables or proper channel blocking.
 
-**Expected improvement:** 8-16x over generic on AVX512 CPUs without SHA-NI
-
-**Note:** SHA-NI is prioritized when available. AVX512 is only used as fallback.
+**Expected improvement:** Reduces idle CPU usage, not hashrate improvement.
 
 ---
 

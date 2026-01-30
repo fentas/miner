@@ -92,6 +92,23 @@ impl PoolConfig {
     }
 }
 
+/// SIMD level configuration
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SimdLevelConfig {
+    /// Auto-detect best available (SHA-NI > AVX2 > Generic)
+    #[default]
+    Auto,
+    /// Intel SHA Extensions (fastest on supported CPUs)
+    ShaNi,
+    /// AVX2 8-way parallel (fallback for older CPUs)
+    Avx2,
+    /// AVX512 16-way parallel (fallback for AVX512 CPUs without SHA-NI)
+    Avx512,
+    /// Portable generic implementation
+    Generic,
+}
+
 /// Mining configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MiningConfig {
@@ -103,6 +120,9 @@ pub struct MiningConfig {
     /// Range: 16-22, default 18. Higher = better throughput but slower job response
     #[serde(default = "default_cpu_batch_exp")]
     pub cpu_batch_exp: u8,
+    /// SIMD level for CPU hashing (auto, sha-ni, avx2, avx512, generic)
+    #[serde(default)]
+    pub simd_level: SimdLevelConfig,
     #[serde(default)]
     pub enable_gpu: bool,
     #[serde(default)]
@@ -141,6 +161,7 @@ impl Default for MiningConfig {
             enable_cpu: true,
             threads: 0,
             cpu_batch_exp: 18,      // 256K nonces per batch
+            simd_level: SimdLevelConfig::Auto,
             enable_gpu: false,
             gpu_devices: vec![],
             gpu_intensity: 100,
@@ -1297,5 +1318,81 @@ mod tests {
         assert_eq!(config.web.port, 0);
         // Port 0 should be valid (means disabled)
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_simd_level_config_default() {
+        let mining = MiningConfig::default();
+        assert_eq!(mining.simd_level, SimdLevelConfig::Auto);
+    }
+
+    #[test]
+    fn test_simd_level_config_from_toml() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            simd_level = "sha-ni"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.simd_level, SimdLevelConfig::ShaNi);
+    }
+
+    #[test]
+    fn test_simd_level_config_avx2() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            simd_level = "avx2"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.simd_level, SimdLevelConfig::Avx2);
+    }
+
+    #[test]
+    fn test_simd_level_config_avx512() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            simd_level = "avx512"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.simd_level, SimdLevelConfig::Avx512);
+    }
+
+    #[test]
+    fn test_simd_level_config_generic() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            simd_level = "generic"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.simd_level, SimdLevelConfig::Generic);
+    }
+
+    #[test]
+    fn test_simd_level_config_auto_explicit() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [mining]
+            simd_level = "auto"
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.mining.simd_level, SimdLevelConfig::Auto);
     }
 }

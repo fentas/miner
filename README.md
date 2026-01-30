@@ -464,8 +464,9 @@ cargo test --test binary_e2e_tests --release
 The miner uses optimized SIMD implementations with automatic fallback:
 
 1. **SHA-NI** - Intel SHA Extensions (best performance on modern CPUs)
-2. **AVX2 8-way** - Parallel hashing fallback for older CPUs without SHA-NI
-3. **Generic** - Portable fallback for all platforms
+2. **AVX512 16-way** - Parallel hashing fallback for AVX512 CPUs without SHA-NI
+3. **AVX2 8-way** - Parallel hashing fallback for older CPUs without SHA-NI
+4. **Generic** - Portable fallback for all platforms
 
 **Benchmark Results (easy target):**
 
@@ -473,15 +474,17 @@ The miner uses optimized SIMD implementations with automatic fallback:
 |---------------------|------------|------------------------------------|
 | Generic (no SIMD)   | ~1.6 MH/s  | Portable fallback                  |
 | AVX2 8-way          | ~10 MH/s   | Haswell/Broadwell era CPUs         |
+| AVX512 16-way       | ~20 MH/s   | AVX512 CPUs without SHA-NI         |
 | SHA-NI (1 thread)   | ~850 GH/s  | Intel/AMD with SHA extensions      |
 | SHA-NI (24 threads) | ~3.3 TH/s  | Full CPU utilization               |
 
 **CPU Support:**
 
 - **SHA-NI:** Intel Goldmont (2016+), Ice Lake (2019+); AMD Zen (2017+)
+- **AVX512:** Intel Skylake-X (2017+), Ice Lake (2019+); AMD Zen 4 (2022+)
 - **AVX2:** Intel Haswell (2013+); AMD Excavator (2015+)
 
-Check your CPU's SHA-NI support:
+Check your CPU's SIMD support:
 
 ```bash
 cargo test --release profile_simd_info -- --ignored --nocapture

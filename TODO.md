@@ -28,11 +28,24 @@ Implemented `sha256_transform_avx2_8way` and `mine_avx2` using AVX2 256-bit intr
 - Falls back from SHA-NI on legacy CPUs (Haswell/Broadwell)
 - Expected 4-8x speedup over generic on AVX2 CPUs without SHA-NI
 
-### 3. [ ] AVX512 16-way Parallel Hashing
+### 3. [x] AVX512 16-way Parallel Hashing - COMPLETED
 
 **File:** `src/mining/sha256_simd.rs`
-**Status:** Low priority - AVX2 fallback now available
-**Expected:** Additional 2x over AVX2 on AVX512 CPUs without SHA-NI
+**Result:** Fallback for AVX512 CPUs without SHA-NI
+
+Implemented `sha256_transform_avx512_16way` and `mine_avx512` using AVX512 512-bit intrinsics:
+
+- Processes 16 nonces in parallel using `__m512i` registers
+- Each lane executes the same SHA-256 operations independently
+- Falls back from SHA-NI on CPUs with AVX512 but without SHA-NI
+- Expected 2x speedup over AVX2 on AVX512 CPUs without SHA-NI
+
+### 3b. [x] SIMD Level Config Option - COMPLETED
+
+**Files:** `src/config.rs`, `btcminer.example.toml`
+**Result:** Users can now override SIMD level detection
+
+Added `simd_level` config option with values: `auto`, `sha-ni`, `avx2`, `avx512`, `generic`
 
 ---
 
