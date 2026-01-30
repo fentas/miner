@@ -136,21 +136,30 @@ if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
 
 ---
 
-### 7. AVX2 8-way Parallel Hashing (Fallback)
+### 6. AVX2 8-way Parallel Hashing (2026-01-30)
 
 **Problem:** On CPUs without SHA-NI, falls back to slow generic implementation.
 
-**Location:** `src/mining/sha256_simd.rs`
+**Solution:** Implemented AVX2 8-way parallel SHA-256 using 256-bit registers.
 
-**Solution:** Implement AVX2 8-way parallel SHA-256 as fallback for non-SHA-NI CPUs.
+**Implementation:**
 
-**Expected improvement:** 4-8x over generic on AVX2 CPUs without SHA-NI (e.g., Haswell, Broadwell)
+- `sha256_transform_avx2_8way` processes 8 SHA-256 blocks in parallel
+- Each `__m256i` register holds one word from 8 different hashes
+- Message schedule expansion and compression loop parallelized
+- Automatic fallback when SHA-NI is not available
 
-**Note:** SHA-NI is prioritized when available. AVX2 is only used as fallback.
+**Expected improvement:** 4-8x over generic on AVX2 CPUs without SHA-NI (Haswell, Broadwell era)
+
+**Note:** SHA-NI is prioritized when available. AVX2 is only used as fallback on legacy CPUs.
+
+**Files changed:** `src/mining/sha256_simd.rs`
 
 ---
 
-### 8. AVX512 16-way Parallel Hashing (Fallback)
+## Pending Optimizations
+
+### 7. AVX512 16-way Parallel Hashing (Fallback)
 
 **Problem:** On CPUs without SHA-NI but with AVX512, falls back to generic.
 

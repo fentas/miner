@@ -3,6 +3,7 @@
 ## Critical Priority
 
 ### 1. [x] Implement SHA-NI Intrinsics - COMPLETED
+
 **File:** `src/mining/sha256_simd.rs`
 **Result:** ~330x speedup with SHA-NI hardware acceleration
 
@@ -15,25 +16,35 @@ Implemented `sha256_transform_shani` and `sha256d_midstate_shani` using Intel SH
 
 Reference: [noloader/SHA-Intrinsics](https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c)
 
-### 2. [N/A] AVX2 8-way Parallel Hashing
+### 2. [x] AVX2 8-way Parallel Hashing - COMPLETED
 
-**Status:** Not needed - SHA-NI provides better performance on modern CPUs
-**Reason:** SHA-NI gives ~530x speedup with hardware acceleration. AVX2 8-way would only help legacy CPUs (Haswell/Broadwell) that lack SHA-NI. Modern AMD (Zen+) and Intel (Ice Lake+) all have SHA-NI.
+**File:** `src/mining/sha256_simd.rs`
+**Result:** Fallback for CPUs without SHA-NI
 
-### 3. [N/A] AVX512 16-way Parallel Hashing
+Implemented `sha256_transform_avx2_8way` and `mine_avx2` using AVX2 256-bit intrinsics:
 
-**Status:** Not needed - SHA-NI provides better performance on modern CPUs
-**Reason:** Same as AVX2 - SHA-NI is faster than SIMD-only approaches on SHA-NI capable CPUs.
+- Processes 8 nonces in parallel using `__m256i` registers
+- Each lane executes the same SHA-256 operations independently
+- Falls back from SHA-NI on legacy CPUs (Haswell/Broadwell)
+- Expected 4-8x speedup over generic on AVX2 CPUs without SHA-NI
+
+### 3. [ ] AVX512 16-way Parallel Hashing
+
+**File:** `src/mining/sha256_simd.rs`
+**Status:** Low priority - AVX2 fallback now available
+**Expected:** Additional 2x over AVX2 on AVX512 CPUs without SHA-NI
 
 ---
 
 ## High Priority (5-10% speedup)
 
 ### 4. [x] Cache Midstate in hash_nonce_range - COMPLETED
+
 **File:** `src/mining/hasher.rs`
 **Result:** Midstate now cached and reused when header prefix unchanged
 
 Changed `hash_nonce_range` to `&mut self` and added caching logic:
+
 ```rust
 if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
     self.midstate_header_prefix = *prefix_64;
@@ -92,6 +103,7 @@ Changed `Worker::spawn` to return `Result<WorkerHandle, std::io::Error>` and upd
 ## Verification
 
 Run regression tests after implementing:
+
 ```bash
 # Correctness test (always runs)
 cargo test test_hash_nonce_range_correctness

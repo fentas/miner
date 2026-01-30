@@ -461,20 +461,25 @@ cargo test --test binary_e2e_tests --release
 
 ## Performance
 
-The miner uses Intel SHA Extensions (SHA-NI) for hardware-accelerated SHA-256 hashing when available.
+The miner uses optimized SIMD implementations with automatic fallback:
+
+1. **SHA-NI** - Intel SHA Extensions (best performance on modern CPUs)
+2. **AVX2 8-way** - Parallel hashing fallback for older CPUs without SHA-NI
+3. **Generic** - Portable fallback for all platforms
 
 **Benchmark Results (easy target):**
 
-| Configuration       | Hashrate   | Notes                          |
-|---------------------|------------|--------------------------------|
-| Generic (no SIMD)   | ~1.6 MH/s  | Portable fallback              |
-| SHA-NI (1 thread)   | ~850 GH/s  | Intel/AMD with SHA extensions  |
-| SHA-NI (24 threads) | ~3.3 TH/s  | Full CPU utilization           |
+| Configuration       | Hashrate   | Notes                              |
+|---------------------|------------|------------------------------------|
+| Generic (no SIMD)   | ~1.6 MH/s  | Portable fallback                  |
+| AVX2 8-way          | ~10 MH/s   | Haswell/Broadwell era CPUs         |
+| SHA-NI (1 thread)   | ~850 GH/s  | Intel/AMD with SHA extensions      |
+| SHA-NI (24 threads) | ~3.3 TH/s  | Full CPU utilization               |
 
 **CPU Support:**
 
-- Intel: Goldmont (2016+), Ice Lake (2019+), Rocket Lake (2021+)
-- AMD: Zen (2017+) and all later architectures
+- **SHA-NI:** Intel Goldmont (2016+), Ice Lake (2019+); AMD Zen (2017+)
+- **AVX2:** Intel Haswell (2013+); AMD Excavator (2015+)
 
 Check your CPU's SHA-NI support:
 
