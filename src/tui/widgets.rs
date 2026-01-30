@@ -922,7 +922,7 @@ fn draw_stats_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     let uptime_str = format_duration(uptime);
     let last_share = state
         .get_last_share_ago()
-        .map(|d| format_duration(d))
+        .map(format_duration)
         .unwrap_or_else(|| "N/A".to_string());
 
     let stats_block = Block::default()
@@ -1085,7 +1085,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &TuiState) {
         // When pct_100 == 0xFFFF (65535), show only elapsed time
         // Otherwise show both percentage and elapsed time
         if name.contains("Snapshot") {
-            let elapsed_secs = (total >> 16) as u64;
+            let elapsed_secs = total >> 16 ;
             let pct_100 = (total & 0xFFFF) as u16;
 
             let title = format!(" {} ", name);

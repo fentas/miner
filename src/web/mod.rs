@@ -13,6 +13,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 
@@ -34,12 +35,14 @@ async fn basic_auth_middleware(
     // Check for Authorization header
     if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Basic ") {
-                let encoded = &auth_str[6..];
+            if let Some(encoded) = auth_str.strip_prefix("Basic ") {
                 if let Ok(decoded) = BASE64.decode(encoded) {
                     if let Ok(credentials) = String::from_utf8(decoded) {
                         if let Some((user, pass)) = credentials.split_once(':') {
-                            if user == auth.username && pass == auth.password {
+                            // Use constant-time comparison to prevent timing attacks
+                            let user_match = user.as_bytes().ct_eq(auth.username.as_bytes());
+                            let pass_match = pass.as_bytes().ct_eq(auth.password.as_bytes());
+                            if (user_match & pass_match).into() {
                                 return next.run(request).await;
                             }
                         }
@@ -54,7 +57,7 @@ async fn basic_auth_middleware(
         .status(StatusCode::UNAUTHORIZED)
         .header(header::WWW_AUTHENTICATE, "Basic realm=\"btcminer\"")
         .body(Body::from("Unauthorized"))
-        .unwrap()
+        .expect("static response should always build")
 }
 
 /// Shared state for the web server

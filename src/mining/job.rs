@@ -128,7 +128,7 @@ impl Job {
         let first_hash = hasher.finalize();
 
         let mut hasher = Sha256::new();
-        hasher.update(&first_hash);
+        hasher.update(first_hash);
         let mut merkle_root: [u8; 32] = hasher.finalize().into();
 
         // Apply merkle branches
@@ -138,11 +138,11 @@ impl Job {
             combined[32..64].copy_from_slice(branch);
 
             let mut hasher = Sha256::new();
-            hasher.update(&combined);
+            hasher.update(combined);
             let first = hasher.finalize();
 
             let mut hasher = Sha256::new();
-            hasher.update(&first);
+            hasher.update(first);
             merkle_root = hasher.finalize().into();
         }
 
@@ -151,13 +151,13 @@ impl Job {
 
     /// Check if a hash meets the pool target
     pub fn meets_target(&self, hash: &[u8; 32]) -> bool {
-        compare_hash_to_target(hash, &self.target)
+        hash_meets_target(hash, &self.target)
     }
 
     /// Check if a hash meets the network target (for block)
     pub fn meets_network_target(&self, hash: &[u8; 32]) -> bool {
         if let Some(ref target) = self.network_target {
-            compare_hash_to_target(hash, target)
+            hash_meets_target(hash, target)
         } else {
             false
         }
@@ -166,7 +166,11 @@ impl Job {
 
 /// Compare hash to target (hash must be <= target)
 /// Returns true if hash meets (is less than or equal to) target
-fn compare_hash_to_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
+///
+/// Used for determining if a hash meets the pool or network difficulty.
+/// Comparison is done from most significant byte (big-endian).
+#[inline]
+pub fn hash_meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
     // Compare from most significant byte (index 0 = MSB in big-endian)
     for i in 0..32 {
         if hash[i] < target[i] {
@@ -224,8 +228,8 @@ pub fn difficulty_to_target(difficulty: f64) -> [u8; 32] {
         // Overflows our placement, fill with 0xFF from appropriate byte
         let overflow_bytes = ((target_scaled.log2() - 64.0) / 8.0).ceil() as usize;
         let start = 4_usize.saturating_sub(overflow_bytes);
-        for i in start..32 {
-            target[i] = 0xff;
+        for byte in target.iter_mut().skip(start) {
+            *byte = 0xff;
         }
         return target;
     }
@@ -255,20 +259,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compare_hash_to_target() {
+    fn test_hash_meets_target() {
         let target = [0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let good_hash = [0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let bad_hash = [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-        assert!(compare_hash_to_target(&good_hash, &target));
-        assert!(!compare_hash_to_target(&bad_hash, &target));
+        assert!(hash_meets_target(&good_hash, &target));
+        assert!(!hash_meets_target(&bad_hash, &target));
     }
 
     #[test]
-    fn test_compare_hash_to_target_equal() {
+    fn test_hash_meets_target_equal() {
         let target = [0x00, 0x00, 0x00, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         // Equal hash should pass
-        assert!(compare_hash_to_target(&target, &target));
+        assert!(hash_meets_target(&target, &target));
     }
 
     #[test]

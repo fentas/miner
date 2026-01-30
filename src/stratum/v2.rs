@@ -178,7 +178,7 @@ impl StratumV2Client {
         frame.extend_from_slice(data);
 
         stream.write_all(&frame).await
-            .map_err(|e| StratumError::IoError(e))?;
+            .map_err(StratumError::IoError)?;
 
         Ok(())
     }
@@ -191,7 +191,7 @@ impl StratumV2Client {
         // Read frame header
         let mut header = [0u8; 6];
         stream.read_exact(&mut header).await
-            .map_err(|e| StratumError::IoError(e))?;
+            .map_err(StratumError::IoError)?;
 
         // Parse length
         let len = (header[3] as usize)
@@ -201,7 +201,7 @@ impl StratumV2Client {
         // Read payload
         let mut payload = vec![0u8; len];
         stream.read_exact(&mut payload).await
-            .map_err(|e| StratumError::IoError(e))?;
+            .map_err(StratumError::IoError)?;
 
         Ok(payload)
     }

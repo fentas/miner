@@ -119,8 +119,13 @@ impl StratumV1Client {
                     self.extranonce1 = hex::decode(en1)
                         .map_err(|_| StratumError::ProtocolError("Invalid extranonce1".into()))?;
                 }
-                // extranonce2_size is at index 2
+                // extranonce2_size is at index 2 (must be 1-8 bytes)
                 if let Some(en2_size) = arr.get(2).and_then(|v| v.as_u64()) {
+                    if en2_size < 1 || en2_size > 8 {
+                        return Err(StratumError::ProtocolError(
+                            format!("Invalid extranonce2_size: expected 1-8, got {}", en2_size),
+                        ));
+                    }
                     self.extranonce2_size = en2_size as usize;
                 }
             }
@@ -233,7 +238,7 @@ impl StratumV1Client {
                     .ok_or_else(|| StratumError::ProtocolError("Invalid notify params".into()))?;
 
                 let job = self.parse_job(params)?;
-                Ok(Some(Notification::Job(job)))
+                Ok(Some(Notification::Job(Box::new(job))))
             }
             Some("mining.set_difficulty") => {
                 if let Some(diff) = msg.get("params")
@@ -266,6 +271,12 @@ impl StratumV1Client {
         let merkle_branches = params.get(4)
             .and_then(|v| v.as_array())
             .ok_or_else(|| StratumError::ProtocolError("Missing merkle branches".into()))?;
+        // Limit merkle branches to prevent DoS (32 branches = 2^32 txs max)
+        if merkle_branches.len() > 32 {
+            return Err(StratumError::ProtocolError(
+                format!("Too many merkle branches: {} (max 32)", merkle_branches.len()),
+            ));
+        }
         let version = get_str(5)?;
         let nbits = get_str(6)?;
         let ntime = get_str(7)?;
@@ -329,7 +340,9 @@ impl StratumV1Client {
             StratumError::ConnectionError("Not connected".to_string())
         })?;
 
-        let data = serde_json::to_string(request).unwrap() + "\n";
+        let data = serde_json::to_string(request)
+            .map_err(|e| StratumError::ProtocolError(format!("JSON serialization failed: {}", e)))?
+            + "\n";
         stream.write_all(data.as_bytes())?;
         stream.flush()?;
 
@@ -412,7 +425,7 @@ impl Default for StratumV1Client {
 /// Stratum notification types
 #[derive(Debug)]
 pub enum Notification {
-    Job(Job),
+    Job(Box<Job>),
     Difficulty(f64),
 }
 
@@ -725,5 +738,54 @@ mod tests {
     fn test_get_extranonce2_size_default() {
         let client = StratumV1Client::new();
         assert_eq!(client.get_extranonce2_size(), 4);
+    }
+
+    #[test]
+    fn test_parse_job_too_many_merkle_branches() {
+        let client = StratumV1Client::new();
+
+        // Create 33 merkle branches (exceeds limit of 32)
+        let branches: Vec<_> = (0..33).map(|_| serde_json::json!("a".repeat(64))).collect();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!(branches),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(format!("{:?}", err).contains("Too many merkle branches"));
+    }
+
+    #[test]
+    fn test_parse_job_max_merkle_branches_allowed() {
+        let client = StratumV1Client::new();
+
+        // Create 32 merkle branches (exactly at limit)
+        let branches: Vec<_> = (0..32).map(|_| serde_json::json!("a".repeat(64))).collect();
+
+        let params = vec![
+            serde_json::json!("job123"),
+            serde_json::json!("0".repeat(64)),
+            serde_json::json!(""),
+            serde_json::json!(""),
+            serde_json::json!(branches),
+            serde_json::json!("20000000"),
+            serde_json::json!("1d00ffff"),
+            serde_json::json!("60000000"),
+            serde_json::json!(false),
+        ];
+
+        let result = client.parse_job(&params);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().merkle_branches.len(), 32);
     }
 }

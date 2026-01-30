@@ -27,7 +27,7 @@ pub enum StratumEvent {
     Connected,
     Disconnected,
     Authorized,
-    JobReceived(Job),
+    JobReceived(Box<Job>),
     ShareAccepted { job_id: String },
     ShareRejected { job_id: String, reason: String },
     DifficultyChanged(f64),

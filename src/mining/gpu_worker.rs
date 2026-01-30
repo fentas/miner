@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use tokio::sync::watch;
 
-use super::{Job, Stats, Midstate};
+use super::{Job, Stats, Midstate, hash_meets_target};
 use crate::gpu::{GpuManager, GpuMiner, GpuDevice};
 
 /// GPU Worker handle
@@ -230,7 +230,7 @@ impl GpuCoordinator {
                     for result in results {
                         // Check if meets network target (for solo mining)
                         if let Some(ref network_target) = job.network_target {
-                            if meets_target(&result.hash, network_target) {
+                            if hash_meets_target(&result.hash, network_target) {
                                 stats.found_block();
                                 eprintln!(
                                     "[GPU {}] Found potential block! Nonce: {:#x}",
@@ -351,25 +351,12 @@ impl Drop for GpuCoordinator {
     }
 }
 
-/// Compare hash to target (hash must be <= target)
-fn meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
-    for i in 0..32 {
-        if hash[i] < target[i] {
-            return true;
-        }
-        if hash[i] > target[i] {
-            return false;
-        }
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_meets_target() {
+    fn test_hash_meets_target() {
         let target = [0x00, 0x00, 0x00, 0x1F, 0xFF, 0xFF, 0xFF, 0xFF,
                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -377,37 +364,37 @@ mod tests {
 
         // Zero hash should meet target
         let zero_hash = [0x00; 32];
-        assert!(meets_target(&zero_hash, &target));
+        assert!(hash_meets_target(&zero_hash, &target));
 
         // High hash should not meet target
         let high_hash = [0xFF; 32];
-        assert!(!meets_target(&high_hash, &target));
+        assert!(!hash_meets_target(&high_hash, &target));
     }
 
     #[test]
-    fn test_meets_target_edge_cases() {
+    fn test_hash_meets_target_edge_cases() {
         // Test exact match - hash equals target
         let target = [0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,
                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let hash = target;
-        assert!(meets_target(&hash, &target), "Hash equal to target should meet target");
+        assert!(hash_meets_target(&hash, &target), "Hash equal to target should meet target");
 
         // Test hash just below target
         let mut hash_below = target;
         hash_below[3] = 0x0F; // One less than target at byte 3
-        assert!(meets_target(&hash_below, &target), "Hash below target should meet target");
+        assert!(hash_meets_target(&hash_below, &target), "Hash below target should meet target");
 
         // Test hash just above target
         let mut hash_above = target;
         hash_above[3] = 0x11; // One more than target at byte 3
-        assert!(!meets_target(&hash_above, &target), "Hash above target should not meet target");
+        assert!(!hash_meets_target(&hash_above, &target), "Hash above target should not meet target");
 
         // Test all zeros target (impossible difficulty)
         let zero_target = [0x00; 32];
         let zero_hash = [0x00; 32];
-        assert!(meets_target(&zero_hash, &zero_target), "Zero hash should meet zero target");
+        assert!(hash_meets_target(&zero_hash, &zero_target), "Zero hash should meet zero target");
 
         // Test all ones target (easiest difficulty)
         let max_target = [0xFF; 32];
@@ -415,11 +402,11 @@ mod tests {
                         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
                         0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
                         0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
-        assert!(meets_target(&any_hash, &max_target), "Any hash should meet max target");
+        assert!(hash_meets_target(&any_hash, &max_target), "Any hash should meet max target");
     }
 
     #[test]
-    fn test_meets_target_comparison_order() {
+    fn test_hash_meets_target_comparison_order() {
         // Test that comparison is done from first byte (most significant)
         let target = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -431,7 +418,7 @@ mod tests {
                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        assert!(meets_target(&hash, &target), "Hash with lower prefix should meet target");
+        assert!(hash_meets_target(&hash, &target), "Hash with lower prefix should meet target");
     }
 
     #[test]

@@ -264,7 +264,7 @@ fn compute_merkle_root(coinbase_tx: &[u8], tx_hashes: &[String]) -> [u8; 32] {
     hasher.update(coinbase_tx);
     let first = hasher.finalize();
     let mut hasher = Sha256::new();
-    hasher.update(&first);
+    hasher.update(first);
     let coinbase_hash: [u8; 32] = hasher.finalize().into();
 
     // Collect all txids (coinbase first, then transactions)
@@ -278,7 +278,7 @@ fn compute_merkle_root(coinbase_tx: &[u8], tx_hashes: &[String]) -> [u8; 32] {
             hasher.update(&tx_bytes);
             let first = hasher.finalize();
             let mut hasher = Sha256::new();
-            hasher.update(&first);
+            hasher.update(first);
             let txid: [u8; 32] = hasher.finalize().into();
             hashes.push(txid);
         }
@@ -298,10 +298,10 @@ fn compute_merkle_root(coinbase_tx: &[u8], tx_hashes: &[String]) -> [u8; 32] {
             combined[32..64].copy_from_slice(&chunk[1]);
 
             let mut hasher = Sha256::new();
-            hasher.update(&combined);
+            hasher.update(combined);
             let first = hasher.finalize();
             let mut hasher = Sha256::new();
-            hasher.update(&first);
+            hasher.update(first);
             let hash: [u8; 32] = hasher.finalize().into();
             new_level.push(hash);
         }
@@ -433,7 +433,7 @@ async fn run_with_tui(cfg: Config, simd_level: SimdLevel) -> anyhow::Result<()> 
         tui_state.set_gpu_available(false);
     }
 
-    tui_state.log_info(format!("Loading configuration from btcminer.toml"));
+    tui_state.log_info("Loading configuration from btcminer.toml".to_string());
     tui_state.log_info(format!("Mining with {} CPU threads", cfg.effective_threads()));
     tui_state.log_info(format!("SIMD level: {}", simd_level.name()));
 
@@ -629,12 +629,12 @@ async fn run_solo_mode_with_tui(
 
                     if status.synced {
                         tui_state.set_syncing(false, 100.0);
-                        tui_state.set_block_height(status.blocks as u64);
+                        tui_state.set_block_height(status.blocks);
                         tui_state.log_success(format!("Synced at height {}", status.blocks));
                         break;
                     } else {
                         tui_state.set_syncing(true, status.progress);
-                        tui_state.set_block_height(status.blocks as u64);
+                        tui_state.set_block_height(status.blocks);
                     }
                 }
                 Err(e) => {
@@ -758,7 +758,7 @@ async fn run_solo_mode_with_tui(
     loop {
         match rpc.get_block_template(&cfg.pool.payout_address).await {
             Ok(template) => {
-                tui_state.set_block_height(template.height as u64);
+                tui_state.set_block_height(template.height);
 
                 // Calculate and set difficulty from bits
                 if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
@@ -954,7 +954,7 @@ async fn run_solo_mode_with_tui(
             // Get block template
             match rpc.get_block_template(&cfg.pool.payout_address).await {
                 Ok(template) => {
-                    tui_state.set_block_height(template.height as u64);
+                    tui_state.set_block_height(template.height);
 
                     // Calculate and set difficulty from bits
                     if let Ok(bits) = u32::from_str_radix(&template.bits, 16) {
@@ -992,7 +992,7 @@ async fn run_solo_mode_with_tui(
                     }
 
                     // Only update job if template changed (new block)
-                    if template.height as u64 != last_template_height {
+                    if template.height != last_template_height {
                         // Build coinbase and compute merkle root for solo mining
                         let coinbase_tx = build_coinbase_tx(
                             template.height,
@@ -1021,7 +1021,7 @@ async fn run_solo_mode_with_tui(
                         // Store current job for block submission
                         current_job = Some(job);
 
-                        last_template_height = template.height as u64;
+                        last_template_height = template.height;
                         tui_state.log_info(format!("New block template: height {}", template.height));
                     }
                 }
@@ -1357,7 +1357,7 @@ async fn run_pool_mode_with_tui(
         match client.poll_notification() {
             Ok(Some(stratum::Notification::Job(job))) => {
                 tui_state.log_info(format!("New job: {}", job.id));
-                coordinator.update_job(job);
+                coordinator.update_job(*job);
             }
             Ok(Some(stratum::Notification::Difficulty(diff))) => {
                 tui_state.set_difficulty(diff as u64);
@@ -1373,7 +1373,7 @@ async fn run_pool_mode_with_tui(
 
         // Check for found shares
         while let Some(share) = coordinator.try_recv_share() {
-            let extranonce2 = hex::encode(&[0u8; 4]);
+            let extranonce2 = hex::encode([0u8; 4]);
             let ntime = hex::encode(share.nonce.to_be_bytes());
             let nonce = hex::encode(share.nonce.to_le_bytes());
 
@@ -2251,7 +2251,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
         match client.poll_notification() {
             Ok(Some(stratum::Notification::Job(job))) => {
                 print_new_job(&job.id);
-                coordinator.update_job(job);
+                coordinator.update_job(*job);
             }
             Ok(Some(stratum::Notification::Difficulty(diff))) => {
                 println!(
@@ -2269,7 +2269,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
 
         // Check for found shares
         while let Some(share) = coordinator.try_recv_share() {
-            let extranonce2 = hex::encode(&[0u8; 4]);
+            let extranonce2 = hex::encode([0u8; 4]);
             let ntime = hex::encode(share.nonce.to_be_bytes());
             let nonce = hex::encode(share.nonce.to_le_bytes());
 

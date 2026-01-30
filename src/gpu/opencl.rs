@@ -274,7 +274,7 @@ pub fn enumerate_devices() -> Result<Vec<GpuDevice>, GpuError> {
 
     // Platform::list() can panic if OpenCL runtime is not available
     // Catch the panic and return empty list instead
-    let platforms = match panic::catch_unwind(|| Platform::list()) {
+    let platforms = match panic::catch_unwind(Platform::list) {
         Ok(p) => p,
         Err(_) => {
             tracing::warn!(
@@ -287,7 +287,7 @@ pub fn enumerate_devices() -> Result<Vec<GpuDevice>, GpuError> {
     };
 
     for platform in platforms {
-        if let Ok(devs) = Device::list(&platform, Some(DeviceType::GPU)) {
+        if let Ok(devs) = Device::list(platform, Some(DeviceType::GPU)) {
             for dev in devs {
                 let name = dev.name().unwrap_or_else(|_| "Unknown".to_string());
                 let vendor = dev.vendor().unwrap_or_else(|_| "Unknown".to_string());
@@ -382,7 +382,7 @@ impl OpenCLMiner {
         let mut current_id = 0u32;
 
         // Platform::list() can panic if OpenCL runtime is not available
-        let platforms = match panic::catch_unwind(|| Platform::list()) {
+        let platforms = match panic::catch_unwind(Platform::list) {
             Ok(p) => p,
             Err(_) => {
                 return Err(GpuError::OpenCL("OpenCL runtime not available".to_string()));
@@ -390,7 +390,7 @@ impl OpenCLMiner {
         };
 
         for platform in platforms {
-            if let Ok(devs) = Device::list(&platform, Some(DeviceType::GPU)) {
+            if let Ok(devs) = Device::list(platform, Some(DeviceType::GPU)) {
                 for dev in devs {
                     if current_id == device_id {
                         target_device = Some(dev);
@@ -567,7 +567,7 @@ impl GpuMiner for OpenCLMiner {
             let batch_size = self.calculate_work_size(remaining);
 
             // Reset result count
-            let zero = vec![0u32; 1];
+            let zero = [0u32; 1];
             if self.result_count_buf.write(&zero[..]).enq().is_err() {
                 break;
             }
@@ -594,7 +594,7 @@ impl GpuMiner for OpenCLMiner {
             }
 
             // Read result count
-            let mut result_count = vec![0u32; 1];
+            let mut result_count = [0u32; 1];
             if self.result_count_buf.read(&mut result_count[..]).enq().is_err() {
                 break;
             }

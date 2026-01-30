@@ -6,6 +6,8 @@
 //! - AVX512: 16-way parallel hashing (~400-500 MH/s)
 //! - Generic: Portable fallback (~10-20 MH/s)
 
+use super::job::hash_meets_target;
+
 
 /// SHA-256 initial hash values (H0-H7)
 pub const H_INIT: [u32; 8] = [
@@ -260,7 +262,7 @@ fn mine_generic(
     for i in 0..nonce_count {
         let nonce = nonce_start.wrapping_add(i);
         let hash = sha256d_midstate_generic(midstate, tail, nonce);
-        if meets_target(&hash, target) {
+        if hash_meets_target(&hash, target) {
             return Some((nonce, hash));
         }
     }
@@ -291,27 +293,13 @@ unsafe fn mine_avx2_8way(
                 break;
             }
             let hash = sha256d_midstate_generic(midstate, tail, nonce);
-            if meets_target(&hash, target) {
+            if hash_meets_target(&hash, target) {
                 return Some((nonce, hash));
             }
         }
         i += 8;
     }
     None
-}
-
-/// Check if hash meets target (hash <= target)
-#[inline]
-fn meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
-    for i in 0..32 {
-        if hash[i] < target[i] {
-            return true;
-        }
-        if hash[i] > target[i] {
-            return false;
-        }
-    }
-    true
 }
 
 /// Pad message for SHA-256
@@ -514,39 +502,39 @@ mod tests {
     }
 
     #[test]
-    fn test_meets_target_easy() {
+    fn test_hash_meets_target_easy() {
         let target = [0xFF; 32]; // Very easy target
         let hash = [0x00; 32];
-        assert!(meets_target(&hash, &target));
+        assert!(hash_meets_target(&hash, &target));
     }
 
     #[test]
-    fn test_meets_target_hard() {
+    fn test_hash_meets_target_hard() {
         let target = [0x00; 32]; // Impossible target
         let hash = [0x01; 32];
-        assert!(!meets_target(&hash, &target));
+        assert!(!hash_meets_target(&hash, &target));
     }
 
     #[test]
-    fn test_meets_target_equal() {
+    fn test_hash_meets_target_equal() {
         let target = [0x11; 32];
         let hash = [0x11; 32];
-        assert!(meets_target(&hash, &target)); // Equal meets target
+        assert!(hash_meets_target(&hash, &target)); // Equal meets target
     }
 
     #[test]
-    fn test_meets_target_boundary() {
+    fn test_hash_meets_target_boundary() {
         let mut target = [0xFF; 32];
         target[0] = 0x00;
         target[1] = 0x01;
 
         let mut good_hash = [0x00; 32];
         good_hash[1] = 0x00;  // Less than target[1]
-        assert!(meets_target(&good_hash, &target));
+        assert!(hash_meets_target(&good_hash, &target));
 
         let mut bad_hash = [0x00; 32];
         bad_hash[1] = 0x02;  // Greater than target[1]
-        assert!(!meets_target(&bad_hash, &target));
+        assert!(!hash_meets_target(&bad_hash, &target));
     }
 
     #[test]
@@ -572,7 +560,7 @@ mod tests {
 
         let (nonce, hash) = result.unwrap();
         assert!(nonce < 10);
-        assert!(meets_target(&hash, &target));
+        assert!(hash_meets_target(&hash, &target));
     }
 
     #[test]

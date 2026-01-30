@@ -13,20 +13,15 @@ pub enum ConfigError {
 }
 
 /// Pool preset options
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PoolPreset {
+    #[default]
     Ckpool,
     Braiins,
     Ocean,
     None,
     Custom,
-}
-
-impl Default for PoolPreset {
-    fn default() -> Self {
-        Self::Ckpool
-    }
 }
 
 impl PoolPreset {
@@ -473,12 +468,13 @@ impl Config {
         }
 
         // Validate web auth config
-        if self.web.auth_enabled {
-            if self.web.auth_user.is_none() || self.web.auth_password.is_none() {
-                return Err(ConfigError::ValidationError(
-                    "web.auth_user and web.auth_password must be set when web.auth_enabled=true".to_string(),
-                ));
-            }
+        if self.web.auth_enabled
+            && (self.web.auth_user.is_none() || self.web.auth_password.is_none())
+        {
+            return Err(ConfigError::ValidationError(
+                "web.auth_user and web.auth_password must be set when web.auth_enabled=true"
+                    .to_string(),
+            ));
         }
 
         // Validate port ranges (web.port 0 means disabled, others must be > 0)

@@ -704,21 +704,25 @@ blockmaxweight=4000000
                                 progress_callback(last_downloaded, total_size);
                             }
                         }
-                        DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
-                            match new_state {
-                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
-                                    info!("AssumeUTXO snapshot download complete");
-                                    break;
-                                }
-                                _ => {}
-                            }
+                        DownloadEvent::StateChanged {
+                            id,
+                            new_state:
+                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed,
+                            ..
+                        } if id == download_id => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
                         }
+                        DownloadEvent::StateChanged { .. } => {}
                         DownloadEvent::Completed { id } if id == download_id => {
                             info!("AssumeUTXO snapshot download complete");
                             break;
                         }
                         DownloadEvent::Failed { id, error, .. } if id == download_id => {
-                            return Err(BitcoinError::DownloadError(format!("Torrent download failed: {}", error)));
+                            return Err(BitcoinError::DownloadError(format!(
+                                "Torrent download failed: {}",
+                                error
+                            )));
                         }
                         _ => {}
                     }
@@ -885,15 +889,16 @@ blockmaxweight=4000000
                             }
                         }
                         // Torrent transitions to Seeding/Completed state when download finishes
-                        DownloadEvent::StateChanged { id, new_state, .. } if id == download_id => {
-                            match new_state {
-                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed => {
-                                    info!("AssumeUTXO snapshot download complete");
-                                    break;
-                                }
-                                _ => {}
-                            }
+                        DownloadEvent::StateChanged {
+                            id,
+                            new_state:
+                                gosh_dl::DownloadState::Seeding | gosh_dl::DownloadState::Completed,
+                            ..
+                        } if id == download_id => {
+                            info!("AssumeUTXO snapshot download complete");
+                            break;
                         }
+                        DownloadEvent::StateChanged { .. } => {}
                         DownloadEvent::Completed { id } if id == download_id => {
                             info!("AssumeUTXO snapshot download complete");
                             break;

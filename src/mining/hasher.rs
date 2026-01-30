@@ -1,5 +1,6 @@
 use sha2::{Sha256, Digest};
 use super::sha256_simd::{Midstate, sha256d_midstate_generic};
+use super::job::hash_meets_target;
 
 /// SHA256 double hasher for Bitcoin block headers
 pub struct Hasher {
@@ -26,7 +27,7 @@ impl Hasher {
 
         // Second SHA256
         let mut hasher = Sha256::new();
-        hasher.update(&first_hash);
+        hasher.update(first_hash);
         hasher.finalize().into()
     }
 
@@ -72,7 +73,7 @@ impl Hasher {
             header[76..80].copy_from_slice(&nonce.to_le_bytes());
             let hash = self.hash_header(&header);
 
-            if meets_target(&hash, target) {
+            if hash_meets_target(&hash, target) {
                 return Some((nonce, hash));
             }
         }
@@ -85,21 +86,6 @@ impl Default for Hasher {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Check if hash meets target (hash <= target in big-endian)
-#[inline]
-fn meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
-    // Compare from most significant byte (index 0 = MSB in big-endian)
-    for i in 0..32 {
-        if hash[i] < target[i] {
-            return true;
-        }
-        if hash[i] > target[i] {
-            return false;
-        }
-    }
-    true
 }
 
 /// Format hash as hex string (reversed for display)
@@ -187,26 +173,26 @@ mod tests {
     }
 
     #[test]
-    fn test_meets_target() {
+    fn test_hash_meets_target() {
         let easy_target = [0xffu8; 32]; // All 0xff = very easy
         let hard_target = [0x00u8; 32]; // All 0x00 = impossible
 
         let hash = [0x80u8; 32]; // Middle value
 
-        assert!(meets_target(&hash, &easy_target));
-        assert!(!meets_target(&hash, &hard_target));
+        assert!(hash_meets_target(&hash, &easy_target));
+        assert!(!hash_meets_target(&hash, &hard_target));
     }
 
     #[test]
-    fn test_meets_target_equal() {
+    fn test_hash_meets_target_equal() {
         let target = [0x11u8; 32];
         let hash = [0x11u8; 32];
         // Equal should pass
-        assert!(meets_target(&hash, &target));
+        assert!(hash_meets_target(&hash, &target));
     }
 
     #[test]
-    fn test_meets_target_boundary() {
+    fn test_hash_meets_target_boundary() {
         // Test boundary condition - first byte differs
         let target = [0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff,
                       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -218,14 +204,14 @@ mod tests {
                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        assert!(meets_target(&good_hash, &target));
+        assert!(hash_meets_target(&good_hash, &target));
 
         // Hash with higher value in 4th byte fails
         let bad_hash = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        assert!(!meets_target(&bad_hash, &target));
+        assert!(!hash_meets_target(&bad_hash, &target));
     }
 
     #[test]

@@ -387,6 +387,8 @@ pub struct Job {
 
 - `prev_hash` must be exactly 32 bytes
 - Each `merkle_branch` must be exactly 32 bytes
+- Maximum 32 merkle branches (DoS protection)
+- `extranonce2_size` must be 1-8 bytes
 - All hex values validated before parsing
 - 64KB response size limit (DoS protection)
 
@@ -441,6 +443,12 @@ Handles automatic Bitcoin Core lifecycle:
 ### 10. Web Interface (`web/mod.rs`)
 
 Built with Axum for REST API and WebSocket support.
+
+#### Security
+
+- Optional HTTP Basic authentication
+- Constant-time credential comparison (via `subtle` crate) to prevent timing attacks
+- Configurable username/password in config file
 
 #### HTTP Endpoints
 
@@ -635,7 +643,7 @@ cargo test -- --nocapture
 
 ### Test Coverage
 
-Total: 391+ tests
+Total: 398+ tests
 
 | Module | Tests |
 |--------|-------|

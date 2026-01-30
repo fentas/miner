@@ -5,7 +5,7 @@ pub mod sha256_simd;
 pub mod gpu_worker;
 
 pub use worker::{Worker, WorkerHandle};
-pub use job::{Job, difficulty_to_target};
+pub use job::{Job, difficulty_to_target, hash_meets_target};
 pub use hasher::Hasher;
 pub use sha256_simd::{SimdLevel, Midstate};
 pub use gpu_worker::{GpuCoordinator, GpuTuningParams};

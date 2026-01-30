@@ -173,13 +173,14 @@ impl Worker {
     fn generate_extranonce2(&self) -> Vec<u8> {
         let mut extranonce2 = vec![0u8; self.extranonce2_size];
 
-        // Use worker id and timestamp for uniqueness
+        // Use worker id and high-resolution timestamp for uniqueness
         let id_bytes = (self.id as u32).to_le_bytes();
-        let timestamp = std::time::SystemTime::now()
+        // Use subsec_nanos for higher resolution to avoid collisions
+        let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as u32;
-        let time_bytes = timestamp.to_le_bytes();
+            .unwrap_or_default()
+            .subsec_nanos();
+        let time_bytes = nanos.to_le_bytes();
 
         // Fill extranonce2
         for (i, byte) in extranonce2.iter_mut().enumerate() {
