@@ -156,6 +156,7 @@ max_reconnect_delay = 300
 
 [idle]
 # Enable idle/screensaver mining mode
+# Supported: Linux (X11), WSL2 (via PowerShell), Native Windows (Win32 API)
 enabled = false
 
 # Idle timeout in seconds before mining starts
@@ -163,3 +164,17 @@ timeout = 900
 
 # Pause mining when user becomes active
 pause_on_active = true
+
+# Idle CPU mining (true = CPU follows idle state)
+# CPU mines when idle, pauses when user is active
+cpu = true
+
+# Idle GPU mining (true = GPU follows idle state)
+gpu = true
+
+# Inverse GPU mode: GPU runs when ACTIVE, pauses when IDLE
+# Useful because GPU reduces CPU hashrate - run GPU only when you're using the PC
+# gpu_inverse = false
+
+# Specific GPU devices to idle (empty = all GPUs follow idle setting)
+# gpu_devices = [0, 1]

@@ -616,6 +616,9 @@ async fn run_solo_mode_with_tui(
         let mut monitor = IdleMonitor::new();
         monitor.set_timeout(cfg.idle.timeout);
         tui_state.log_info(format!("Idle monitor enabled ({}s)", cfg.idle.timeout));
+        tui_state.set_idle_enabled(true);
+        tui_state.set_idle_cpu(cfg.idle.cpu);
+        tui_state.set_idle_gpu(cfg.idle.gpu);
         monitor.start();
         Some(monitor)
     } else {
@@ -738,15 +741,38 @@ async fn run_solo_mode_with_tui(
 
         // Check idle state
         if let Some(ref monitor) = idle_monitor {
-            if cfg.idle.pause_on_active && !monitor.is_idle() && !tui_state.is_paused() {
-                coordinator.stop();
-                if let Some(ref gpu_coord) = gpu_coordinator {
-                    gpu_coord.stop();
+            let is_idle = monitor.is_idle();
+            tui_state.set_idle_active(is_idle);
+
+            if !tui_state.is_paused() {
+                // CPU follows normal idle behavior (if cpu=true: mine when idle, pause when active)
+                if cfg.idle.cpu {
+                    if cfg.idle.pause_on_active && !is_idle {
+                        coordinator.stop();
+                    } else {
+                        coordinator.start();
+                    }
                 }
-            } else if !tui_state.is_paused() {
-                coordinator.start();
+
+                // GPU behavior depends on gpu_inverse flag
                 if let Some(ref gpu_coord) = gpu_coordinator {
-                    gpu_coord.start();
+                    if cfg.idle.gpu {
+                        if cfg.idle.gpu_inverse {
+                            // Inverse: GPU runs when ACTIVE, pauses when IDLE
+                            if is_idle {
+                                gpu_coord.stop();
+                            } else {
+                                gpu_coord.start();
+                            }
+                        } else {
+                            // Normal: GPU runs when IDLE, pauses when ACTIVE
+                            if cfg.idle.pause_on_active && !is_idle {
+                                gpu_coord.stop();
+                            } else {
+                                gpu_coord.start();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -898,6 +924,9 @@ async fn run_sv2_mode_with_tui(
         let mut monitor = IdleMonitor::new();
         monitor.set_timeout(cfg.idle.timeout);
         tui_state.log_info(format!("Idle monitor enabled ({}s)", cfg.idle.timeout));
+        tui_state.set_idle_enabled(true);
+        tui_state.set_idle_cpu(cfg.idle.cpu);
+        tui_state.set_idle_gpu(cfg.idle.gpu);
         monitor.start();
         Some(monitor)
     } else {
@@ -935,10 +964,15 @@ async fn run_sv2_mode_with_tui(
 
         // Check idle state
         if let Some(ref monitor) = idle_monitor {
-            if cfg.idle.pause_on_active && !monitor.is_idle() && !tui_state.is_paused() {
-                coordinator.stop();
-            } else if !tui_state.is_paused() {
-                coordinator.start();
+            let is_idle = monitor.is_idle();
+            tui_state.set_idle_active(is_idle);
+
+            if !tui_state.is_paused() && cfg.idle.cpu {
+                if cfg.idle.pause_on_active && !is_idle {
+                    coordinator.stop();
+                } else {
+                    coordinator.start();
+                }
             }
         }
 
@@ -1003,6 +1037,9 @@ async fn run_pool_mode_with_tui(
         let mut monitor = IdleMonitor::new();
         monitor.set_timeout(cfg.idle.timeout);
         tui_state.log_info(format!("Idle monitor enabled (timeout: {}s)", cfg.idle.timeout));
+        tui_state.set_idle_enabled(true);
+        tui_state.set_idle_cpu(cfg.idle.cpu);
+        tui_state.set_idle_gpu(cfg.idle.gpu);
         monitor.start();
         Some(monitor)
     } else {
@@ -1022,7 +1059,9 @@ async fn run_pool_mode_with_tui(
             }
         });
 
-        tui_state.log_info(format!("Web dashboard at http://localhost:{}", cfg.web.port));
+        let web_url = format!("http://localhost:{}", cfg.web.port);
+        tui_state.log_info(format!("Web dashboard at {}", web_url));
+        tui_state.set_web_url(&web_url);
         Some(state)
     } else {
         None
@@ -1061,15 +1100,19 @@ async fn run_pool_mode_with_tui(
         // Check idle state
         if let Some(ref monitor) = idle_monitor {
             let is_idle = monitor.is_idle();
-            if cfg.idle.pause_on_active && !is_idle && !tui_state.is_paused() {
-                coordinator.stop();
-                if let Some(ref state) = web_state {
-                    state.set_paused(true).await;
-                }
-            } else if !tui_state.is_paused() {
-                coordinator.start();
-                if let Some(ref state) = web_state {
-                    state.set_paused(false).await;
+            tui_state.set_idle_active(is_idle);
+
+            if !tui_state.is_paused() && cfg.idle.cpu {
+                if cfg.idle.pause_on_active && !is_idle {
+                    coordinator.stop();
+                    if let Some(ref state) = web_state {
+                        state.set_paused(true).await;
+                    }
+                } else {
+                    coordinator.start();
+                    if let Some(ref state) = web_state {
+                        state.set_paused(false).await;
+                    }
                 }
             }
         }
@@ -1614,15 +1657,35 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     loop {
         // Check idle state
         if let Some(ref monitor) = idle_monitor {
-            if cfg.idle.pause_on_active && !monitor.is_idle() {
-                coordinator.stop();
-                if let Some(ref gpu_coord) = gpu_coordinator {
-                    gpu_coord.stop();
+            let is_idle = monitor.is_idle();
+
+            // CPU follows normal idle behavior (if cpu=true: mine when idle, pause when active)
+            if cfg.idle.cpu {
+                if cfg.idle.pause_on_active && !is_idle {
+                    coordinator.stop();
+                } else {
+                    coordinator.start();
                 }
-            } else {
-                coordinator.start();
-                if let Some(ref gpu_coord) = gpu_coordinator {
-                    gpu_coord.start();
+            }
+
+            // GPU behavior depends on gpu_inverse flag
+            if let Some(ref gpu_coord) = gpu_coordinator {
+                if cfg.idle.gpu {
+                    if cfg.idle.gpu_inverse {
+                        // Inverse: GPU runs when ACTIVE, pauses when IDLE
+                        if is_idle {
+                            gpu_coord.stop();
+                        } else {
+                            gpu_coord.start();
+                        }
+                    } else {
+                        // Normal: GPU runs when IDLE, pauses when ACTIVE
+                        if cfg.idle.pause_on_active && !is_idle {
+                            gpu_coord.stop();
+                        } else {
+                            gpu_coord.start();
+                        }
+                    }
                 }
             }
         }
@@ -1763,10 +1826,13 @@ async fn run_sv2_mode(cfg: Config) -> anyhow::Result<()> {
     loop {
         // Check idle state
         if let Some(ref monitor) = idle_monitor {
-            if cfg.idle.pause_on_active && !monitor.is_idle() {
-                coordinator.stop();
-            } else {
-                coordinator.start();
+            let is_idle = monitor.is_idle();
+            if cfg.idle.cpu {
+                if cfg.idle.pause_on_active && !is_idle {
+                    coordinator.stop();
+                } else {
+                    coordinator.start();
+                }
             }
         }
 
@@ -1854,15 +1920,17 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
         // Check idle state and update web state
         if let Some(ref monitor) = idle_monitor {
             let is_idle = monitor.is_idle();
-            if cfg.idle.pause_on_active && !is_idle {
-                coordinator.stop();
-                if let Some(ref state) = web_state {
-                    state.set_paused(true).await;
-                }
-            } else {
-                coordinator.start();
-                if let Some(ref state) = web_state {
-                    state.set_paused(false).await;
+            if cfg.idle.cpu {
+                if cfg.idle.pause_on_active && !is_idle {
+                    coordinator.stop();
+                    if let Some(ref state) = web_state {
+                        state.set_paused(true).await;
+                    }
+                } else {
+                    coordinator.start();
+                    if let Some(ref state) = web_state {
+                        state.set_paused(false).await;
+                    }
                 }
             }
         }

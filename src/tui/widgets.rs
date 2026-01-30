@@ -178,7 +178,6 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
     } else {
         state.get_logs()
     };
-    let scroll = state.get_log_scroll();
     let filter = state.get_log_time_filter();
 
     // Apply time filter
@@ -195,6 +194,16 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
     } else {
         // All logs
         all_logs
+    };
+
+    // Calculate available lines (accounting for border)
+    let available_lines = chunks[1].height.saturating_sub(2) as usize;
+
+    // Autoscroll: show most recent logs if enabled
+    let scroll = if state.is_autoscroll() {
+        filtered_logs.len().saturating_sub(available_lines)
+    } else {
+        state.get_log_scroll()
     };
 
     let log_items: Vec<ListItem> = filtered_logs
@@ -225,14 +234,16 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
 
     let log_count = filtered_logs.len();
     let filter_str = filter.as_str();
-    let title = if showing_bitcoin {
-        format!(" Bitcoin Core Logs ({}) [{}] ", log_count, filter_str)
-    } else {
-        format!(" Logs ({}) [{}] ", log_count, filter_str)
-    };
+    let autoscroll_str = if state.is_autoscroll() { "Autoscroll:On" } else { "Autoscroll:Off" };
+    let log_type = if showing_bitcoin { "Bitcoin Core" } else { "Miner" };
+
+    // k9s style: title on left with count, status on right
+    let title = format!(" {} Logs ({}) [{}] ", log_type, log_count, filter_str);
+    let title_right = format!(" {}  FullScreen ", autoscroll_str);
 
     let logs_block = Block::default()
         .title(title)
+        .title_bottom(Line::from(title_right).alignment(Alignment::Right))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::White));
 
@@ -247,14 +258,19 @@ fn draw_focused_logs(f: &mut Frame, area: Rect, state: &TuiState) {
 
 #[cfg(not(tarpaulin_include))]
 fn draw_header(f: &mut Frame, area: Rect, state: &TuiState) {
-    // Split header into left (info) and right (shortcuts)
+    // k9s style: Info | Filters | Actions (no borders, colored titles)
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Length(42),  // Info section
+            Constraint::Length(22),  // Filters section
+            Constraint::Min(20),     // Actions section
+        ])
         .split(area);
 
     draw_header_info(f, chunks[0], state);
-    draw_header_shortcuts(f, chunks[1], state);
+    draw_header_filters(f, chunks[1], state);
+    draw_header_actions(f, chunks[2], state);
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -297,35 +313,72 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
         ("No devices".to_string(), Color::Yellow)
     };
 
-    let label_style = Style::default().fg(Color::DarkGray);
+    // k9s style: label in one color, value in another, aligned with spaces
+    let label_style = Style::default().fg(Color::Magenta);
     let value_style = Style::default().fg(Color::Cyan);
 
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("BTC Miner: ", label_style),
+            Span::styled("BTC Miner:", label_style),
+            Span::raw("  "),
             Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::styled(paused_text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("Mode:      ", label_style),
+            Span::styled("Mode:", label_style),
+            Span::raw("       "),
             Span::styled(&mode, value_style),
         ]),
         Line::from(vec![
-            Span::styled("Status:    ", label_style),
+            Span::styled("Status:", label_style),
+            Span::raw("     "),
             Span::styled(status_text, Style::default().fg(status_color)),
         ]),
         Line::from(vec![
-            Span::styled("Compute:   ", label_style),
+            Span::styled("Compute:", label_style),
+            Span::raw("    "),
             Span::styled(format!("{} CPU ({})", workers, simd), value_style),
-            Span::styled(" + ", label_style),
+            Span::raw(" + "),
             Span::styled(&gpu_text, Style::default().fg(gpu_color)),
         ]),
     ];
 
+    // Add idle mode status if enabled
+    if state.is_idle_enabled() {
+        let idle_active = state.is_idle_active();
+        let idle_cpu = state.is_idle_cpu();
+        let idle_gpu = state.is_idle_gpu();
+
+        let status_text = if idle_active {
+            "Active (system idle)"
+        } else {
+            "Waiting"
+        };
+        let status_color = if idle_active { Color::Green } else { Color::Yellow };
+
+        // Build target text (what follows idle state)
+        let target_text = match (idle_cpu, idle_gpu) {
+            (true, true) => "CPU+GPU",
+            (true, false) => "CPU",
+            (false, true) => "GPU",
+            (false, false) => "None",
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("Idle:", label_style),
+            Span::raw("       "),
+            Span::styled(status_text, Style::default().fg(status_color)),
+            Span::raw(" ["),
+            Span::styled(target_text, value_style),
+            Span::raw("]"),
+        ]));
+    }
+
     // Add web URL if present
     if !web_url.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("Web:       ", label_style),
+            Span::styled("Web:", label_style),
+            Span::raw("        "),
             Span::styled(&web_url, Style::default().fg(Color::Blue)),
         ]));
     }
@@ -334,125 +387,136 @@ fn draw_header_info(f: &mut Frame, area: Rect, state: &TuiState) {
     f.render_widget(info, area);
 }
 
+/// Draw Filters section (k9s style: magenta title, no border)
 #[cfg(not(tarpaulin_include))]
-fn draw_header_shortcuts(f: &mut Frame, area: Rect, state: &TuiState) {
-    // k9s-style: two separate bordered boxes for shortcuts
-    let cyan = Style::default().fg(Color::Cyan);
-    let magenta = Style::default().fg(Color::Magenta);
-    let action_style = Style::default().fg(Color::DarkGray);
+fn draw_header_filters(f: &mut Frame, area: Rect, state: &TuiState) {
+    let key_style = Style::default().fg(Color::Magenta);
+    let desc_style = Style::default().fg(Color::DarkGray);
+    let yellow = Style::default().fg(Color::Yellow);
 
-    // Split into two boxes side by side
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    // Title line with magenta color (k9s style)
+    let title_style = Style::default().fg(Color::Magenta);
 
     if state.is_logs_focused() {
-        // Focused logs mode: Time filters box + Actions box
+        // Focused mode: show time filters
         let filter = state.get_log_time_filter();
-        let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
+        let active = |name: &str| if filter.as_str() == name { yellow } else { key_style };
 
-        // Time filters box (left)
-        let filter_lines = vec![
+        let lines = vec![
+            Line::from(vec![Span::styled("Filters ", title_style), Span::raw("─".repeat(12))]),
             Line::from(vec![
-                Span::styled("<0>", if filter.as_str() == "tail" { Style::default().fg(Color::Yellow) } else { cyan }),
-                Span::styled(" tail ", action_style),
-                Span::styled("<1>", if filter.as_str() == "1m" { Style::default().fg(Color::Yellow) } else { magenta }),
-                Span::styled(" 1m", action_style),
+                Span::styled("<0>", active("tail")),
+                Span::styled(" tail  ", desc_style),
+                Span::styled("<1>", active("1m")),
+                Span::styled(" 1m", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<2>", if filter.as_str() == "5m" { Style::default().fg(Color::Yellow) } else { cyan }),
-                Span::styled(" 5m   ", action_style),
-                Span::styled("<3>", if filter.as_str() == "15m" { Style::default().fg(Color::Yellow) } else { magenta }),
-                Span::styled(" 15m", action_style),
+                Span::styled("<2>", active("5m")),
+                Span::styled(" 5m    ", desc_style),
+                Span::styled("<3>", active("15m")),
+                Span::styled(" 15m", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<4>", if filter.as_str() == "30m" { Style::default().fg(Color::Yellow) } else { cyan }),
-                Span::styled(" 30m  ", action_style),
-                Span::styled("<5>", if filter.as_str() == "1h" { Style::default().fg(Color::Yellow) } else { magenta }),
-                Span::styled(" 1h", action_style),
+                Span::styled("<4>", active("30m")),
+                Span::styled(" 30m   ", desc_style),
+                Span::styled("<5>", active("1h")),
+                Span::styled(" 1h", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<6>", if filter.as_str() == "all" { Style::default().fg(Color::Yellow) } else { cyan }),
-                Span::styled(" all", action_style),
+                Span::styled("<6>", active("all")),
+                Span::styled(" all", desc_style),
             ]),
         ];
-        let filter_block = Block::default()
-            .title(" Filters ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let filter_para = Paragraph::new(filter_lines).block(filter_block);
-        f.render_widget(filter_para, chunks[0]);
-
-        // Actions box (right)
-        let mut action_lines = vec![
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+    } else {
+        // Normal mode: show general shortcuts
+        let lines = vec![
+            Line::from(vec![Span::styled("Shortcuts ", title_style), Span::raw("─".repeat(10))]),
             Line::from(vec![
-                Span::styled("<esc>", cyan),
-                Span::styled(" Unfocus", action_style),
+                Span::styled("<?>", key_style),
+                Span::styled(" Help", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<s>", magenta),
-                Span::styled(if state.is_autoscroll() { " Scroll:On" } else { " Scroll:Off" }, action_style),
+                Span::styled("<:>", key_style),
+                Span::styled(" Command", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("<C>", cyan),
-                Span::styled(" Clear", action_style),
+                Span::styled("<p>", key_style),
+                Span::styled(" Pause", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<l>", key_style),
+                Span::styled(" Logs", desc_style),
             ]),
         ];
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+    }
+}
+
+/// Draw Actions section (k9s style: blue title, no border)
+#[cfg(not(tarpaulin_include))]
+fn draw_header_actions(f: &mut Frame, area: Rect, state: &TuiState) {
+    let key_style = Style::default().fg(Color::Blue);
+    let desc_style = Style::default().fg(Color::DarkGray);
+
+    // Title line with blue color (k9s style)
+    let title_style = Style::default().fg(Color::Blue);
+    let has_bitcoin = state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading();
+
+    if state.is_logs_focused() {
+        // Focused mode: show all log actions
+        let scroll_status = if state.is_autoscroll() { "Scroll:On" } else { "Scroll:Off" };
+
+        let mut lines = vec![
+            Line::from(vec![Span::styled("Actions ", title_style), Span::raw("─".repeat(12))]),
+            Line::from(vec![
+                Span::styled("<esc>", key_style),
+                Span::styled(" Unfocus", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<s>", key_style),
+                Span::styled(format!(" {}", scroll_status), desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("<C>", key_style),
+                Span::styled(" Clear", desc_style),
+            ]),
+        ];
+
         if has_bitcoin {
-            action_lines.push(Line::from(vec![
-                Span::styled("<L>", magenta),
-                Span::styled(if state.is_showing_bitcoin_logs() { " Miner" } else { " Core" }, action_style),
+            let log_label = if state.is_showing_bitcoin_logs() { " Miner" } else { " Core" };
+            lines.push(Line::from(vec![
+                Span::styled("<shift+l>", key_style),
+                Span::styled(log_label, desc_style),
             ]));
         }
-        let action_block = Block::default()
-            .title(" Actions ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let action_para = Paragraph::new(action_lines).block(action_block);
-        f.render_widget(action_para, chunks[1]);
-    } else {
-        // Normal mode: Shortcuts box + empty or Bitcoin box
-        let shortcut_lines = vec![
-            Line::from(vec![
-                Span::styled("<?>", cyan),
-                Span::styled(" Help", action_style),
-            ]),
-            Line::from(vec![
-                Span::styled("<:>", magenta),
-                Span::styled(" Command", action_style),
-            ]),
-            Line::from(vec![
-                Span::styled("<p>", cyan),
-                Span::styled(" Pause", action_style),
-            ]),
-            Line::from(vec![
-                Span::styled("<l>", magenta),
-                Span::styled(" Logs", action_style),
-            ]),
-        ];
-        let shortcut_block = Block::default()
-            .title(" Shortcuts ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let shortcut_para = Paragraph::new(shortcut_lines).block(shortcut_block);
-        f.render_widget(shortcut_para, chunks[0]);
 
-        // Bitcoin/Actions box (right)
-        if state.is_bitcoin_managed() || state.is_connected() || state.is_syncing() || state.is_downloading() {
-            let bitcoin_lines = vec![
-                Line::from(vec![
-                    Span::styled("<L>", cyan),
-                    Span::styled(if state.is_showing_bitcoin_logs() { " Miner Logs" } else { " Core Logs" }, action_style),
-                ]),
-            ];
-            let bitcoin_block = Block::default()
-                .title(" Bitcoin ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray));
-            let bitcoin_para = Paragraph::new(bitcoin_lines).block(bitcoin_block);
-            f.render_widget(bitcoin_para, chunks[1]);
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+    } else {
+        // Normal mode: show Bitcoin toggle if available
+        let mut lines = vec![
+            Line::from(vec![Span::styled("Actions ", title_style), Span::raw("─".repeat(12))]),
+        ];
+
+        if has_bitcoin {
+            let log_label = if state.is_showing_bitcoin_logs() { " Miner Logs" } else { " Core Logs" };
+            lines.push(Line::from(vec![
+                Span::styled("<shift+l>", key_style),
+                Span::styled(log_label, desc_style),
+            ]));
         }
+
+        // Always show hashrate toggle
+        lines.push(Line::from(vec![
+            Span::styled("<h>", key_style),
+            Span::styled(" Toggle Hashrate", desc_style),
+        ]));
+
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
     }
 }
 
@@ -667,7 +731,16 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, state: &TuiState) {
     } else {
         state.get_logs()
     };
-    let scroll = state.get_log_scroll();
+
+    // Calculate available lines (accounting for border)
+    let available_lines = area.height.saturating_sub(2) as usize;
+
+    // Autoscroll: show most recent logs if enabled
+    let scroll = if state.is_autoscroll() {
+        logs.len().saturating_sub(available_lines)
+    } else {
+        state.get_log_scroll()
+    };
 
     let log_items: Vec<ListItem> = logs
         .iter()

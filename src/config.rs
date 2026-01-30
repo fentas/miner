@@ -340,6 +340,20 @@ pub struct IdleConfig {
     pub timeout: u32,
     #[serde(default = "default_true")]
     pub pause_on_active: bool,
+    /// Idle CPU mining (default: true = CPU pauses when user is active)
+    #[serde(default = "default_true")]
+    pub cpu: bool,
+    /// Idle GPU mining (default: true = GPU pauses when user is active)
+    #[serde(default = "default_true")]
+    pub gpu: bool,
+    /// Inverse GPU idle mode (default: false)
+    /// When true: GPU runs when user is ACTIVE, pauses when IDLE
+    /// Useful when GPU affects CPU performance - run GPU only when user is present
+    #[serde(default)]
+    pub gpu_inverse: bool,
+    /// Specific GPU devices to idle (empty = all GPUs follow idle setting)
+    #[serde(default)]
+    pub gpu_devices: Vec<u32>,
 }
 
 fn default_idle_timeout() -> u32 {
@@ -352,6 +366,10 @@ impl Default for IdleConfig {
             enabled: false,
             timeout: default_idle_timeout(),
             pause_on_active: true,
+            cpu: true,
+            gpu: true,
+            gpu_inverse: false,
+            gpu_devices: vec![],
         }
     }
 }
@@ -532,6 +550,10 @@ mod tests {
         assert!(!idle.enabled);
         assert_eq!(idle.timeout, 900);
         assert!(idle.pause_on_active);
+        assert!(idle.cpu);
+        assert!(idle.gpu);
+        assert!(!idle.gpu_inverse);
+        assert!(idle.gpu_devices.is_empty());
     }
 
     #[test]
@@ -550,6 +572,65 @@ mod tests {
         assert!(config.idle.enabled);
         assert_eq!(config.idle.timeout, 300);
         assert!(!config.idle.pause_on_active);
+        // Defaults should be applied
+        assert!(config.idle.cpu);
+        assert!(config.idle.gpu);
+    }
+
+    #[test]
+    fn test_idle_config_cpu_gpu_selection() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [idle]
+            enabled = true
+            cpu = false
+            gpu = true
+            gpu_devices = [0, 1]
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.idle.enabled);
+        assert!(!config.idle.cpu);
+        assert!(config.idle.gpu);
+        assert!(!config.idle.gpu_inverse); // default
+        assert_eq!(config.idle.gpu_devices, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_idle_config_gpu_inverse() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [idle]
+            enabled = true
+            cpu = true
+            gpu = true
+            gpu_inverse = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.idle.enabled);
+        assert!(config.idle.cpu);
+        assert!(config.idle.gpu);
+        assert!(config.idle.gpu_inverse);
+    }
+
+    #[test]
+    fn test_idle_config_gpu_inverse_default_false() {
+        let toml_content = r#"
+            [pool]
+            preset = "ckpool"
+            payout_address = "bc1qtest"
+
+            [idle]
+            enabled = true
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        // gpu_inverse should default to false
+        assert!(!config.idle.gpu_inverse);
     }
 
     #[test]

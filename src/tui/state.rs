@@ -217,6 +217,12 @@ pub struct TuiState {
     syncing: AtomicBool,
     sync_progress: AtomicU64, // Stored as progress * 100 (for decimal precision)
 
+    // Idle mode status
+    idle_enabled: AtomicBool,
+    idle_active: AtomicBool,  // True when system is idle (mining active)
+    idle_cpu: AtomicBool,     // CPU follows idle state
+    idle_gpu: AtomicBool,     // GPU follows idle state
+
     // Download progress (e.g., for AssumeUTXO)
     downloading: AtomicBool,
     download_name: RwLock<String>,
@@ -277,6 +283,10 @@ impl TuiState {
             connected: AtomicBool::new(false),
             syncing: AtomicBool::new(false),
             sync_progress: AtomicU64::new(0),
+            idle_enabled: AtomicBool::new(false),
+            idle_active: AtomicBool::new(false),
+            idle_cpu: AtomicBool::new(true),
+            idle_gpu: AtomicBool::new(true),
             downloading: AtomicBool::new(false),
             download_name: RwLock::new(String::new()),
             download_bytes: AtomicU64::new(0),
@@ -655,6 +665,39 @@ impl TuiState {
             self.download_bytes.load(Ordering::Relaxed),
             self.download_total.load(Ordering::Relaxed),
         )
+    }
+
+    // Idle mode methods
+    pub fn set_idle_enabled(&self, enabled: bool) {
+        self.idle_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_idle_enabled(&self) -> bool {
+        self.idle_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_idle_active(&self, active: bool) {
+        self.idle_active.store(active, Ordering::Relaxed);
+    }
+
+    pub fn is_idle_active(&self) -> bool {
+        self.idle_active.load(Ordering::Relaxed)
+    }
+
+    pub fn set_idle_cpu(&self, cpu: bool) {
+        self.idle_cpu.store(cpu, Ordering::Relaxed);
+    }
+
+    pub fn is_idle_cpu(&self) -> bool {
+        self.idle_cpu.load(Ordering::Relaxed)
+    }
+
+    pub fn set_idle_gpu(&self, gpu: bool) {
+        self.idle_gpu.store(gpu, Ordering::Relaxed);
+    }
+
+    pub fn is_idle_gpu(&self) -> bool {
+        self.idle_gpu.load(Ordering::Relaxed)
     }
 
     pub fn get_uptime(&self) -> std::time::Duration {
@@ -1190,5 +1233,80 @@ mod tests {
         assert_eq!(logs[0].level, LogLevel::Debug);
         assert_eq!(logs[0].message, "Custom debug");
         assert_eq!(logs[0].timestamp, "12:00:00");
+    }
+
+    #[test]
+    fn test_tui_state_idle_enabled() {
+        let state = TuiState::new();
+
+        // Default should be false
+        assert!(!state.is_idle_enabled());
+
+        state.set_idle_enabled(true);
+        assert!(state.is_idle_enabled());
+
+        state.set_idle_enabled(false);
+        assert!(!state.is_idle_enabled());
+    }
+
+    #[test]
+    fn test_tui_state_idle_active() {
+        let state = TuiState::new();
+
+        // Default should be false
+        assert!(!state.is_idle_active());
+
+        state.set_idle_active(true);
+        assert!(state.is_idle_active());
+
+        state.set_idle_active(false);
+        assert!(!state.is_idle_active());
+    }
+
+    #[test]
+    fn test_tui_state_idle_cpu_gpu() {
+        let state = TuiState::new();
+
+        // Defaults should be true
+        assert!(state.is_idle_cpu());
+        assert!(state.is_idle_gpu());
+
+        state.set_idle_cpu(false);
+        assert!(!state.is_idle_cpu());
+
+        state.set_idle_gpu(false);
+        assert!(!state.is_idle_gpu());
+
+        // Can set independently
+        state.set_idle_cpu(true);
+        assert!(state.is_idle_cpu());
+        assert!(!state.is_idle_gpu());
+    }
+
+    #[test]
+    fn test_tui_state_idle_combined() {
+        let state = TuiState::new();
+
+        // Simulate idle mode setup
+        state.set_idle_enabled(true);
+        state.set_idle_cpu(true);
+        state.set_idle_gpu(true);
+
+        // Simulate system becoming idle
+        state.set_idle_active(true);
+
+        assert!(state.is_idle_enabled());
+        assert!(state.is_idle_active());
+        assert!(state.is_idle_cpu());
+        assert!(state.is_idle_gpu());
+
+        // Simulate user becoming active
+        state.set_idle_active(false);
+        assert!(!state.is_idle_active());
+
+        // Settings should remain
+        assert!(state.is_idle_enabled());
+        assert!(state.is_idle_cpu());
+        assert!(state.is_idle_gpu());
     }
 }
