@@ -131,17 +131,20 @@ impl Coordinator {
 
     /// Start mining
     pub fn start(&self) {
-        self.running.store(true, Ordering::SeqCst);
+        // Release ordering ensures job updates are visible to workers
+        self.running.store(true, Ordering::Release);
     }
 
     /// Stop mining
     pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
+        // Release ordering ensures workers see the stop before checking again
+        self.running.store(false, Ordering::Release);
     }
 
     /// Check if mining is active
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        // Acquire ordering pairs with Release in start/stop
+        self.running.load(Ordering::Acquire)
     }
 
     /// Update the current job

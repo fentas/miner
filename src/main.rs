@@ -311,6 +311,31 @@ fn compute_merkle_root(coinbase_tx: &[u8], tx_hashes: &[String]) -> [u8; 32] {
     hashes.first().copied().unwrap_or([0u8; 32])
 }
 
+/// Resolve web directory path - checks multiple locations for portability
+/// 1. First tries the path as-is (works when cwd is where the binary is)
+/// 2. Then tries relative to the executable location (works on Windows when run from elsewhere)
+fn resolve_web_dir(configured_path: &str) -> String {
+    use std::path::Path;
+
+    // Try configured path first
+    if Path::new(configured_path).exists() {
+        return configured_path.to_string();
+    }
+
+    // Try relative to executable location
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let exe_relative = exe_dir.join(configured_path);
+            if exe_relative.exists() {
+                return exe_relative.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // Return configured path anyway (will fail gracefully at serve time)
+    configured_path.to_string()
+}
+
 // Main entry point is excluded from coverage as it requires
 // full program execution which is not suitable for unit testing
 #[tokio::main]
@@ -696,7 +721,7 @@ async fn run_solo_mode_with_tui(
         let thread_count = cfg.effective_threads();
         let state = Arc::new(web::WebState::new(pool_address, thread_count));
         let state_clone = Arc::clone(&state);
-        let web_dir = cfg.web.dir.clone();
+        let web_dir = resolve_web_dir(&cfg.web.dir);
         let web_port = cfg.web.port;
         let web_auth = if cfg.web.auth_enabled {
             Some(web::BasicAuthConfig {
@@ -1112,7 +1137,7 @@ async fn run_sv2_mode_with_tui(
     if cfg.web.port > 0 {
         let state = Arc::new(web::WebState::new(proxy_addr.clone(), thread_count));
         let state_clone = Arc::clone(&state);
-        let web_dir = cfg.web.dir.clone();
+        let web_dir = resolve_web_dir(&cfg.web.dir);
         let web_port = cfg.web.port;
         let web_auth = if cfg.web.auth_enabled {
             Some(web::BasicAuthConfig {
@@ -1253,7 +1278,7 @@ async fn run_pool_mode_with_tui(
     let web_state = if cfg.web.port > 0 {
         let state = Arc::new(web::WebState::new(pool_address.clone(), thread_count));
         let state_clone = Arc::clone(&state);
-        let web_dir = cfg.web.dir.clone();
+        let web_dir = resolve_web_dir(&cfg.web.dir);
         let web_port = cfg.web.port;
         let web_auth = if cfg.web.auth_enabled {
             Some(web::BasicAuthConfig {
@@ -2173,7 +2198,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
     let web_state = if cfg.web.port > 0 {
         let state = Arc::new(web::WebState::new(pool_address.clone(), thread_count));
         let state_clone = Arc::clone(&state);
-        let web_dir = cfg.web.dir.clone();
+        let web_dir = resolve_web_dir(&cfg.web.dir);
         let web_port = cfg.web.port;
         let web_auth = if cfg.web.auth_enabled {
             Some(web::BasicAuthConfig {

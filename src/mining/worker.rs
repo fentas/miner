@@ -57,7 +57,10 @@ impl Worker {
                 };
                 worker.run();
             })
-            .expect("Failed to spawn worker thread");
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to spawn worker thread {}: {}", id, e);
+                thread::spawn(|| {}) // Return dummy handle
+            });
 
         WorkerHandle { id, handle }
     }
@@ -119,6 +122,7 @@ impl Worker {
 
                 // Check for share
                 if let Some((found_nonce, hash)) = result {
+                    // Note: job.id is only cloned when share found (rare event in real mining)
                     let share = Share {
                         job_id: job.id.clone(),
                         nonce: found_nonce,

@@ -173,19 +173,48 @@ impl StratumV1Client {
         Ok(response.get("result") == Some(&Value::Bool(true)))
     }
 
-    /// Receive and parse a notification (non-blocking check)
+    /// Receive and parse a notification (non-blocking check) with size limit
     pub fn poll_notification(&mut self) -> Result<Option<Notification>, StratumError> {
         let reader = self.reader.as_mut().ok_or_else(|| {
             StratumError::ConnectionError("Not connected".to_string())
         })?;
 
-        // Check if data is available (this is a simplification)
+        // Limit line size to 64KB to prevent memory exhaustion
+        const MAX_LINE_SIZE: usize = 64 * 1024;
         let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => return Err(StratumError::ConnectionError("Connection closed".to_string())),
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
-            Err(e) => return Err(e.into()),
+        let mut total_read = 0;
+
+        loop {
+            let buf = match reader.fill_buf() {
+                Ok(b) => b,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+                Err(e) => return Err(e.into()),
+            };
+
+            if buf.is_empty() {
+                return Err(StratumError::ConnectionError("Connection closed".to_string()));
+            }
+
+            let newline_pos = buf.iter().position(|&b| b == b'\n');
+            let bytes_to_consume = newline_pos.map(|p| p + 1).unwrap_or(buf.len());
+
+            if total_read + bytes_to_consume > MAX_LINE_SIZE {
+                return Err(StratumError::ProtocolError(
+                    format!("Response too large (>{} bytes)", MAX_LINE_SIZE)
+                ));
+            }
+
+            let end = if newline_pos.is_some() { bytes_to_consume - 1 } else { bytes_to_consume };
+            line.push_str(
+                std::str::from_utf8(&buf[..end])
+                    .map_err(|_| StratumError::ProtocolError("Invalid UTF-8".to_string()))?
+            );
+            total_read += bytes_to_consume;
+            reader.consume(bytes_to_consume);
+
+            if newline_pos.is_some() {
+                break;
+            }
         }
 
         let msg: Value = serde_json::from_str(&line)
@@ -300,14 +329,47 @@ impl StratumV1Client {
         Ok(())
     }
 
-    /// Receive a JSON-RPC response
+    /// Receive a JSON-RPC response with size limit to prevent DoS
     fn recv(&mut self) -> Result<Value, StratumError> {
         let reader = self.reader.as_mut().ok_or_else(|| {
             StratumError::ConnectionError("Not connected".to_string())
         })?;
 
+        // Limit line size to 64KB to prevent memory exhaustion from malicious servers
+        const MAX_LINE_SIZE: usize = 64 * 1024;
         let mut line = String::new();
-        reader.read_line(&mut line)?;
+        let mut total_read = 0;
+
+        loop {
+            let buf = reader.fill_buf()?;
+            if buf.is_empty() {
+                return Err(StratumError::ConnectionError("Connection closed".to_string()));
+            }
+
+            // Find newline or end of buffer
+            let newline_pos = buf.iter().position(|&b| b == b'\n');
+            let bytes_to_consume = newline_pos.map(|p| p + 1).unwrap_or(buf.len());
+
+            // Check size limit
+            if total_read + bytes_to_consume > MAX_LINE_SIZE {
+                return Err(StratumError::ProtocolError(
+                    format!("Response too large (>{} bytes)", MAX_LINE_SIZE)
+                ));
+            }
+
+            // Append to line (strip newline if present)
+            let end = if newline_pos.is_some() { bytes_to_consume - 1 } else { bytes_to_consume };
+            line.push_str(
+                std::str::from_utf8(&buf[..end])
+                    .map_err(|_| StratumError::ProtocolError("Invalid UTF-8".to_string()))?
+            );
+            total_read += bytes_to_consume;
+            reader.consume(bytes_to_consume);
+
+            if newline_pos.is_some() {
+                break;
+            }
+        }
 
         serde_json::from_str(&line)
             .map_err(|e| StratumError::ProtocolError(e.to_string()))

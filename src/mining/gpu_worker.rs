@@ -250,7 +250,11 @@ impl GpuCoordinator {
                     }
                 }
             })
-            .expect("Failed to spawn GPU worker thread")
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to spawn GPU worker thread: {}", e);
+                // Return a dummy handle that immediately exits
+                thread::spawn(|| {})
+            })
     }
 
     /// Create a GPU job from a mining Job
@@ -279,17 +283,20 @@ impl GpuCoordinator {
 
     /// Start GPU mining
     pub fn start(&self) {
-        self.running.store(true, Ordering::SeqCst);
+        // Release ordering ensures job updates are visible to workers
+        self.running.store(true, Ordering::Release);
     }
 
     /// Stop GPU mining
     pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
+        // Release ordering ensures workers see the stop
+        self.running.store(false, Ordering::Release);
     }
 
     /// Check if GPU mining is active
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        // Acquire ordering pairs with Release in start/stop
+        self.running.load(Ordering::Acquire)
     }
 
     /// Update the current job for all GPU workers

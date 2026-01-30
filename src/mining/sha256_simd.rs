@@ -197,6 +197,10 @@ pub fn sha256d_midstate_generic(midstate: &Midstate, tail: &[u8; 16], nonce: u32
 }
 
 /// SHA-NI accelerated double SHA-256 (x86_64 only)
+///
+/// # Safety
+/// Caller must ensure CPU supports SHA-NI and SSE4.1 instructions.
+/// Use `is_x86_feature_detected!("sha")` before calling.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sha", enable = "sse4.1")]
 pub unsafe fn sha256d_shani(data: &[u8]) -> [u8; 32] {
@@ -223,6 +227,7 @@ pub fn mine_with_midstate(
             // Use AVX2 8-way path
             #[cfg(target_arch = "x86_64")]
             if is_x86_feature_detected!("avx2") {
+                // SAFETY: We just verified AVX2 is supported via is_x86_feature_detected!
                 return unsafe {
                     mine_avx2_8way(midstate, tail, nonce_start, nonce_count, target)
                 };
@@ -233,6 +238,7 @@ pub fn mine_with_midstate(
             // Use AVX512 16-way path (fall back to AVX2 for now)
             #[cfg(target_arch = "x86_64")]
             if is_x86_feature_detected!("avx2") {
+                // SAFETY: We just verified AVX2 is supported via is_x86_feature_detected!
                 return unsafe {
                     mine_avx2_8way(midstate, tail, nonce_start, nonce_count, target)
                 };
@@ -262,6 +268,10 @@ fn mine_generic(
 }
 
 /// AVX2 8-way parallel mining
+///
+/// # Safety
+/// Caller must ensure CPU supports AVX2 instructions.
+/// Use `is_x86_feature_detected!("avx2")` before calling.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn mine_avx2_8way(

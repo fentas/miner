@@ -274,6 +274,7 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
         .constraints([
             Constraint::Length(7),  // Header
             Constraint::Min(10),    // Chart
+            Constraint::Length(2),  // Filter bar
             Constraint::Length(cmd_height),
         ])
         .split(area);
@@ -333,9 +334,9 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
             })
             .collect();
 
-        // Calculate Y axis bounds
+        // Calculate Y axis bounds (consider total, CPU, and GPU separately)
         let max_hashrate = samples.iter()
-            .map(|s| s.total_hashrate)
+            .map(|s| s.total_hashrate.max(s.cpu_hashrate).max(s.gpu_hashrate))
             .fold(0.0_f64, f64::max) / 1_000_000.0;
         let y_max = (max_hashrate * 1.1).max(1.0); // 10% headroom
 
@@ -415,19 +416,10 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
             format!(" Hashrate History ({} samples) [{}] ", sample_count, filter_str)
         };
 
-        // Legend
-        let legend = if has_gpu {
-            " Total:White CPU:Cyan GPU:Green │ Blocks:Yellow "
-        } else {
-            " Total:White │ Blocks:Yellow "
-        };
-
         let chart = Chart::new(datasets)
             .block(Block::default()
                 .title(title)
-                .title_bottom(Line::from(legend).alignment(Alignment::Right))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)))
+                .borders(Borders::NONE))
             .x_axis(x_axis)
             .y_axis(y_axis);
 
@@ -436,15 +428,15 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
         // Draw block markers as labels (vertical lines simulation)
         if !block_markers.is_empty() {
             let chart_area = chunks[1];
-            let inner_width = chart_area.width.saturating_sub(8) as f64; // Account for Y axis
-            let inner_x_start = chart_area.x + 7;
+            let inner_width = chart_area.width.saturating_sub(7) as f64; // Account for Y axis
+            let inner_x_start = chart_area.x + 6;
 
             for (x_pos, height) in block_markers.iter().take(5) { // Max 5 markers
                 let x_ratio = x_pos / time_range;
                 let screen_x = inner_x_start + (x_ratio * inner_width) as u16;
-                if screen_x > inner_x_start && screen_x < chart_area.x + chart_area.width - 1 {
+                if screen_x > inner_x_start && screen_x < chart_area.x + chart_area.width {
                     // Draw a vertical marker
-                    let marker_area = Rect::new(screen_x, chart_area.y + 1, 1, chart_area.height.saturating_sub(3));
+                    let marker_area = Rect::new(screen_x, chart_area.y, 1, chart_area.height.saturating_sub(2));
                     for y in marker_area.y..marker_area.y + marker_area.height {
                         f.render_widget(
                             Paragraph::new("│").style(Style::default().fg(Color::Yellow)),
@@ -454,10 +446,10 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
                     // Draw height label at top
                     let label = format!("{}", height);
                     let label_len = label.len() as u16;
-                    if screen_x + label_len <= chart_area.x + chart_area.width - 1 {
+                    if screen_x + label_len <= chart_area.x + chart_area.width {
                         f.render_widget(
                             Paragraph::new(label).style(Style::default().fg(Color::Yellow)),
-                            Rect::new(screen_x, chart_area.y + 1, label_len, 1)
+                            Rect::new(screen_x, chart_area.y, label_len, 1)
                         );
                     }
                 }
@@ -465,16 +457,15 @@ fn draw_focused_history(f: &mut Frame, area: Rect, state: &TuiState) {
         }
     }
 
-    // Draw filter bar at the bottom of the chart area
-    let filter_area = Rect::new(chunks[1].x + 1, chunks[1].y + chunks[1].height - 1, chunks[1].width - 2, 1);
-    draw_history_filter_bar(f, filter_area, state);
+    // Draw filter bar below the chart (same style as log focus mode)
+    draw_history_filter_bar(f, chunks[2], state);
 
     if state.is_command_mode() {
-        draw_command_input(f, chunks[2], state);
+        draw_command_input(f, chunks[3], state);
     }
 }
 
-/// Draw the filter bar for history panel
+/// Draw the filter bar for history panel (k9s style, same as log filter bar)
 #[cfg(not(tarpaulin_include))]
 fn draw_history_filter_bar(f: &mut Frame, area: Rect, state: &TuiState) {
     let current = state.get_history_time_filter();
@@ -488,20 +479,46 @@ fn draw_history_filter_bar(f: &mut Frame, area: Rect, state: &TuiState) {
         (LogTimeFilter::All, "6:all"),
     ];
 
-    let mut spans = vec![Span::raw(" Filters: ")];
-    for (filter, label) in filters.iter() {
+    // First line: filters
+    let mut filter_spans = vec![Span::styled(" <", Style::default().fg(Color::Blue))];
+    for (i, (filter, label)) in filters.iter().enumerate() {
         let style = if *filter == current {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        spans.push(Span::styled(*label, style));
-        spans.push(Span::raw(" "));
+        filter_spans.push(Span::styled(*label, style));
+        if i < filters.len() - 1 {
+            filter_spans.push(Span::raw(" "));
+        }
     }
-    spans.push(Span::raw("│ <esc> close"));
+    filter_spans.push(Span::styled(">", Style::default().fg(Color::Blue)));
 
-    let filter_line = Paragraph::new(Line::from(spans));
-    f.render_widget(filter_line, area);
+    // Second line: actions
+    let action_spans = vec![
+        Span::styled(" <esc>", Style::default().fg(Color::Blue)),
+        Span::styled(" Unfocus", Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled("Total:", Style::default().fg(Color::White)),
+        Span::styled("White", Style::default().fg(Color::White)),
+        Span::raw(" "),
+        Span::styled("CPU:", Style::default().fg(Color::Cyan)),
+        Span::styled("Cyan", Style::default().fg(Color::Cyan)),
+        Span::raw(" "),
+        Span::styled("GPU:", Style::default().fg(Color::Green)),
+        Span::styled("Green", Style::default().fg(Color::Green)),
+        Span::raw(" │ "),
+        Span::styled("Blocks:", Style::default().fg(Color::Yellow)),
+        Span::styled("Yellow", Style::default().fg(Color::Yellow)),
+    ];
+
+    let lines = vec![
+        Line::from(filter_spans),
+        Line::from(action_spans),
+    ];
+
+    let filter_para = Paragraph::new(lines);
+    f.render_widget(filter_para, area);
 }
 
 #[cfg(not(tarpaulin_include))]
