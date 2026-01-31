@@ -108,6 +108,21 @@ jobs:
       - name: Run tests
         run: cargo test --release ${{ matrix.features }}
 
+      - name: Performance sanity check
+        if: matrix.name == 'default'
+        run: |
+          # Run SIMD detection and performance tests (logs only, won't fail build)
+          cargo test --release --test windows_performance_test -- --nocapture 2>&1 | tee performance-log.txt
+          # Save output for debugging
+          echo "=== SIMD Detection Summary ===" >> performance-log.txt
+
+      - name: Upload performance log
+        if: matrix.name == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-performance-log
+          path: performance-log.txt
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

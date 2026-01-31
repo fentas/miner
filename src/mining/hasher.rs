@@ -141,12 +141,6 @@ impl Hasher {
         count: u32,
         target: &[u8; 32],
     ) -> Option<(u32, [u8; 32])> {
-        // DEBUG: Track actual hashes computed (same as baseline)
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static TOTAL_HASHES: AtomicU64 = AtomicU64::new(0);
-        static TOTAL_MATCHES: AtomicU64 = AtomicU64::new(0);
-        static LAST_PRINT: AtomicU64 = AtomicU64::new(0);
-
         let mut header = [0u8; 80];
         header[..76].copy_from_slice(header_prefix);
 
@@ -155,45 +149,8 @@ impl Hasher {
             let hash = self.hash_header(&header);
 
             if hash_meets_target(&hash, target) {
-                TOTAL_HASHES.fetch_add((nonce - start_nonce + 1) as u64, Ordering::Relaxed);
-                TOTAL_MATCHES.fetch_add(1, Ordering::Relaxed);
-
-                // Print debug every 5 seconds
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = LAST_PRINT.load(Ordering::Relaxed);
-                if now > last + 5 {
-                    LAST_PRINT.store(now, Ordering::Relaxed);
-                    let total_h = TOTAL_HASHES.load(Ordering::Relaxed);
-                    let total_m = TOTAL_MATCHES.load(Ordering::Relaxed);
-                    eprintln!("DEBUG SHA2-HASHER: {} real hashes, {} matches, avg {:.1} hashes/match, target={:02x}{:02x}{:02x}{:02x}",
-                        total_h, total_m,
-                        if total_m > 0 { total_h as f64 / total_m as f64 } else { 0.0 },
-                        target[0], target[1], target[2], target[3]);
-                }
-
                 return Some((nonce, hash));
             }
-        }
-
-        TOTAL_HASHES.fetch_add(count as u64, Ordering::Relaxed);
-
-        // Log every 5 seconds when NO match found
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let last = LAST_PRINT.load(Ordering::Relaxed);
-        if now > last + 5 {
-            LAST_PRINT.store(now, Ordering::Relaxed);
-            let total_h = TOTAL_HASHES.load(Ordering::Relaxed);
-            let total_m = TOTAL_MATCHES.load(Ordering::Relaxed);
-            eprintln!("DEBUG SHA2-HASHER: {} real hashes, {} matches, avg {:.1} hashes/match, target={:02x}{:02x}{:02x}{:02x}",
-                total_h, total_m,
-                if total_m > 0 { total_h as f64 / total_m as f64 } else { f64::INFINITY },
-                target[0], target[1], target[2], target[3]);
         }
 
         None

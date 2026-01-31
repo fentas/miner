@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, watch};
 /// Uses atomic increment instead of SystemTime for ~12x faster generation
 static EXTRANONCE2_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-use super::{Job, Share, Stats, Hasher};
+use super::{Job, Share, Stats, Hasher, HasherType};
 
 /// Notification mechanism for waking workers
 ///
@@ -92,6 +92,7 @@ impl Worker {
         job_rx: watch::Receiver<Option<Arc<Job>>>,
         share_tx: mpsc::Sender<Share>,
         batch_size: u32,
+        hasher_type: HasherType,
     ) -> Result<WorkerHandle, std::io::Error> {
         let handle = thread::Builder::new()
             .name(format!("miner-{}", id))
@@ -103,7 +104,7 @@ impl Worker {
                     notifier,
                     job_rx,
                     share_tx,
-                    hasher: Hasher::new(),
+                    hasher: Hasher::with_type(hasher_type),
                     extranonce1: vec![0u8; 4],
                     extranonce2_size: 4,
                     batch_size,

@@ -29,6 +29,18 @@ This is the REAL hashrate. All historical "TH/s" numbers below were artifacts of
 
 *Note: Easy target measurements are inflated ~256,000x. Hard target = real mining performance.*
 
+### Verified Baseline (commit `b335349` - tested 2026-01-31)
+
+Baseline tested with hard target `[0x00; 32]` in `/home/fentas/github/fentas/miner-baseline`:
+
+| Configuration | Hashrate (Hard Target) | Per Thread |
+|---------------|------------------------|------------|
+| 1 thread (SHA-NI) | 10.64 MH/s | 10.64 MH/s |
+| 12 threads | 88.71 MH/s | 7.39 MH/s |
+| 24 threads | 111.36 MH/s | 4.64 MH/s |
+
+**Thread efficiency at 24 threads:** 43.6%
+
 ### Current State (2026-01-31 - After All Optimizations + Cache-Line Padding)
 
 | Configuration | Hashrate (Hard Target) | Notes |
@@ -37,9 +49,9 @@ This is the REAL hashrate. All historical "TH/s" numbers below were artifacts of
 | 12 threads | 204.41 MH/s | 17.03 MH/s per thread |
 | 24 threads | 254.29 MH/s | 10.60 MH/s per thread |
 
-**Improvement from original:** ~10-15x (generic → SHA-NI)
+**Improvement from verified baseline (commit `b335349`):** 2.27x (111 MH/s → 254 MH/s at 24 threads)
 
-**Thread scaling efficiency:** 46.3% at 24 threads (improved from 42.8%)
+**Thread scaling efficiency:** 46.0% at 24 threads (improved from 43.6%)
 
 ---
 
@@ -113,12 +125,12 @@ Pre-compute K+W additions for constant padding bytes.
 
 ## Progress Tracking
 
-| Date | Change | Single Thread | 24 Threads | vs Original |
+| Date | Change | Single Thread | 24 Threads | vs Baseline |
 |------|--------|---------------|------------|-------------|
-| Before | Generic (no SIMD) | ~2 MH/s | ~48 MH/s | baseline |
-| 2026-01-31 | SHA-NI sequential | 22.88 MH/s | 234.91 MH/s | **~5x** |
+| Baseline | commit `b335349` (verified) | 10.64 MH/s | 111.36 MH/s | baseline |
+| 2026-01-31 | SHA-NI sequential | 22.88 MH/s | 234.91 MH/s | **2.1x** |
 | 2026-01-31 | SHA-NI 2-way (tested) | 23.55 MH/s | 218.81 MH/s | no improvement |
-| 2026-01-31 | Cache-line padding | 22.87 MH/s | 254.29 MH/s | **~5.3x** |
+| 2026-01-31 | Cache-line padding | 22.87 MH/s | 254.29 MH/s | **2.27x** |
 
 ---
 

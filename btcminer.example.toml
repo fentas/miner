@@ -46,6 +46,11 @@ threads = 0
 # generic = portable implementation (slowest, always works)
 # simd_level = "auto"
 
+# Hasher implementation (simd, sha2)
+# simd = SIMD-optimized hasher (default, fastest)
+# sha2 = SHA2 crate only (for debugging, matches baseline behavior)
+# hasher = "simd"
+
 # Enable GPU mining (requires CUDA/OpenCL build)
 enable_gpu = false
 
