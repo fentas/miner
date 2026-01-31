@@ -128,7 +128,7 @@ function handleStats(data) {
     // Update difficulty
     if (data.difficulty !== undefined) {
         const el = document.getElementById('difficulty');
-        if (el) el.textContent = data.difficulty > 0 ? data.difficulty.toFixed(4) : '-';
+        if (el) el.textContent = data.difficulty > 0 ? window.app?.formatNumber(data.difficulty) : '-';
     }
 
     // Update estimated time

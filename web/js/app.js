@@ -69,10 +69,18 @@ function formatDuration(seconds) {
         const hours = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
         return hours + 'h ' + mins + 'm';
-    } else {
+    } else if (seconds < 31536000) {
+        // Less than a year
         const days = Math.floor(seconds / 86400);
         const hours = Math.floor((seconds % 86400) / 3600);
         return days + 'd ' + hours + 'h';
+    } else {
+        // Years - use compact format for huge numbers
+        const years = seconds / 31536000;
+        if (years >= 1e9) return (years / 1e9).toFixed(1) + 'B years';
+        if (years >= 1e6) return (years / 1e6).toFixed(1) + 'M years';
+        if (years >= 1e3) return (years / 1e3).toFixed(1) + 'K years';
+        return years.toFixed(1) + ' years';
     }
 }
 
