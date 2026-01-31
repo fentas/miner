@@ -773,13 +773,59 @@ Both are essentially equal! The "85 GH/s" production performance was likely due 
 
 ---
 
-## Next Investigation: Hash Counting Bug
+## Bug Resolution: Hash Counting and Nonce Position (2026-01-31)
 
-The hash counting bug that triggers at 17+ threads needs investigation:
+### Two Critical Bugs Found and Fixed
 
-1. Check PaddedAtomicU64 for overflow issues
-2. Check if Stats struct has alignment problems at certain thread counts
-3. Verify no fixed-size arrays assume max 16 threads
-4. Test with Ordering::SeqCst instead of Relaxed
+#### Bug 1: Hash Counting Inflation at 17+ Threads
+
+**Root Cause**: In `hash_nonce_range_sha2()`, the loop used `saturating_add`:
+
+```rust
+for nonce in start_nonce..start_nonce.saturating_add(count)
+```
+
+When `start_nonce + count` overflowed u32::MAX, `saturating_add` capped at u32::MAX, causing fewer iterations than expected. But we still reported `batch_size` hashes. With 17+ threads having overlapping nonce ranges (due to `nonce_start = id * (u32::MAX / 16)` overflow), this caused 600-950x hash count inflation.
+
+**Fix**: Changed to use `wrapping_add` like other implementations:
+
+```rust
+for i in 0..count {
+    let nonce = start_nonce.wrapping_add(i);
+```
+
+#### Bug 2: Incorrect Nonce Position in All SIMD Implementations
+
+**Root Cause**: All midstate implementations placed nonce at `block[16..20]` (bytes 80-83), but Bitcoin headers are 80 bytes with nonce at bytes 76-79 (`block[12..16]`).
+
+The SIMD implementations were computing hashes for an 84-byte message instead of the correct 80-byte Bitcoin header!
+
+**Fix**: Updated all implementations (generic, shani, asm, asm_v2, asm_v3, avx2, avx512):
+
+```rust
+// Before (WRONG - 84-byte message):
+block[..16].copy_from_slice(tail);
+block[16..20].copy_from_slice(&nonce.to_le_bytes());
+block[20] = 0x80;
+
+// After (CORRECT - 80-byte message):
+block[..12].copy_from_slice(&tail[..12]);
+block[12..16].copy_from_slice(&nonce.to_le_bytes());
+block[16] = 0x80;
+```
+
+#### Verification Results
+
+After fix, all thread counts work correctly:
+
+- 17 threads SHA2: 243 MH/s (was 216 GH/s - now correct)
+- All `*_matches_generic` tests pass
+- `test_hash_nonce_range_correctness` passes
+
+#### Performance Implications
+
+1. The earlier "85 GH/s" and "188 GH/s" results for SHA2 crate were caused by the hash counting bug
+2. SIMD implementations were computing wrong hashes (would not find valid Bitcoin blocks)
+3. True performance is ~22-23 MH/s per thread for all implementations
 
 ---
