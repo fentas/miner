@@ -644,4 +644,91 @@ mod tests {
 
         assert_eq!(hash1, hash2);
     }
+
+    #[test]
+    fn test_hasher_sha2_type() {
+        let mut hasher = Hasher::with_type(HasherType::Sha2Crate);
+        let header_prefix = [0x42u8; 76];
+        let easy_target = [0xFF; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 5, &easy_target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_hasher_simd_type() {
+        let mut hasher = Hasher::with_type(HasherType::Simd);
+        let header_prefix = [0x43u8; 76];
+        let easy_target = [0xFF; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 5, &easy_target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_hasher_asm_type() {
+        let mut hasher = Hasher::with_type(HasherType::Assembly);
+        let header_prefix = [0x44u8; 76];
+        let easy_target = [0xFF; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 5, &easy_target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_hasher_asm_v2_type() {
+        let mut hasher = Hasher::with_type(HasherType::AsmV2);
+        let header_prefix = [0x45u8; 76];
+        let easy_target = [0xFF; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 5, &easy_target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_hasher_asm_v3_type() {
+        let mut hasher = Hasher::with_type(HasherType::AsmV3);
+        let header_prefix = [0x46u8; 76];
+        let easy_target = [0xFF; 32];
+
+        let result = hasher.hash_nonce_range(&header_prefix, 0, 5, &easy_target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_all_hasher_types_produce_same_result() {
+        let header = [0x77u8; 80];
+        let hasher_types = [
+            HasherType::Sha2Crate,
+            HasherType::Simd,
+            HasherType::Assembly,
+            HasherType::AsmV2,
+            HasherType::AsmV3,
+        ];
+
+        let base_hasher = Hasher::with_type(HasherType::Sha2Crate);
+        let base_hash = base_hasher.hash_header(&header);
+
+        for hasher_type in hasher_types {
+            let hasher = Hasher::with_type(hasher_type);
+            let hash = hasher.hash_header(&header);
+            assert_eq!(hash, base_hash, "Hasher {:?} produced different result", hasher_type);
+        }
+    }
+
+    #[test]
+    fn test_hasher_type_display() {
+        assert_eq!(format!("{:?}", HasherType::Sha2Crate), "Sha2Crate");
+        assert_eq!(format!("{:?}", HasherType::Simd), "Simd");
+        assert_eq!(format!("{:?}", HasherType::Assembly), "Assembly");
+        assert_eq!(format!("{:?}", HasherType::AsmV2), "AsmV2");
+        assert_eq!(format!("{:?}", HasherType::AsmV3), "AsmV3");
+    }
+
+    #[test]
+    fn test_hasher_type_clone() {
+        let original = HasherType::Simd;
+        let cloned = original.clone();
+        assert_eq!(format!("{:?}", cloned), "Simd");
+    }
 }

@@ -4,13 +4,15 @@ This document describes the test coverage for the BTC Miner project.
 
 ## Overview
 
-**Total Tests: 442+**
+**Total Tests: 500+**
+**Line Coverage: 50.45%** (core mining modules)
 
 The codebase has extensive test coverage focusing on:
 - Unit tests for core functionality
 - Integration tests with mock servers
 - Edge case handling
 - Concurrent access testing
+- Block finding and submission paths
 
 ## Test Distribution by Module
 
@@ -22,10 +24,10 @@ The codebase has extensive test coverage focusing on:
 | `src/tui/state.rs` | 37 | TUI state management, getters/setters |
 | `src/bitcoin/manager.rs` | 35 | Bitcoin Core management, download, paths |
 | `src/mining/sha256_simd.rs` | 27 | SHA256 SIMD implementations |
+| `src/mining/hasher.rs` | 27 | Hashing operations, midstate, all hasher types |
+| `src/mining/job.rs` | 26 | Job creation, header building, targets, varint encoding |
+| `src/mining/mod.rs` | 22 | Coordinator, stats tracking, GPU hashes |
 | `src/main.rs` | 21 | Main app flow tests |
-| `src/mining/job.rs` | 18 | Job creation, header building, targets |
-| `src/mining/mod.rs` | 18 | Coordinator, stats tracking |
-| `src/mining/hasher.rs` | 17 | Hashing operations, midstate |
 | `src/mining/gpu_worker.rs` | 16 | GPU job creation, coordinator |
 | `src/web/mod.rs` | 13 | Web API endpoints |
 | `src/stratum/v1.rs` | 13 | Stratum V1 protocol |
@@ -45,12 +47,13 @@ The codebase has extensive test coverage focusing on:
 | Test File | Tests | Coverage Focus |
 |-----------|-------|----------------|
 | `tests/integration_tests.rs` | 34 | End-to-end mining flow, block submission, GPU coordination |
+| `tests/block_finding_tests.rs` | 23 | Share struct, block building, target comparison, hasher consistency |
 | `tests/gpu_tests.rs` | 21 | GPU coordinator, job handling, tuning params |
 | `tests/stratum_integration_tests.rs` | 18 | Mock stratum server, protocol flow |
 | `tests/mining_tests.rs` | 15 | Mining primitives, encoding |
-| `tests/config_tests.rs` | 7 | Config file parsing |
-| `tests/web_api_tests.rs` | 5 | HTTP API endpoints |
 | `tests/rpc_integration_tests.rs` | 11 | Mock RPC server tests |
+| `tests/config_tests.rs` | 7 | Config file parsing |
+| `tests/web_api_tests.rs` | 19 | HTTP API endpoints |
 | `tests/tui_tests.rs` | 1 | TUI state |
 
 ## Critical Path Coverage
@@ -156,30 +159,52 @@ When adding new functionality:
 
 ## Coverage Goals
 
-| Category | Target | Current |
-|----------|--------|---------|
-| Core Mining | 95%+ | High |
-| Block Submission | 95%+ | High |
-| RPC Client | 90%+ | High |
-| Stratum Protocol | 90%+ | High |
-| Config Parsing | 95%+ | High |
-| Stats/Metrics | 90%+ | High |
-| GPU Coordination | 85%+ | Medium |
-| Idle Detection | 80%+ | Medium |
-| TUI/UI | N/A | Excluded |
+| Category | Target | Current | Notes |
+|----------|--------|---------|-------|
+| Core Mining | 95%+ | 68% | hasher.rs: 68%, job.rs: 78% |
+| Block Submission | 95%+ | 78% | job.rs build_block paths |
+| RPC Client | 90%+ | 15% | Async calls need mock server |
+| Stratum Protocol | 90%+ | 97% | v1.rs: 97%, v2.rs: 100% |
+| Config Parsing | 95%+ | 86% | config.rs: 86% |
+| Stats/Metrics | 90%+ | 100% | stats/mod.rs: 100% |
+| GPU Coordination | 85%+ | 71% | gpu_worker.rs: 71% |
+| Idle Detection | 80%+ | 31% | Platform-specific code |
+| TUI/UI | N/A | Excluded | Visual rendering code |
+| SHA256 SIMD | 80%+ | 85%+ | avx2: 92%, avx512: 93%, generic: 96% |
 
 ## Recent Additions
 
-### Block Submission Tests (Session)
-- `test_job_build_block_with_data` - Full block construction
+### Block Finding Tests (`tests/block_finding_tests.rs`)
+- `test_share_has_required_fields` - Share struct validation
+- `test_share_ntime_encoding_for_pool` - ntime big-endian encoding
+- `test_share_nonce_encoding_for_pool` - nonce little-endian encoding
+- `test_share_extranonce2_encoding_for_pool` - extranonce2 hex encoding
+- `test_job_has_solo_mining_fields` - Solo mining job requirements
 - `test_job_build_block_missing_coinbase` - Error handling
 - `test_job_build_block_missing_transactions` - Error handling
-- `test_job_build_block_with_multiple_transactions` - Multi-tx blocks
-- `test_job_build_block_different_nonces` - Nonce variation
-- `test_varint_encoding_in_block` - Bitcoin varint encoding
-- `test_block_meets_network_target_integration` - Block detection
+- `test_job_meets_network_target` - Block detection
+- `test_hash_meets_target_comparison` - Target comparison logic
+- `test_difficulty_to_target_values` - Difficulty conversion
+- `test_job_build_header_structure` - Header byte layout
+- `test_block_varint_encoding` - Bitcoin varint 1/3/5/9 byte formats
+- `test_all_hashers_share_detection` - All hasher types produce same hash
+- `test_hash_nonce_range_finds_share` - Nonce range search
+- `test_coordinator_share_channel` - Share channel functionality
 
-### RPC Mock Tests (Session)
+### Hasher Type Tests
+- `test_hasher_sha2_type` - Sha2Crate hasher path
+- `test_hasher_simd_type` - SIMD hasher path
+- `test_hasher_asm_type` - Assembly hasher path
+- `test_hasher_asm_v2_type` - Assembly V2 hasher path
+- `test_hasher_asm_v3_type` - Assembly V3 hasher path
+- `test_all_hasher_types_produce_same_result` - Hash consistency across types
+
+### Stats Tests
+- `test_stats_gpu_hashes` - GPU hash counter
+- `test_padded_atomic_operations` - Cache-line padded atomics
+- `test_padded_atomic_default` - Default initialization
+
+### RPC Mock Tests
 - `test_mock_getblocktemplate` - Template parsing
 - `test_mock_getblocktemplate_warmup` - Warmup error
 - `test_mock_getblocktemplate_no_peers` - Peer error

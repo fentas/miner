@@ -361,6 +361,37 @@ mod tests {
     }
 
     #[test]
+    fn test_stats_gpu_hashes() {
+        let stats = Stats::new();
+        assert_eq!(stats.get_gpu_hashes(), 0);
+
+        stats.add_gpu_hashes(1000);
+        assert_eq!(stats.get_gpu_hashes(), 1000);
+
+        stats.add_gpu_hashes(500);
+        assert_eq!(stats.get_gpu_hashes(), 1500);
+    }
+
+    #[test]
+    fn test_padded_atomic_operations() {
+        let padded = PaddedAtomicU64::new(100);
+        assert_eq!(padded.load(Ordering::Relaxed), 100);
+
+        padded.fetch_add(50, Ordering::Relaxed);
+        assert_eq!(padded.load(Ordering::Relaxed), 150);
+
+        let old = padded.swap(0, Ordering::Relaxed);
+        assert_eq!(old, 150);
+        assert_eq!(padded.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_padded_atomic_default() {
+        let padded = PaddedAtomicU64::default();
+        assert_eq!(padded.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn test_stats_snapshot() {
         let stats = Stats::new();
         stats.add_hashes(1000);
