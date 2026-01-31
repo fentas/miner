@@ -561,7 +561,7 @@ async fn run_solo_mode_with_tui(
     let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
 
     // Setup GPU coordinator if enabled
-    let gpu_coordinator = if cfg.mining.enable_gpu {
+    let mut gpu_coordinator = if cfg.mining.enable_gpu {
         let tuning = mining::GpuTuningParams {
             intensity: cfg.mining.gpu_intensity,
             workgroup_size: cfg.mining.gpu_workgroup_size,
@@ -977,6 +977,46 @@ async fn run_solo_mode_with_tui(
                         // This should never happen - it means coinbase_tx or transactions missing
                         coordinator.stats().reject_share();
                         tui_state.log_error("Failed to build block data - missing coinbase or transactions");
+                    }
+                }
+            }
+        }
+
+        // Check for GPU found blocks and submit
+        if let Some(ref mut gpu_coord) = gpu_coordinator {
+            while let Some(share) = gpu_coord.try_recv_share() {
+                if let Some(ref job) = current_job {
+                    // Check if this share meets the network target (is a valid block)
+                    if job.meets_network_target(&share.hash) {
+                        tui_state.log_success("🎉 GPU BLOCK FOUND! Submitting to network...");
+                        if cfg.logging.system_bell {
+                            // Triple bell for block found!
+                            print!("\x07\x07\x07");
+                        }
+
+                        // Build the full block and submit
+                        if let Some(block_hex) = job.build_block(share.nonce) {
+                            let Some(rpc) = bitcoind.rpc() else {
+                                tui_state.log_error("Cannot submit block - RPC not available");
+                                continue;
+                            };
+                            match rpc.submit_block(&block_hex).await {
+                                Ok(()) => {
+                                    coordinator.stats().accept_share();
+                                    tui_state.record_share();
+                                    tui_state.log_success("✅ GPU BLOCK ACCEPTED BY NETWORK!");
+                                    let hash_hex = hex::encode(share.hash);
+                                    tui_state.log_success(format!("Block hash: {}", hash_hex));
+                                }
+                                Err(e) => {
+                                    coordinator.stats().reject_share();
+                                    tui_state.log_error(format!("❌ GPU Block rejected: {}", e));
+                                }
+                            }
+                        } else {
+                            coordinator.stats().reject_share();
+                            tui_state.log_error("Failed to build GPU block data - missing coinbase or transactions");
+                        }
                     }
                 }
             }
@@ -1690,7 +1730,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
     let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
 
     // Setup GPU coordinator if enabled
-    let gpu_coordinator = if cfg.mining.enable_gpu {
+    let mut gpu_coordinator = if cfg.mining.enable_gpu {
         let tuning = mining::GpuTuningParams {
             intensity: cfg.mining.gpu_intensity,
             workgroup_size: cfg.mining.gpu_workgroup_size,
@@ -1974,6 +2014,41 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                         // This should never happen - it means coinbase_tx or transactions missing
                         coordinator.stats().reject_share();
                         error!("Failed to build block data - missing coinbase or transactions");
+                    }
+                }
+            }
+        }
+
+        // Check for GPU found blocks and submit
+        if let Some(ref mut gpu_coord) = gpu_coordinator {
+            while let Some(share) = gpu_coord.try_recv_share() {
+                if let Some(ref job) = current_job {
+                    // Check if this share meets the network target (is a valid block)
+                    if job.meets_network_target(&share.hash) {
+                        println!("\n{}", "🎉 GPU BLOCK FOUND! Submitting to network...".bright_green().bold());
+                        if cfg.logging.system_bell {
+                            // Triple bell for block found!
+                            print!("\x07\x07\x07");
+                        }
+
+                        // Build the full block and submit
+                        if let Some(block_hex) = job.build_block(share.nonce) {
+                            match rpc.submit_block(&block_hex).await {
+                                Ok(()) => {
+                                    coordinator.stats().accept_share();
+                                    println!("{}", "✅ GPU BLOCK ACCEPTED BY NETWORK!".bright_green().bold());
+                                    let hash_hex = hex::encode(share.hash);
+                                    println!("{} {}", "Block hash:".bright_white(), hash_hex.bright_cyan());
+                                }
+                                Err(e) => {
+                                    coordinator.stats().reject_share();
+                                    println!("{} {}", "❌ GPU Block rejected:".bright_red().bold(), e);
+                                }
+                            }
+                        } else {
+                            coordinator.stats().reject_share();
+                            error!("Failed to build GPU block data - missing coinbase or transactions");
+                        }
                     }
                 }
             }

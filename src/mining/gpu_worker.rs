@@ -5,9 +5,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
-use super::{Job, Stats, Midstate, hash_meets_target};
+use super::{Job, Share, Stats, Midstate, hash_meets_target};
 use crate::gpu::{GpuManager, GpuMiner, GpuDevice};
 
 /// GPU Worker handle
@@ -36,6 +36,7 @@ pub struct GpuCoordinator {
     stats: Arc<Stats>,
     running: Arc<AtomicBool>,
     job_tx: watch::Sender<Option<GpuJob>>,
+    share_rx: mpsc::Receiver<Share>,
 }
 
 /// GPU-specific job with pre-computed midstate
@@ -46,6 +47,8 @@ pub struct GpuJob {
     pub tail: [u8; 16],
     pub target: [u8; 32],
     pub network_target: Option<[u8; 32]>,
+    /// Block timestamp (for share submission)
+    pub ntime: u32,
 }
 
 /// GPU tuning parameters
@@ -87,6 +90,7 @@ impl GpuCoordinator {
     pub fn with_tuning(device_ids: &[u32], tuning: GpuTuningParams, stats: Arc<Stats>) -> Self {
         let running = Arc::new(AtomicBool::new(false));
         let (job_tx, _job_rx) = watch::channel(None);
+        let (share_tx, share_rx) = mpsc::channel(100);
 
         let gpu_manager = GpuManager::new();
         let available_devices = gpu_manager.devices();
@@ -127,6 +131,7 @@ impl GpuCoordinator {
                         Arc::clone(&running),
                         job_tx.subscribe(),
                         Arc::clone(&device_hashrate),
+                        share_tx.clone(),
                         batch_size,
                         tuning.intensity,
                     );
@@ -147,6 +152,7 @@ impl GpuCoordinator {
             stats,
             running,
             job_tx,
+            share_rx,
         }
     }
 
@@ -159,6 +165,7 @@ impl GpuCoordinator {
         running: Arc<AtomicBool>,
         mut job_rx: watch::Receiver<Option<GpuJob>>,
         hashrate: Arc<AtomicU64>,
+        share_tx: mpsc::Sender<Share>,
         batch_size: u32,
         intensity: u8,
     ) -> JoinHandle<()> {
@@ -227,16 +234,37 @@ impl GpuCoordinator {
                     // Store current hashrate
                     hashrate.store(miner.hashrate().to_bits(), Ordering::Relaxed);
 
-                    // Process results
+                    // Process results - send any valid shares/blocks
                     for result in results {
-                        // Check if meets network target (for solo mining)
-                        if let Some(ref network_target) = job.network_target {
-                            if hash_meets_target(&result.hash, network_target) {
+                        // Check if meets pool target (share) or network target (block)
+                        let meets_pool_target = hash_meets_target(&result.hash, &job.target);
+                        let meets_network_target = job.network_target
+                            .as_ref()
+                            .map(|t| hash_meets_target(&result.hash, t))
+                            .unwrap_or(false);
+
+                        if meets_pool_target || meets_network_target {
+                            // Create share for submission
+                            let share = Share {
+                                job_id: job.job_id.clone(),
+                                nonce: result.nonce,
+                                hash: result.hash,
+                                worker_id: device.id as usize + 1000, // GPU workers have ID >= 1000
+                                ntime: job.ntime,
+                                extranonce2: vec![], // GPU uses merkle_root_override, not extranonce
+                            };
+
+                            if meets_network_target {
                                 stats.found_block();
                                 eprintln!(
-                                    "[GPU {}] Found potential block! Nonce: {:#x}",
+                                    "[GPU {}] 🎉 Found potential BLOCK! Nonce: {:#x}",
                                     device.id, result.nonce
                                 );
+                            }
+
+                            // Send share (non-blocking, log warning if channel full)
+                            if share_tx.try_send(share).is_err() {
+                                tracing::warn!("[GPU {}] Share channel full, share may be lost!", device.id);
                             }
                         }
                     }
@@ -279,6 +307,7 @@ impl GpuCoordinator {
             tail,
             target: job.target,
             network_target: job.network_target,
+            ntime: job.ntime,
         }
     }
 
@@ -309,6 +338,11 @@ impl GpuCoordinator {
     /// Clear the current job
     pub fn clear_job(&self) {
         let _ = self.job_tx.send(None);
+    }
+
+    /// Receive a found share (non-blocking)
+    pub fn try_recv_share(&mut self) -> Option<Share> {
+        self.share_rx.try_recv().ok()
     }
 
     /// Get number of GPU workers
