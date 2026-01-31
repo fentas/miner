@@ -423,7 +423,7 @@ async fn run_solo_mode_with_tui(
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let mut coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
@@ -904,7 +904,7 @@ async fn run_sv2_mode_with_tui(
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let coordinator = Coordinator::new(thread_count);
+    let coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
     coordinator.start();
 
     // Setup idle monitor
@@ -1057,7 +1057,7 @@ async fn run_pool_mode_with_tui(
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let mut coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
     coordinator.start();
 
     // Setup idle monitor if enabled
@@ -1547,7 +1547,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Create mining coordinator (but don't start yet)
     let thread_count = cfg.effective_threads();
-    let mut coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
 
     // Setup GPU coordinator if enabled
     let gpu_coordinator = if cfg.mining.enable_gpu {
@@ -1574,6 +1574,46 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Setup idle monitor if enabled
     let idle_monitor = setup_idle_monitor(&cfg);
+
+    // Start web server if enabled
+    let web_state = if cfg.web.port > 0 {
+        let state = Arc::new(web::WebState::new("Bitcoin Network (solo)".to_string(), thread_count));
+        let state_clone = Arc::clone(&state);
+        let web_dir = resolve_web_dir(&cfg.web.dir);
+        let web_port = cfg.web.port;
+        let web_auth = if cfg.web.auth_enabled {
+            Some(web::BasicAuthConfig {
+                username: cfg.web.auth_user.clone().unwrap_or_default(),
+                password: cfg.web.auth_password.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        };
+
+        // Initialize config snapshot for web state
+        state.set_config(web::ConfigSnapshot::for_solo(&cfg, thread_count)).await;
+
+        // Initialize idle settings in web state
+        if cfg.idle.enabled {
+            state.set_idle_enabled(true, Some(cfg.idle.timeout as u64)).await;
+        }
+
+        // Initialize GPU stats if enabled
+        if cfg.mining.enable_gpu {
+            state.set_gpu_stats(true, 0.0, String::new()).await;
+        }
+
+        tokio::spawn(async move {
+            if let Err(e) = web::start_server(state_clone, &web_dir, web_port, web_auth).await {
+                error!("Web server error: {}", e);
+            }
+        });
+
+        info!("Web interface available at http://127.0.0.1:{}", cfg.web.port);
+        Some(state)
+    } else {
+        None
+    };
 
     // Setup stats
     let mut hashrate_calc = HashrateCalculator::new(60);
@@ -1801,7 +1841,7 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
         if last_stats.elapsed() >= stats_interval {
             // Include GPU stats in output
             let stats = coordinator.stats().snapshot();
-            if gpu_coordinator.is_some() && stats.gpu_hashes > 0 {
+            let hashrate = if gpu_coordinator.is_some() && stats.gpu_hashes > 0 {
                 gpu_hashrate_calc.add_sample(stats.gpu_hashes);
                 let gpu_rate = gpu_hashrate_calc.hashrate();
                 hashrate_calc.add_sample(stats.hashes);
@@ -1814,9 +1854,17 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                     format_hashrate(gpu_rate),
                     stats.hashes + stats.gpu_hashes
                 );
+                total_rate
             } else {
-                print_stats(&coordinator, &mut hashrate_calc, start_time);
+                let rate = print_stats(&coordinator, &mut hashrate_calc, start_time);
+                rate
+            };
+
+            // Update web state
+            if let Some(ref state) = web_state {
+                state.update_stats(stats, hashrate).await;
             }
+
             last_stats = Instant::now();
         }
 
@@ -1841,7 +1889,7 @@ async fn run_sv2_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let coordinator = Coordinator::new(thread_count);
+    let coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
     coordinator.start();
 
     // Setup idle monitor if enabled
@@ -1916,7 +1964,7 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
 
     // Start mining coordinator
     let thread_count = cfg.effective_threads();
-    let mut coordinator = Coordinator::new(thread_count);
+    let mut coordinator = Coordinator::with_options(thread_count, 1 << cfg.mining.cpu_batch_exp, cfg.mining.hasher.to_hasher_type());
     coordinator.start();
 
     // Setup idle monitor if enabled

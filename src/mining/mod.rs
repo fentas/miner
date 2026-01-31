@@ -6,7 +6,7 @@ pub mod gpu_worker;
 
 pub use worker::{Worker, WorkerHandle, Notifier};
 pub use job::{Job, difficulty_to_target, hash_meets_target};
-pub use hasher::Hasher;
+pub use hasher::{Hasher, HasherType};
 pub use sha256_simd::{SimdLevel, Midstate};
 pub use gpu_worker::{GpuCoordinator, GpuTuningParams};
 
@@ -173,11 +173,16 @@ pub struct Share {
 impl Coordinator {
     /// Create a new mining coordinator
     pub fn new(thread_count: usize) -> Self {
-        Self::with_batch_size(thread_count, 1 << 18) // Default: 256K nonces
+        Self::with_options(thread_count, 1 << 18, HasherType::default()) // Default: 256K nonces, SIMD hasher
     }
 
     /// Create a new mining coordinator with custom batch size
     pub fn with_batch_size(thread_count: usize, batch_size: u32) -> Self {
+        Self::with_options(thread_count, batch_size, HasherType::default())
+    }
+
+    /// Create a new mining coordinator with custom batch size and hasher type
+    pub fn with_options(thread_count: usize, batch_size: u32, hasher_type: HasherType) -> Self {
         let stats = Arc::new(Stats::new());
         let running = Arc::new(AtomicBool::new(false));
         let notifier = Arc::new(Notifier::new());
@@ -195,6 +200,7 @@ impl Coordinator {
                 job_tx.subscribe(),
                 share_tx.clone(),
                 batch_size,
+                hasher_type,
             ) {
                 Ok(handle) => workers.push(handle),
                 Err(e) => {

@@ -1,11 +1,24 @@
 use sha2::{Sha256, Digest};
 use super::sha256_simd::{Midstate, sha256d_midstate_generic, mine_with_midstate};
+use super::job::hash_meets_target;
+
+/// Hasher implementation selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HasherType {
+    /// SIMD-optimized hasher (AVX2/SHA-NI) - default, fastest
+    #[default]
+    Simd,
+    /// SHA2 crate only - for debugging/comparison (matches baseline b335349)
+    Sha2Crate,
+}
 
 /// SHA256 double hasher for Bitcoin block headers
 pub struct Hasher {
     // Cached mid-state for header prefix (first 64 bytes)
     midstate: Option<Midstate>,
     midstate_header_prefix: [u8; 64],
+    // Hasher implementation type (configurable at runtime)
+    hasher_type: HasherType,
 }
 
 impl Hasher {
@@ -13,7 +26,22 @@ impl Hasher {
         Self {
             midstate: None,
             midstate_header_prefix: [0u8; 64],
+            hasher_type: HasherType::default(),
         }
+    }
+
+    /// Create a hasher with a specific implementation type
+    pub fn with_type(hasher_type: HasherType) -> Self {
+        Self {
+            midstate: None,
+            midstate_header_prefix: [0u8; 64],
+            hasher_type,
+        }
+    }
+
+    /// Get the current hasher type
+    pub fn hasher_type(&self) -> HasherType {
+        self.hasher_type
     }
 
     /// Compute double SHA256 hash of a block header
@@ -57,13 +85,29 @@ impl Hasher {
         }
     }
 
-    /// Batch hash multiple nonces efficiently using SIMD-optimized mining
+    /// Batch hash multiple nonces efficiently
     ///
-    /// This uses the midstate optimization and SIMD (AVX2/SHA-NI) for maximum performance.
+    /// Dispatches to SIMD or sha2-crate implementation based on hasher_type:
+    /// - `Simd`: Uses SIMD-optimized mining (AVX2/SHA-NI) - default, fastest
+    /// - `Sha2Crate`: Uses sha2 crate in a loop (for debugging, matches baseline b335349)
+    ///
     /// The header_prefix contains 76 bytes: first 64 bytes for midstate, bytes 64-76 for tail.
-    ///
     /// The midstate is cached and only recomputed when the first 64 bytes change.
     pub fn hash_nonce_range(
+        &mut self,
+        header_prefix: &[u8; 76],
+        start_nonce: u32,
+        count: u32,
+        target: &[u8; 32],
+    ) -> Option<(u32, [u8; 32])> {
+        match self.hasher_type {
+            HasherType::Simd => self.hash_nonce_range_simd(header_prefix, start_nonce, count, target),
+            HasherType::Sha2Crate => self.hash_nonce_range_sha2(header_prefix, start_nonce, count, target),
+        }
+    }
+
+    /// SIMD-optimized implementation (default)
+    fn hash_nonce_range_simd(
         &mut self,
         header_prefix: &[u8; 76],
         start_nonce: u32,
@@ -84,6 +128,75 @@ impl Hasher {
 
         // Use SIMD-optimized mining function (AVX2 8-way or SHA-NI)
         mine_with_midstate(self.midstate.as_ref().unwrap(), &tail, start_nonce, count, target)
+    }
+
+    /// SHA2-crate only implementation (like baseline b335349)
+    ///
+    /// This is slower but useful for debugging to compare against SIMD implementation.
+    /// Configure in btcminer.toml: hasher = "sha2"
+    fn hash_nonce_range_sha2(
+        &mut self,
+        header_prefix: &[u8; 76],
+        start_nonce: u32,
+        count: u32,
+        target: &[u8; 32],
+    ) -> Option<(u32, [u8; 32])> {
+        // DEBUG: Track actual hashes computed (same as baseline)
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TOTAL_HASHES: AtomicU64 = AtomicU64::new(0);
+        static TOTAL_MATCHES: AtomicU64 = AtomicU64::new(0);
+        static LAST_PRINT: AtomicU64 = AtomicU64::new(0);
+
+        let mut header = [0u8; 80];
+        header[..76].copy_from_slice(header_prefix);
+
+        for nonce in start_nonce..start_nonce.saturating_add(count) {
+            header[76..80].copy_from_slice(&nonce.to_le_bytes());
+            let hash = self.hash_header(&header);
+
+            if hash_meets_target(&hash, target) {
+                TOTAL_HASHES.fetch_add((nonce - start_nonce + 1) as u64, Ordering::Relaxed);
+                TOTAL_MATCHES.fetch_add(1, Ordering::Relaxed);
+
+                // Print debug every 5 seconds
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_PRINT.load(Ordering::Relaxed);
+                if now > last + 5 {
+                    LAST_PRINT.store(now, Ordering::Relaxed);
+                    let total_h = TOTAL_HASHES.load(Ordering::Relaxed);
+                    let total_m = TOTAL_MATCHES.load(Ordering::Relaxed);
+                    eprintln!("DEBUG SHA2-HASHER: {} real hashes, {} matches, avg {:.1} hashes/match, target={:02x}{:02x}{:02x}{:02x}",
+                        total_h, total_m,
+                        if total_m > 0 { total_h as f64 / total_m as f64 } else { 0.0 },
+                        target[0], target[1], target[2], target[3]);
+                }
+
+                return Some((nonce, hash));
+            }
+        }
+
+        TOTAL_HASHES.fetch_add(count as u64, Ordering::Relaxed);
+
+        // Log every 5 seconds when NO match found
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let last = LAST_PRINT.load(Ordering::Relaxed);
+        if now > last + 5 {
+            LAST_PRINT.store(now, Ordering::Relaxed);
+            let total_h = TOTAL_HASHES.load(Ordering::Relaxed);
+            let total_m = TOTAL_MATCHES.load(Ordering::Relaxed);
+            eprintln!("DEBUG SHA2-HASHER: {} real hashes, {} matches, avg {:.1} hashes/match, target={:02x}{:02x}{:02x}{:02x}",
+                total_h, total_m,
+                if total_m > 0 { total_h as f64 / total_m as f64 } else { f64::INFINITY },
+                target[0], target[1], target[2], target[3]);
+        }
+
+        None
     }
 }
 

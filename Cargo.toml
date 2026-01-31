@@ -88,6 +88,7 @@ tokio-test = "0.4"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 criterion = { version = "0.5", features = ["html_reports"] }
+ureq = { version = "2.12", features = ["json"] }
 
 [[bench]]
 name = "mining_benchmarks"
@@ -101,6 +102,21 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# Benchmark profile - match release for accurate measurements
+# Without LTO, SHA256 benchmarks can be 100-1000x slower!
+[profile.bench]
+inherits = "release"
+debug = false
+lto = "fat"
+codegen-units = 1
+
+# Test profile - full optimization for accurate performance tests
+[profile.test]
+inherits = "release"
+debug = false
+lto = "fat"
+codegen-units = 1
 
 # The profile that 'dist' will build with
 [profile.dist]

@@ -109,6 +109,27 @@ pub enum SimdLevelConfig {
     Generic,
 }
 
+/// Hasher implementation type (for debugging/comparison)
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HasherConfig {
+    /// SIMD-optimized hasher (default, fastest)
+    #[default]
+    Simd,
+    /// SHA2 crate only (for debugging, matches baseline b335349)
+    Sha2,
+}
+
+impl HasherConfig {
+    /// Convert to runtime HasherType
+    pub fn to_hasher_type(self) -> crate::mining::HasherType {
+        match self {
+            HasherConfig::Simd => crate::mining::HasherType::Simd,
+            HasherConfig::Sha2 => crate::mining::HasherType::Sha2Crate,
+        }
+    }
+}
+
 /// Mining configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MiningConfig {
@@ -123,6 +144,9 @@ pub struct MiningConfig {
     /// SIMD level for CPU hashing (auto, sha-ni, avx2, avx512, generic)
     #[serde(default)]
     pub simd_level: SimdLevelConfig,
+    /// Hasher implementation (simd = optimized, sha2 = baseline for debugging)
+    #[serde(default)]
+    pub hasher: HasherConfig,
     #[serde(default)]
     pub enable_gpu: bool,
     #[serde(default)]
@@ -162,6 +186,7 @@ impl Default for MiningConfig {
             threads: 0,
             cpu_batch_exp: 18,      // 256K nonces per batch
             simd_level: SimdLevelConfig::Auto,
+            hasher: HasherConfig::default(),
             enable_gpu: false,
             gpu_devices: vec![],
             gpu_intensity: 100,
