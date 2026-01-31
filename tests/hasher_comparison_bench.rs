@@ -14,7 +14,7 @@
 
 use std::time::{Duration, Instant};
 use btcminer::mining::{Coordinator, Job, Hasher, HasherType};
-use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm};
+use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2};
 
 fn format_hashrate(hashrate: f64) -> String {
     if hashrate >= 1e12 { format!("{:.2} TH/s", hashrate / 1e12) }
@@ -82,6 +82,20 @@ fn bench_direct_calls() {
     }
     let rate_asm = count as f64 / start.elapsed().as_secs_f64();
 
+    // Test 4: AsmV2 (sha2 crate style)
+    println!("Testing AsmV2...");
+    count = 0;
+    nonce = 0;
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        for _ in 0..10000 {
+            let _ = sha256d_midstate_v2(&midstate, &tail, nonce);
+            nonce = nonce.wrapping_add(1);
+            count += 1;
+        }
+    }
+    let rate_v2 = count as f64 / start.elapsed().as_secs_f64();
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("  RESULTS (Direct Calls - Single Thread)");
@@ -92,6 +106,7 @@ fn bench_direct_calls() {
     println!("  {:25} {:>15} {:>10}", "Generic", format_hashrate(rate_generic), "1.0x");
     println!("  {:25} {:>15} {:>10}", "SIMD", format_hashrate(rate_simd), format!("{:.1}x", rate_simd / rate_generic));
     println!("  {:25} {:>15} {:>10}", "Assembly", format_hashrate(rate_asm), format!("{:.1}x", rate_asm / rate_generic));
+    println!("  {:25} {:>15} {:>10}", "AsmV2", format_hashrate(rate_v2), format!("{:.1}x", rate_v2 / rate_generic));
     println!();
 }
 
@@ -114,6 +129,7 @@ fn bench_hasher_class() {
         (HasherType::Sha2Crate, "SHA2 Crate"),
         (HasherType::Simd, "SIMD"),
         (HasherType::Assembly, "Assembly"),
+        (HasherType::AsmV2, "AsmV2"),
     ];
 
     let mut results = Vec::new();
@@ -168,6 +184,7 @@ fn bench_coordinator() {
         (HasherType::Sha2Crate, "SHA2 Crate"),
         (HasherType::Simd, "SIMD"),
         (HasherType::Assembly, "Assembly"),
+        (HasherType::AsmV2, "AsmV2"),
     ];
 
     let mut results = Vec::new();

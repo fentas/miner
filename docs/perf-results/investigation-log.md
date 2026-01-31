@@ -601,3 +601,70 @@ The theory that inline assembly would avoid inlining boundaries was **correct in
 3. Assembly: **184 MH/s** (manual asm, worse than LLVM's intrinsic lowering)
 
 ---
+
+## AsmV2: SHA2 Crate Style Implementation (2026-01-31)
+
+### AsmV2 Hypothesis
+
+Apply sha2 crate's key optimizations to our implementation:
+
+1. Use `cpufeatures` crate for one-time CPU detection (not per-hash)
+2. Use clean macro structure matching sha2 crate for better LLVM optimization
+3. Keep state in XMM registers across transforms
+
+### AsmV2 Implementation
+
+Created `src/mining/sha256_simd/asm_v2.rs` with:
+
+- `cpufeatures::new!()` for static CPU detection
+- `rounds4!` and `schedule_rounds4!` macros matching sha2 structure
+- Correct K constant ordering for `_mm_set_epi32`
+- Public function without `#[target_feature]` for inlining
+
+### AsmV2 Benchmark Results (Coordinator, 24 Threads)
+
+| Implementation | Total       | Per Thread  | vs SHA2 |
+| -------------- | ----------- | ----------- | ------- |
+| SHA2 Crate     | 85.05 GH/s  | 3.54 GH/s   | 1.00x   |
+| SIMD           | 269.64 MH/s | 11.23 MH/s  | 0.003x  |
+| **AsmV2**      | 270.77 MH/s | 11.28 MH/s  | 0.003x  |
+| Assembly       | 197.97 MH/s | 8.25 MH/s   | 0.002x  |
+
+### AsmV2 Analysis
+
+**AsmV2 improvements:**
+
+- 37% faster than original Assembly (270 vs 198 MH/s)
+- Now matches SIMD performance
+- `cpufeatures` one-time detection works correctly
+
+**Still 300x slower than SHA2 crate because:**
+
+The `#[target_feature]` boundary still blocks inlining. Even though our public function has no `#[target_feature]`, the internal `transform_block` function does, and LLVM cannot inline across this boundary.
+
+The sha2 crate solves this differently:
+
+- Their internal `digest_blocks` has `#[target_feature]`
+- But their public `compress()` just checks `shani_cpuid::get()` and calls it
+- The key is that sha2's threads are created INSIDE the library where `compress()` is defined
+- Our threads are created in the Coordinator, also inside the library
+- But our hot loop calls functions that cross into code with `#[target_feature]`
+
+### AsmV2 Root Cause
+
+The sha2 crate achieves 85 GH/s because:
+
+1. **Same compilation unit**: Their `compress()` and `digest_blocks()` are in the same file
+2. **Intra-crate inlining**: When threads call `Sha256::digest()`, LLVM can see the whole call chain
+3. **No `#[target_feature]` on public API**: The boundary is internal
+
+Our implementations (SIMD, Assembly, AsmV2) cannot match this because the `#[target_feature]` functions are called across a function boundary that LLVM won't inline across.
+
+**Updated ranking** (Coordinator, 24 threads):
+
+1. SHA2 Crate: **85 GH/s** (default, recommended)
+2. AsmV2: **271 MH/s** (sha2-style macros with cpufeatures)
+3. SIMD: **270 MH/s** (intrinsics)
+4. Assembly: **198 MH/s** (manual asm)
+
+---

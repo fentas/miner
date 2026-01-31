@@ -120,6 +120,8 @@ pub enum HasherConfig {
     Simd,
     /// Inline assembly implementation (no #[target_feature] boundary)
     Asm,
+    /// V2 optimized (sha2 crate style with cpufeatures)
+    AsmV2,
 }
 
 impl HasherConfig {
@@ -129,6 +131,7 @@ impl HasherConfig {
             HasherConfig::Sha2 => crate::mining::HasherType::Sha2Crate,
             HasherConfig::Simd => crate::mining::HasherType::Simd,
             HasherConfig::Asm => crate::mining::HasherType::Assembly,
+            HasherConfig::AsmV2 => crate::mining::HasherType::AsmV2,
         }
     }
 }

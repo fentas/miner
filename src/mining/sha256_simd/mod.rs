@@ -15,6 +15,8 @@ mod avx2;
 mod avx512;
 #[cfg(target_arch = "x86_64")]
 mod asm;
+#[cfg(target_arch = "x86_64")]
+mod asm_v2;
 
 use super::job::hash_meets_target;
 
@@ -142,6 +144,24 @@ pub fn sha256d_midstate_asm(midstate: &Midstate, tail: &[u8; 16], nonce: u32) ->
     #[cfg(target_arch = "x86_64")]
     {
         return asm::sha256d_midstate_asm(midstate, tail, nonce);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        generic::sha256d_midstate(midstate, tail, nonce)
+    }
+}
+
+/// Double SHA-256 with midstate - v2 optimized (sha2 crate style)
+///
+/// Key optimizations from sha2 crate:
+/// 1. Uses cpufeatures for one-time CPU detection (not per-hash)
+/// 2. Clean macro structure matching sha2 crate for better LLVM optimization
+/// 3. No #[target_feature] on public function - allows inlining
+#[inline]
+pub fn sha256d_midstate_v2(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    #[cfg(target_arch = "x86_64")]
+    {
+        return asm_v2::sha256d_midstate_v2(midstate, tail, nonce);
     }
     #[cfg(not(target_arch = "x86_64"))]
     {

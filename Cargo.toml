@@ -42,6 +42,7 @@ clap = { version = "4.5", features = ["derive"] }
 
 # Crypto & Bitcoin
 sha2 = "0.10"
+cpufeatures = "0.2"  # Fast CPU feature detection (same as sha2 uses)
 hex = "0.4"
 bitcoin = "0.32"
 
