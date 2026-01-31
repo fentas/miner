@@ -364,7 +364,7 @@ btcminer --benchmark
 btcminer --benchmark --benchmark-duration 30  # 30 second test
 ```
 
-This measures actual performance by running the mining hot path directly in the production binary. External tools like `cargo bench` show lower rates (~23 MH/s vs 50+ GH/s) due to Rust cross-crate optimization boundaries.
+This measures actual performance by running the mining hot path directly in the production binary (typically ~272 MH/s on 24 threads with SHA-NI support).
 
 &nbsp;
 
@@ -476,25 +476,23 @@ cargo test --test binary_e2e_tests --release
 
 The miner uses the highly optimized [sha2 crate](https://crates.io/crates/sha2) from RustCrypto with automatic hardware acceleration:
 
-**Benchmark Results (24 threads, hard target):**
+**Benchmark Results (24 threads, 5-second runs, Intel CPU with SHA-NI):**
 
-| Hasher Implementation | Total      | Per Thread | Notes                     |
-| --------------------- | ---------- | ---------- | ------------------------- |
-| SHA2 Crate (default)  | 84 GH/s    | 3.5 GH/s   | RustCrypto with SHA-NI    |
-| SIMD                  | 240 MH/s   | 10 MH/s    | Custom implementation     |
-| Assembly              | 184 MH/s   | 7.7 MH/s   | Inline assembly           |
+| Hasher Implementation | Total      | Per Thread  | Notes                              |
+| --------------------- | ---------- | ----------- | ---------------------------------- |
+| SIMD                  | 279 MH/s   | 11.6 MH/s   | Custom intrinsics (fastest)        |
+| AsmV3                 | 277 MH/s   | 11.5 MH/s   | Global target-feature              |
+| AsmV2                 | 273 MH/s   | 11.4 MH/s   | sha2-style macros                  |
+| SHA2 Crate (default)  | 272 MH/s   | 11.3 MH/s   | RustCrypto with SHA-NI             |
+| Assembly              | 203 MH/s   | 8.5 MH/s    | Manual inline assembly             |
 
-The SHA2 crate achieves 350x better performance due to:
-
-- Highly optimized code with years of refinement
-- Efficient runtime CPU feature detection
-- Better instruction scheduling and pipelining
+All SHA-NI implementations perform within ~3% of each other. The SHA2 crate is recommended for production use.
 
 **Hasher Configuration:**
 
 ```toml
 [mining]
-hasher = "sha2"    # sha2 (default), simd, asm
+hasher = "sha2"    # sha2 (default), simd, asm, v2, v3
 ```
 
 **CPU Support:**

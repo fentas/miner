@@ -110,19 +110,20 @@ pub enum SimdLevelConfig {
 }
 
 /// Hasher implementation type (for debugging/comparison)
+/// All SHA-NI implementations perform within ~3% of each other (~272-279 MH/s @ 24 threads)
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum HasherConfig {
-    /// SHA2 crate - default (73+ GH/s via Coordinator)
+    /// SHA2 crate - default, recommended (272 MH/s, well-tested)
     #[default]
     Sha2,
-    /// Custom SIMD implementation with SHA-NI
+    /// Custom SIMD intrinsics with #[target_feature] (279 MH/s, fastest)
     Simd,
-    /// Inline assembly implementation (no #[target_feature] boundary)
+    /// Manual inline assembly (203 MH/s, slowest)
     Asm,
-    /// V2 optimized (sha2 crate style with cpufeatures)
+    /// sha2-style macros with cpufeatures (273 MH/s)
     AsmV2,
-    /// V3 optimized - NO #[target_feature] (requires global compilation flags)
+    /// Global target-feature, no #[target_feature] (277 MH/s)
     /// WILL CRASH on CPUs without SHA-NI!
     AsmV3,
 }

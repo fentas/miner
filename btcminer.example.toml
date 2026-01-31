@@ -46,12 +46,16 @@ threads = 0
 # generic = portable implementation (slowest, always works)
 # simd_level = "auto"
 
-# Hasher implementation (sha2, simd, asm)
-# sha2 = SHA2 crate with midstate optimization (default, fastest - 73+ GH/s)
-# simd = Custom SIMD implementation (slower due to inlining constraints)
-# asm  = Inline assembly implementation (avoids #[target_feature] boundary)
-# The sha2 crate achieves better performance because its runtime CPU dispatch
-# allows hot loops to be inlined by the compiler, unlike #[target_feature] functions
+# Hasher implementation: sha2, simd, asm, v2, v3
+# All SHA-NI implementations perform within ~3% of each other (~272-279 MH/s @ 24 threads)
+#
+# sha2 = SHA2 crate (default, recommended - well-tested, 272 MH/s)
+# simd = Custom SIMD intrinsics with #[target_feature] (fastest, 279 MH/s)
+# v3   = Global target-feature, no #[target_feature] (277 MH/s)
+# v2   = sha2-style macros with cpufeatures (273 MH/s)
+# asm  = Manual inline assembly (slowest, 203 MH/s)
+#
+# Recommendation: Use "sha2" for production (well-maintained, competitive performance)
 # hasher = "sha2"
 
 # Enable GPU mining (requires CUDA/OpenCL build)
