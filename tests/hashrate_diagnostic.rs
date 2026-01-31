@@ -241,7 +241,7 @@ fn e2e_05_coordinator_performance() {
     };
 
     for num_threads in thread_counts {
-        let mut coordinator = Coordinator::new(num_threads);
+        let coordinator = Coordinator::new(num_threads);
 
         // Create a test job
         let mut job = Job::new("test-job".to_string());
@@ -326,7 +326,7 @@ fn e2e_06_overhead_analysis() {
 
     // 2. Coordinator (real mining path)
     let coordinator_hashes = {
-        let mut coordinator = Coordinator::new(num_threads);
+        let coordinator = Coordinator::new(num_threads);
 
         let mut job = Job::new("test-job".to_string());
         job.version = 0x20000000;

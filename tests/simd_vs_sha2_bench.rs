@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 use sha2::{Sha256, Digest};
-use btcminer::mining::sha256_simd::{Midstate, H_INIT, state_to_bytes};
+use btcminer::mining::sha256_simd::Midstate;
 
 fn format_hashrate(hashrate: f64) -> String {
     if hashrate >= 1e12 { format!("{:.2} TH/s", hashrate / 1e12) }

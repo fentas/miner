@@ -467,3 +467,43 @@ Use `hasher = "sha2"` in btcminer.toml (which is now the default). This achieves
 - Same performance as the production baseline
 
 The SIMD implementation (241 MH/s) should be deprecated or used only as a fallback for CPUs without good sha2 crate support.
+
+---
+
+## ADDENDUM: Inline Assembly Experiment (2026-01-31)
+
+### Hypothesis
+
+Inline assembly (`asm!` macro) might avoid the `#[target_feature]` inlining boundary since the assembly becomes part of the function body.
+
+### Implementation
+
+Created `HasherType::Assembly` using Rust's `asm!` macro with:
+
+- Full SHA-256 transform in inline assembly (~300 lines)
+- SHA-NI instructions: sha256rnds2, sha256msg1, sha256msg2
+- No `#[target_feature]` on public function
+- Runtime CPU detection with generic fallback
+
+### Benchmark Results (Coordinator, 24 Threads)
+
+| Implementation | Total        | Per Thread  | vs SHA2 |
+| -------------- | ------------ | ----------- | ------- |
+| SHA2 Crate     | 84.00 GH/s   | 3.50 GH/s   | 1.0x    |
+| SIMD           | 240.38 MH/s  | 10.02 MH/s  | 0.003x  |
+| Assembly       | 183.66 MH/s  | 7.65 MH/s   | 0.002x  |
+
+### Why Assembly Didn't Help
+
+The inline assembly implementation did NOT achieve the expected speedup. It's actually slower than the intrinsics-based SIMD:
+
+1. **Runtime detection overhead**: Each hash call checks CPU features
+2. **State packing overhead**: Converting between [u32; 8] and XMM registers
+3. **Missing optimizations**: The sha2 crate has years of optimization
+4. **Different root cause**: The sha2 crate's speed isn't just about avoiding `#[target_feature]` - it has fundamentally better code generation
+
+### Final Conclusion
+
+SHA2 crate remains the best option. The inline assembly experiment confirms that the performance gap is not just about inlining boundaries - the sha2 crate's implementation is superior in multiple ways.
+
+**Final recommendation**: Use `hasher = "sha2"` (default) for best performance.

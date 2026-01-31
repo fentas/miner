@@ -474,22 +474,28 @@ cargo test --test binary_e2e_tests --release
 
 ## Performance
 
-The miner uses optimized SIMD implementations with automatic fallback:
+The miner uses the highly optimized [sha2 crate](https://crates.io/crates/sha2) from RustCrypto with automatic hardware acceleration:
 
-1. **SHA-NI** - Intel SHA Extensions (best performance on modern CPUs)
-2. **AVX512 16-way** - Parallel hashing fallback for AVX512 CPUs without SHA-NI
-3. **AVX2 8-way** - Parallel hashing fallback for older CPUs without SHA-NI
-4. **Generic** - Portable fallback for all platforms
+**Benchmark Results (24 threads, hard target):**
 
-**Benchmark Results (easy target):**
+| Hasher Implementation | Total      | Per Thread | Notes                     |
+| --------------------- | ---------- | ---------- | ------------------------- |
+| SHA2 Crate (default)  | 84 GH/s    | 3.5 GH/s   | RustCrypto with SHA-NI    |
+| SIMD                  | 240 MH/s   | 10 MH/s    | Custom implementation     |
+| Assembly              | 184 MH/s   | 7.7 MH/s   | Inline assembly           |
 
-| Configuration       | Hashrate   | Notes                              |
-|---------------------|------------|------------------------------------|
-| Generic (no SIMD)   | ~1.6 MH/s  | Portable fallback                  |
-| AVX2 8-way          | ~10 MH/s   | Haswell/Broadwell era CPUs         |
-| AVX512 16-way       | ~20 MH/s   | AVX512 CPUs without SHA-NI         |
-| SHA-NI (1 thread)   | ~850 GH/s  | Intel/AMD with SHA extensions      |
-| SHA-NI (24 threads) | ~3.3 TH/s  | Full CPU utilization               |
+The SHA2 crate achieves 350x better performance due to:
+
+- Highly optimized code with years of refinement
+- Efficient runtime CPU feature detection
+- Better instruction scheduling and pipelining
+
+**Hasher Configuration:**
+
+```toml
+[mining]
+hasher = "sha2"    # sha2 (default), simd, asm
+```
 
 **CPU Support:**
 
@@ -503,7 +509,7 @@ Check your CPU's SIMD support:
 cargo test --release profile_simd_info -- --ignored --nocapture
 ```
 
-See [Profiling Documentation](docs/profiling.md) for detailed benchmarking.
+See [docs/perf-results/investigation-log.md](docs/perf-results/investigation-log.md) for detailed performance analysis.
 
 &nbsp;
 
