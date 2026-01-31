@@ -1,5 +1,16 @@
 # BTC Miner Configuration
 # Consistent with SRI (Stratum Reference Implementation) TOML format
+#
+# Quick Navigation:
+#   [pool]      - Pool connection settings
+#   [mining]    - CPU/GPU mining configuration
+#   [bitcoind]  - Bitcoin Core integration
+#   [sv2]       - Stratum V2 settings
+#   [web]       - Web dashboard
+#   [logging]   - Logging and stats
+#   [network]   - Network settings
+#   [idle]      - Idle/screensaver mining mode
+#   [overlay]   - Desktop overlay widget
 
 # ============================================
 # POOL CONNECTION
