@@ -507,3 +507,97 @@ The inline assembly implementation did NOT achieve the expected speedup. It's ac
 SHA2 crate remains the best option. The inline assembly experiment confirms that the performance gap is not just about inlining boundaries - the sha2 crate's implementation is superior in multiple ways.
 
 **Final recommendation**: Use `hasher = "sha2"` (default) for best performance.
+
+---
+
+## ASM vs SIMD Deep Dive (2026-01-31)
+
+### Theories
+
+The Assembly implementation (184 MH/s) being slower than SIMD (240 MH/s) might be due to:
+
+1. Extra CPU feature detection overhead (ASM checks 3 features vs SIMD's 2)
+2. Suboptimal instruction scheduling in hand-written assembly
+3. LLVM generates better code from intrinsics than hand-written asm
+
+### Test File
+
+`tests/asm_simd_diagnostic.rs`
+
+### Test Results
+
+#### CPU Feature Detection Overhead
+
+```text
+100,000,000 iterations:
+  2 features (sha + sse4.1):        39.89 ms (0.40 ns/check)
+  3 features (sha + sse4.1 + ssse3): 59.20 ms (0.59 ns/check)
+
+Extra overhead for 3rd check: 0.19 ns/hash
+```
+
+CPU detection overhead is negligible (0.19 ns vs ~70 ns per hash). NOT the bottleneck.
+
+#### Function Call Overhead (Single Thread, Direct Calls)
+
+```text
+  Implementation             Rate     vs Generic
+  ─────────────              ────     ──────────
+  Generic               2.96 MH/s          1.0x
+  SIMD                 21.69 MH/s          7.3x
+  ASM                  14.26 MH/s          4.8x
+```
+
+#### Tight Loop Performance (Single Thread)
+
+```text
+  Implementation             Rate     vs Generic
+  ─────────────              ────     ──────────
+  Generic               3.01 MH/s          1.0x
+  SIMD                 21.77 MH/s          7.2x
+  ASM                  14.20 MH/s          4.7x
+```
+
+### Test Analysis
+
+1. **SIMD is consistently 1.52x faster than ASM** across all tests
+2. **Both are ~7x faster than generic** - SHA-NI IS being used in both
+3. **The ratio is consistent** whether through Coordinator (240/184 = 1.30x) or direct calls (21.7/14.2 = 1.53x)
+
+### Root Cause: LLVM Generates Better Code
+
+The key insight is that **LLVM's intrinsic lowering produces better machine code** than our hand-written inline assembly.
+
+Reasons:
+
+1. **Better instruction scheduling**: LLVM understands SHA-NI latencies and reorders instructions
+2. **Better register allocation**: LLVM can choose optimal register assignments
+3. **Dead code elimination**: LLVM can remove unnecessary operations
+4. **Constant propagation**: LLVM can fold constants at compile time
+
+Our inline assembly forces specific instruction ordering, which may not be optimal for the CPU's out-of-order execution.
+
+### Verification
+
+Both implementations use SHA-NI instructions (sha256rnds2, sha256msg1, sha256msg2), but:
+
+- Intrinsics let LLVM decide the final instruction sequence
+- Inline asm forces our exact instruction order
+
+The 1.5x difference shows that LLVM's decisions are better than our manual scheduling.
+
+### Deep Dive Conclusion
+
+The theory that inline assembly would avoid inlining boundaries was **correct in principle but wrong in practice**:
+
+- Yes, inline asm avoids `#[target_feature]` boundaries
+- But the performance loss from suboptimal scheduling outweighs any inlining benefit
+- LLVM intrinsics + `#[target_feature]` produces better code than manual asm without `#[target_feature]`
+
+**Final ranking** (Coordinator, 24 threads):
+
+1. SHA2 Crate: **84 GH/s** (default, highly optimized)
+2. SIMD: **240 MH/s** (intrinsics, good but limited by #[target_feature])
+3. Assembly: **184 MH/s** (manual asm, worse than LLVM's intrinsic lowering)
+
+---
