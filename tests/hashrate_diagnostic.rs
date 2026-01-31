@@ -1,18 +1,21 @@
 //! Hashrate Diagnostic Tests (Library-level)
 //!
 //! These tests diagnose hasher performance and identify bottlenecks.
-//! They call library functions directly, which means they CANNOT measure
-//! true production performance due to cross-crate optimization boundaries.
 //!
-//! IMPORTANT:
-//! - These tests show ~23 MH/s (library call overhead)
-//! - Production binary achieves 50+ GH/s (2,200x faster)
-//! - Use `btcminer --benchmark` for true production hashrate
-//! - Use `binary_api_test.rs` for E2E production measurement
+//! IMPORTANT - Cross-compilation-unit optimization:
+//! - Tests that spawn threads DIRECTLY (Tests 2-4, 6 isolated): ~10-100 MH/s
+//!   The threads run in the test binary, which cannot inline library functions.
+//! - Tests using COORDINATOR (Tests 5-6 coordinator): ~73+ GH/s
+//!   Coordinator spawns threads inside the library, allowing full optimization.
+//!
+//! ROOT CAUSE: #[target_feature] functions cannot be inlined across compilation
+//! units. The sha2 crate uses runtime CPU dispatch without #[target_feature] on
+//! its public API, so it benefits from cross-unit inlining when threads are
+//! spawned inside the library.
 //!
 //! These tests are useful for:
+//! - Comparing direct vs Coordinator performance (see root cause above)
 //! - Relative performance comparisons (A vs B)
-//! - Identifying overhead in coordinator vs isolated hasher
 //! - Verifying SIMD detection works correctly
 //!
 //! Run with: cargo test --release --test hashrate_diagnostic -- --nocapture --ignored
