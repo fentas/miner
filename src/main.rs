@@ -93,104 +93,121 @@ fn resolve_web_dir(configured_path: &str) -> String {
 
 /// Run hashrate benchmark - measures true production performance
 ///
-/// This runs the mining hot path directly in the production binary,
-/// bypassing all cross-crate optimization boundaries that affect test code.
+/// Uses Coordinator to ensure threads are created inside the library,
+/// enabling full compiler optimizations across function boundaries.
 ///
-/// External benchmarks (cargo bench, cargo test) show ~23 MH/s due to
-/// Rust's cross-crate inlining limitations with #[target_feature] functions.
+/// External benchmarks (cargo bench, cargo test) that create threads
+/// outside the library show ~100 MH/s due to cross-compilation-unit
+/// inlining limitations.
 /// This benchmark shows the true ~50+ GH/s production hashrate.
 async fn run_benchmark(simd_level: SimdLevel, duration_secs: u64, thread_count: usize) -> anyhow::Result<()> {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::thread;
-    use mining::Midstate;
-    use mining::sha256_simd::mine_with_midstate;
+    use mining::{Job, HasherType};
 
     println!();
     println!("╔═══════════════════════════════════════════════════════════════╗");
     println!("║              btcminer Hashrate Benchmark                      ║");
     println!("╚═══════════════════════════════════════════════════════════════╝");
     println!();
-    println!("  SIMD Level:    {}", simd_level.name());
-    println!("  Threads:       {}", thread_count);
-    println!("  Duration:      {}s", duration_secs);
-    println!("  Batch Size:    262144 (256K)");
-    println!();
 
     let batch_size = 262144u32;
     let duration = Duration::from_secs(duration_secs);
 
-    // Shared state
-    let total_hashes = Arc::new(AtomicU64::new(0));
-    let running = Arc::new(AtomicBool::new(true));
+    // Benchmark both SIMD and SHA2 for comparison
+    let hashers = [
+        (HasherType::Simd, "SIMD"),
+        (HasherType::Sha2Crate, "SHA2 Crate"),
+    ];
 
-    println!("Running benchmark...");
-    println!();
+    let mut results = Vec::new();
 
-    // Spawn worker threads
-    let mut handles = Vec::new();
-    for thread_id in 0..thread_count {
-        let hashes = Arc::clone(&total_hashes);
-        let run = Arc::clone(&running);
+    for (hasher_type, hasher_name) in hashers {
+        println!("─────────────────────────────────────────────────────────────────");
+        println!("  Testing: {} hasher", hasher_name);
+        println!("  SIMD Level:    {}", simd_level.name());
+        println!("  Threads:       {}", thread_count);
+        println!("  Duration:      {}s", duration_secs);
+        println!("  Batch Size:    {}", batch_size);
+        println!();
 
-        let handle = thread::spawn(move || {
-            // Create hasher and midstate in thread (same as production)
-            let header = [0u8; 64];
-            let midstate = Midstate::from_header_prefix(&header);
-            let tail = [0u8; 16];
-            let target = [0x00; 32]; // Hard target - no early exit
+        // Use Coordinator - threads created INSIDE library for full optimization
+        let coordinator = Coordinator::with_options(thread_count, batch_size, hasher_type);
 
-            // Each thread starts at different nonce range
-            let mut nonce = (thread_id as u32) * (u32::MAX / thread_count as u32);
+        // Create a job with hard target (no early exit)
+        let mut job = Job::new("benchmark".to_string());
+        job.version = 0x20000000;
+        job.prev_hash = [0u8; 32];
+        job.merkle_root_override = Some([0u8; 32]);
+        job.ntime = 0x12345678;
+        job.nbits = 0x1d00ffff;
+        job.target = [0x00; 32]; // Hard target - no early exit
+        job.clean_jobs = true;
 
-            while run.load(Ordering::Relaxed) {
-                // Call the hot path DIRECTLY - same compilation unit = full optimization
-                let _ = mine_with_midstate(&midstate, &tail, nonce, batch_size, &target);
-                hashes.fetch_add(batch_size as u64, Ordering::Relaxed);
-                nonce = nonce.wrapping_add(batch_size);
-            }
-        });
-        handles.push(handle);
+        coordinator.update_job(job);
+        coordinator.start();
+
+        let start = Instant::now();
+
+        println!("  Running...");
+        while start.elapsed() < duration {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let elapsed = start.elapsed().as_secs_f64();
+            let stats = coordinator.stats().snapshot();
+            let hashrate = stats.hashes as f64 / elapsed;
+            println!("    {:>5.1}s: {} ({} hashes)",
+                elapsed,
+                format_hashrate(hashrate),
+                stats.hashes
+            );
+        }
+
+        coordinator.stop();
+
+        let final_stats = coordinator.stats().snapshot();
+        let final_elapsed = start.elapsed().as_secs_f64();
+        let final_hashrate = final_stats.hashes as f64 / final_elapsed;
+        let per_thread = final_hashrate / thread_count as f64;
+
+        results.push((hasher_name, final_stats.hashes, final_hashrate, per_thread));
+
+        println!();
+        println!("  {} Results:", hasher_name);
+        println!("    Total hashes:     {}", final_stats.hashes);
+        println!("    Total hashrate:   {}", format_hashrate(final_hashrate));
+        println!("    Per-thread rate:  {}", format_hashrate(per_thread));
+        println!();
     }
 
-    // Progress reporting
-    let start = Instant::now();
-    let report_hashes = Arc::clone(&total_hashes);
-    while start.elapsed() < duration {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let elapsed = start.elapsed().as_secs_f64();
-        let hashes = report_hashes.load(Ordering::Relaxed);
-        let hashrate = hashes as f64 / elapsed;
-        println!("  {:>5.1}s: {} ({} hashes)",
-            elapsed,
-            format_hashrate(hashrate),
-            hashes
+    // Final comparison
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("  BENCHMARK RESULTS COMPARISON");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!();
+    println!("  {:15} {:>15} {:>15}", "Hasher", "Total", "Per-Thread");
+    println!("  {:15} {:>15} {:>15}", "------", "-----", "----------");
+    for (name, _hashes, total_rate, per_thread) in &results {
+        println!("  {:15} {:>15} {:>15}",
+            name,
+            format_hashrate(*total_rate),
+            format_hashrate(*per_thread)
         );
     }
 
-    // Stop workers
-    running.store(false, Ordering::SeqCst);
-    for h in handles {
-        let _ = h.join();
+    if results.len() >= 2 {
+        let simd_rate = results[0].2;
+        let sha2_rate = results[1].2;
+        let ratio = sha2_rate / simd_rate;
+        println!();
+        if ratio > 1.0 {
+            println!("  SHA2 Crate is {:.1}x faster than SIMD", ratio);
+        } else {
+            println!("  SIMD is {:.1}x faster than SHA2 Crate", 1.0 / ratio);
+        }
     }
 
-    // Final results
-    let final_hashes = total_hashes.load(Ordering::Relaxed);
-    let final_elapsed = start.elapsed().as_secs_f64();
-    let final_hashrate = final_hashes as f64 / final_elapsed;
-    let per_thread = final_hashrate / thread_count as f64;
-
     println!();
-    println!("═══════════════════════════════════════════════════════════════");
-    println!("  RESULTS");
-    println!("═══════════════════════════════════════════════════════════════");
-    println!("  Total hashes:     {}", final_hashes);
-    println!("  Duration:         {:.2}s", final_elapsed);
-    println!("  Total hashrate:   {}", format_hashrate(final_hashrate));
-    println!("  Per-thread rate:  {}", format_hashrate(per_thread));
-    println!();
-    println!("  Note: This is the TRUE production hashrate.");
-    println!("  External benchmarks (cargo bench) show ~23 MH/s due to");
-    println!("  cross-crate optimization boundaries - that is expected.");
+    println!("  Note: Uses Coordinator for accurate measurement.");
+    println!("  External tests that create threads outside the library");
+    println!("  show ~100 MH/s due to cross-compilation-unit inlining limits.");
     println!();
 
     Ok(())

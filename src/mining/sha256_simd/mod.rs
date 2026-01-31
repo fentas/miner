@@ -109,6 +109,27 @@ pub fn sha256d_midstate_generic(midstate: &Midstate, tail: &[u8; 16], nonce: u32
     generic::sha256d_midstate(midstate, tail, nonce)
 }
 
+/// Double SHA-256 with midstate using best available SIMD
+///
+/// This function computes a SINGLE hash and is designed to be called from a loop
+/// that lives OUTSIDE of any #[target_feature] function. This allows the loop
+/// to be inlined while still using SIMD acceleration for the actual hashing.
+///
+/// The dispatch overhead is minimal compared to the hash computation time.
+#[inline]
+pub fn sha256d_midstate_simd(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sha") && is_x86_feature_detected!("sse4.1") {
+            // SAFETY: We just checked that SHA-NI is available
+            return unsafe { shani::sha256d_midstate(midstate, tail, nonce) };
+        }
+        // AVX2 and AVX512 don't have single-hash functions optimized for this use case,
+        // fall through to generic which is still reasonably fast
+    }
+    generic::sha256d_midstate(midstate, tail, nonce)
+}
+
 /// Mine with midstate using best available SIMD
 pub fn mine_with_midstate(
     midstate: &Midstate,

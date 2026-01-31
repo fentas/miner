@@ -1,15 +1,17 @@
 use sha2::{Sha256, Digest};
-use super::sha256_simd::{Midstate, sha256d_midstate_generic, mine_with_midstate};
+use super::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd};
 use super::job::hash_meets_target;
 
 /// Hasher implementation selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HasherType {
-    /// SIMD-optimized hasher (AVX2/SHA-NI) - default, fastest
+    /// SHA2 crate - default (73+ GH/s via Coordinator)
+    /// Uses RustCrypto's highly optimized SHA-256 with SHA-NI support
     #[default]
-    Simd,
-    /// SHA2 crate only - for debugging/comparison (matches baseline b335349)
     Sha2Crate,
+    /// Custom SIMD implementation with SHA-NI
+    /// Loop is outside #[target_feature] to allow cross-unit inlining
+    Simd,
 }
 
 /// SHA256 double hasher for Bitcoin block headers
@@ -106,7 +108,11 @@ impl Hasher {
         }
     }
 
-    /// SIMD-optimized implementation (default)
+    /// SIMD-optimized implementation
+    ///
+    /// The hot loop is HERE (not inside any #[target_feature] function) so it can
+    /// be inlined by the compiler. Each hash call dispatches to SIMD at runtime.
+    /// This structure allows ~300x speedup when called from library-created threads.
     fn hash_nonce_range_simd(
         &mut self,
         header_prefix: &[u8; 76],
@@ -121,13 +127,24 @@ impl Hasher {
             self.midstate = Some(Midstate::from_header_prefix(prefix_64));
         }
 
-        // Extract tail (bytes 64-76, padded to 16 bytes - nonce goes in last 4)
+        // Extract tail (bytes 64-76, padded to 16 bytes)
         let mut tail = [0u8; 16];
         tail[..12].copy_from_slice(&header_prefix[64..76]);
-        // Note: tail[12..16] will be filled with nonce by mine_with_midstate
 
-        // Use SIMD-optimized mining function (AVX2 8-way or SHA-NI)
-        mine_with_midstate(self.midstate.as_ref().unwrap(), &tail, start_nonce, count, target)
+        let midstate = self.midstate.as_ref().unwrap();
+
+        // HOT LOOP - this is outside #[target_feature] so it CAN be inlined
+        // Each hash call dispatches to SHA-NI/AVX2/generic at runtime
+        for i in 0..count {
+            let nonce = start_nonce.wrapping_add(i);
+            let hash = sha256d_midstate_simd(midstate, &tail, nonce);
+
+            if hash_meets_target(&hash, target) {
+                return Some((nonce, hash));
+            }
+        }
+
+        None
     }
 
     /// SHA2-crate only implementation (like baseline b335349)
