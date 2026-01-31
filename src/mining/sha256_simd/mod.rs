@@ -13,6 +13,8 @@ mod shani;
 mod avx2;
 #[cfg(target_arch = "x86_64")]
 mod avx512;
+#[cfg(target_arch = "x86_64")]
+mod asm;
 
 use super::job::hash_meets_target;
 
@@ -128,6 +130,23 @@ pub fn sha256d_midstate_simd(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -
         // fall through to generic which is still reasonably fast
     }
     generic::sha256d_midstate(midstate, tail, nonce)
+}
+
+/// Double SHA-256 with midstate using inline assembly (no #[target_feature])
+///
+/// This implementation uses the `asm!` macro directly, avoiding the
+/// #[target_feature] inlining boundary that limits SIMD performance.
+/// The mining loop can be fully inlined by the compiler when using this function.
+#[inline]
+pub fn sha256d_midstate_asm(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    #[cfg(target_arch = "x86_64")]
+    {
+        return asm::sha256d_midstate_asm(midstate, tail, nonce);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        generic::sha256d_midstate(midstate, tail, nonce)
+    }
 }
 
 /// Mine with midstate using best available SIMD

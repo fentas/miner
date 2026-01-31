@@ -1,5 +1,5 @@
 use sha2::{Sha256, Digest};
-use super::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd};
+use super::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm};
 use super::job::hash_meets_target;
 
 /// Hasher implementation selection
@@ -12,6 +12,9 @@ pub enum HasherType {
     /// Custom SIMD implementation with SHA-NI
     /// Loop is outside #[target_feature] to allow cross-unit inlining
     Simd,
+    /// Inline assembly implementation (no #[target_feature] boundary)
+    /// Uses asm! macro to avoid inlining restrictions for maximum performance
+    Assembly,
 }
 
 /// SHA256 double hasher for Bitcoin block headers
@@ -105,6 +108,7 @@ impl Hasher {
         match self.hasher_type {
             HasherType::Simd => self.hash_nonce_range_simd(header_prefix, start_nonce, count, target),
             HasherType::Sha2Crate => self.hash_nonce_range_sha2(header_prefix, start_nonce, count, target),
+            HasherType::Assembly => self.hash_nonce_range_asm(header_prefix, start_nonce, count, target),
         }
     }
 
@@ -164,6 +168,44 @@ impl Hasher {
         for nonce in start_nonce..start_nonce.saturating_add(count) {
             header[76..80].copy_from_slice(&nonce.to_le_bytes());
             let hash = self.hash_header(&header);
+
+            if hash_meets_target(&hash, target) {
+                return Some((nonce, hash));
+            }
+        }
+
+        None
+    }
+
+    /// Inline assembly implementation
+    ///
+    /// Uses `asm!` macro to avoid the #[target_feature] inlining boundary.
+    /// The hot loop is HERE and can be fully inlined by the compiler.
+    /// Configure in btcminer.toml: hasher = "asm"
+    fn hash_nonce_range_asm(
+        &mut self,
+        header_prefix: &[u8; 76],
+        start_nonce: u32,
+        count: u32,
+        target: &[u8; 32],
+    ) -> Option<(u32, [u8; 32])> {
+        // Check if we need to recompute midstate (first 64 bytes changed)
+        let prefix_64: &[u8; 64] = header_prefix[..64].try_into().unwrap();
+        if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
+            self.midstate_header_prefix = *prefix_64;
+            self.midstate = Some(Midstate::from_header_prefix(prefix_64));
+        }
+
+        // Extract tail (bytes 64-76, padded to 16 bytes)
+        let mut tail = [0u8; 16];
+        tail[..12].copy_from_slice(&header_prefix[64..76]);
+
+        let midstate = self.midstate.as_ref().unwrap();
+
+        // HOT LOOP - uses inline assembly, no #[target_feature] boundary
+        for i in 0..count {
+            let nonce = start_nonce.wrapping_add(i);
+            let hash = sha256d_midstate_asm(midstate, &tail, nonce);
 
             if hash_meets_target(&hash, target) {
                 return Some((nonce, hash));

@@ -46,9 +46,10 @@ threads = 0
 # generic = portable implementation (slowest, always works)
 # simd_level = "auto"
 
-# Hasher implementation (sha2, simd)
+# Hasher implementation (sha2, simd, asm)
 # sha2 = SHA2 crate with midstate optimization (default, fastest - 73+ GH/s)
 # simd = Custom SIMD implementation (slower due to inlining constraints)
+# asm  = Inline assembly implementation (avoids #[target_feature] boundary)
 # The sha2 crate achieves better performance because its runtime CPU dispatch
 # allows hot loops to be inlined by the compiler, unlike #[target_feature] functions
 # hasher = "sha2"
