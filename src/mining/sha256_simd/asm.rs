@@ -374,16 +374,16 @@ pub fn sha256d_midstate_asm(midstate: &Midstate, tail: &[u8; 16], nonce: u32) ->
         return super::generic::sha256d_midstate(midstate, tail, nonce);
     }
 
-    // Build the last block (64 bytes):
-    // [0..16]:   tail (16 bytes from header)
-    // [16..20]:  nonce (4 bytes, little-endian)
-    // [20]:      0x80 (SHA-256 padding: single 1-bit)
-    // [21..62]:  0x00 (padding zeros)
+    // Build the last block for an 80-byte message (64 bytes):
+    // [0..12]:   tail[0..12] (12 bytes: header bytes 64-75)
+    // [12..16]:  nonce (4 bytes, little-endian: header bytes 76-79)
+    // [16]:      0x80 (SHA-256 padding: single 1-bit at byte 80)
+    // [17..62]:  0x00 (padding zeros)
     // [62..64]:  0x02 0x80 (message length in bits: 80*8 = 640 = 0x0280 big-endian)
     let mut block = [0u8; 64];
-    block[..16].copy_from_slice(tail);
-    block[16..20].copy_from_slice(&nonce.to_le_bytes());
-    block[20] = 0x80;
+    block[..12].copy_from_slice(&tail[..12]);
+    block[12..16].copy_from_slice(&nonce.to_le_bytes());
+    block[16] = 0x80;
     block[62] = 0x02;
     block[63] = 0x80;
 

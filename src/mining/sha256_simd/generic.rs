@@ -88,13 +88,21 @@ pub fn sha256d(data: &[u8]) -> [u8; 32] {
 }
 
 /// SHA-256 with midstate (for mining - only last 16 bytes change)
+///
+/// The tail parameter contains bytes 64-75 of the header (12 bytes, padded to 16).
+/// The nonce is placed at bytes 76-79 (block[12..16]) to match an 80-byte header.
 pub fn sha256d_midstate(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
-    // Build the last block (16 bytes of data + nonce + padding)
+    // Build the last block for an 80-byte message:
+    // - bytes 64-75: tail[0..12] (12 bytes of header data)
+    // - bytes 76-79: nonce (4 bytes)
+    // - byte 80: 0x80 padding marker
+    // - bytes 81-125: zeros
+    // - bytes 126-127: length in bits (640 = 0x0280)
     let mut block = [0u8; 64];
-    block[..16].copy_from_slice(tail);
-    block[16..20].copy_from_slice(&nonce.to_le_bytes());
+    block[..12].copy_from_slice(&tail[..12]);
+    block[12..16].copy_from_slice(&nonce.to_le_bytes());
     // Padding for 80-byte message
-    block[20] = 0x80;
+    block[16] = 0x80;
     // Length in bits (80 * 8 = 640 = 0x280) at end
     block[62] = 0x02;
     block[63] = 0x80;

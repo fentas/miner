@@ -163,11 +163,15 @@ unsafe fn store_state(abef: __m128i, cdgh: __m128i, state: &mut [u32; 8]) {
 unsafe fn sha256d_fused(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
     // ========== FIRST HASH (midstate + tail + nonce + padding) ==========
 
-    // Build block 1
+    // Build block 1 for an 80-byte message:
+    // [0..12]:   tail[0..12] (header bytes 64-75)
+    // [12..16]:  nonce (header bytes 76-79)
+    // [16]:      0x80 padding (byte 80)
+    // [62..64]:  0x0280 length (640 bits = 80 bytes)
     let mut block1 = [0u8; 64];
-    block1[..16].copy_from_slice(tail);
-    block1[16..20].copy_from_slice(&nonce.to_le_bytes());
-    block1[20] = 0x80;
+    block1[..12].copy_from_slice(&tail[..12]);
+    block1[12..16].copy_from_slice(&nonce.to_le_bytes());
+    block1[16] = 0x80;
     block1[62] = 0x02;
     block1[63] = 0x80;
 

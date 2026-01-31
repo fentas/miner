@@ -239,10 +239,14 @@ pub unsafe fn mine(
             let nonce = nonce_start.wrapping_add(i).wrapping_add(j as u32);
             nonces[j] = nonce;
 
-            // Build the last block (16 bytes of data + nonce + padding)
-            blocks[j][..16].copy_from_slice(tail);
-            blocks[j][16..20].copy_from_slice(&nonce.to_le_bytes());
-            blocks[j][20] = 0x80;
+            // Build the last block for an 80-byte message:
+            // [0..12]:   tail[0..12] (header bytes 64-75)
+            // [12..16]:  nonce (header bytes 76-79)
+            // [16]:      0x80 padding (byte 80)
+            // [62..64]:  0x0280 length (640 bits = 80 bytes)
+            blocks[j][..12].copy_from_slice(&tail[..12]);
+            blocks[j][12..16].copy_from_slice(&nonce.to_le_bytes());
+            blocks[j][16] = 0x80;
             blocks[j][62] = 0x02;
             blocks[j][63] = 0x80;
         }

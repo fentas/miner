@@ -660,11 +660,11 @@ mod tests {
         for nonce in [0u32, 1, 7, 8, 15, 16, 100, 1000] {
             let generic_hash = sha256d_midstate_generic(&midstate, &tail, nonce);
 
-            // Build block the same way mine_avx2 does
+            // Build block for an 80-byte message (same as mine_avx2)
             let mut block = [0u8; 64];
-            block[..16].copy_from_slice(&tail);
-            block[16..20].copy_from_slice(&nonce.to_le_bytes());
-            block[20] = 0x80;
+            block[..12].copy_from_slice(&tail[..12]);
+            block[12..16].copy_from_slice(&nonce.to_le_bytes());
+            block[16] = 0x80;
             block[62] = 0x02;
             block[63] = 0x80;
 
@@ -780,11 +780,11 @@ mod tests {
         for nonce in [0u32, 1, 15, 16, 31, 32, 100, 1000] {
             let generic_hash = sha256d_midstate_generic(&midstate, &tail, nonce);
 
-            // Build block the same way mine_avx512 does
+            // Build block for an 80-byte message (same as mine_avx512)
             let mut block = [0u8; 64];
-            block[..16].copy_from_slice(&tail);
-            block[16..20].copy_from_slice(&nonce.to_le_bytes());
-            block[20] = 0x80;
+            block[..12].copy_from_slice(&tail[..12]);
+            block[12..16].copy_from_slice(&nonce.to_le_bytes());
+            block[16] = 0x80;
             block[62] = 0x02;
             block[63] = 0x80;
 

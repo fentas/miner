@@ -174,7 +174,11 @@ impl Hasher {
         let mut header = [0u8; 80];
         header[..76].copy_from_slice(header_prefix);
 
-        for nonce in start_nonce..start_nonce.saturating_add(count) {
+        // Use wrapping_add to ensure exactly `count` iterations, matching SIMD path
+        // The previous saturating_add would run fewer iterations when nonce + count > u32::MAX,
+        // causing hash count inflation since we always report batch_size hashes
+        for i in 0..count {
+            let nonce = start_nonce.wrapping_add(i);
             header[76..80].copy_from_slice(&nonce.to_le_bytes());
             let hash = self.hash_header(&header);
 

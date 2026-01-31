@@ -256,12 +256,15 @@ pub unsafe fn transform(state: &mut [u32; 8], block: &[u8; 64]) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sha", enable = "sse4.1", enable = "ssse3")]
 pub unsafe fn sha256d_midstate(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
-    // Build the last block (16 bytes of data + nonce + padding)
+    // Build the last block for an 80-byte message:
+    // - bytes 64-75: tail[0..12] (12 bytes of header data)
+    // - bytes 76-79: nonce (4 bytes)
+    // - byte 80: 0x80 padding marker
     let mut block = [0u8; 64];
-    block[..16].copy_from_slice(tail);
-    block[16..20].copy_from_slice(&nonce.to_le_bytes());
+    block[..12].copy_from_slice(&tail[..12]);
+    block[12..16].copy_from_slice(&nonce.to_le_bytes());
     // Padding for 80-byte message
-    block[20] = 0x80;
+    block[16] = 0x80;
     // Length in bits (80 * 8 = 640 = 0x280) at end
     block[62] = 0x02;
     block[63] = 0x80;
@@ -540,17 +543,17 @@ unsafe fn sha256d_midstate_2way(
     nonce0: u32,
     nonce1: u32,
 ) -> ([u8; 32], [u8; 32]) {
-    // Build blocks for both nonces
+    // Build blocks for both nonces (80-byte message layout)
     let mut block_a = [0u8; 64];
     let mut block_b = [0u8; 64];
 
-    block_a[..16].copy_from_slice(tail);
-    block_b[..16].copy_from_slice(tail);
-    block_a[16..20].copy_from_slice(&nonce0.to_le_bytes());
-    block_b[16..20].copy_from_slice(&nonce1.to_le_bytes());
+    block_a[..12].copy_from_slice(&tail[..12]);
+    block_b[..12].copy_from_slice(&tail[..12]);
+    block_a[12..16].copy_from_slice(&nonce0.to_le_bytes());
+    block_b[12..16].copy_from_slice(&nonce1.to_le_bytes());
     // Padding for 80-byte message
-    block_a[20] = 0x80;
-    block_b[20] = 0x80;
+    block_a[16] = 0x80;
+    block_b[16] = 0x80;
     block_a[62] = 0x02;
     block_b[62] = 0x02;
     block_a[63] = 0x80;
