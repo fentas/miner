@@ -974,7 +974,9 @@ async fn run_solo_mode_with_tui(
                             }
                         }
                     } else {
-                        tui_state.log_error("Failed to build block data");
+                        // This should never happen - it means coinbase_tx or transactions missing
+                        coordinator.stats().reject_share();
+                        tui_state.log_error("Failed to build block data - missing coinbase or transactions");
                     }
                 }
             }
@@ -1343,8 +1345,9 @@ async fn run_pool_mode_with_tui(
 
         // Check for found shares
         while let Some(share) = coordinator.try_recv_share() {
-            let extranonce2 = hex::encode([0u8; 4]);
-            let ntime = hex::encode(share.nonce.to_be_bytes());
+            // Use the extranonce2 and ntime from the share (set by worker)
+            let extranonce2 = hex::encode(&share.extranonce2);
+            let ntime = hex::encode(share.ntime.to_be_bytes());
             let nonce = hex::encode(share.nonce.to_le_bytes());
 
             match client.submit(
@@ -1367,6 +1370,8 @@ async fn run_pool_mode_with_tui(
                     tui_state.log_error("Share rejected");
                 }
                 Err(e) => {
+                    // Count as rejected for accurate statistics
+                    coordinator.stats().reject_share();
                     tui_state.log_error(format!("Submit error: {}", e));
                 }
             }
@@ -1966,7 +1971,9 @@ async fn run_solo_mode(cfg: Config) -> anyhow::Result<()> {
                             }
                         }
                     } else {
-                        error!("Failed to build block data");
+                        // This should never happen - it means coinbase_tx or transactions missing
+                        coordinator.stats().reject_share();
+                        error!("Failed to build block data - missing coinbase or transactions");
                     }
                 }
             }
@@ -2201,8 +2208,9 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
 
         // Check for found shares
         while let Some(share) = coordinator.try_recv_share() {
-            let extranonce2 = hex::encode([0u8; 4]);
-            let ntime = hex::encode(share.nonce.to_be_bytes());
+            // Use the extranonce2 and ntime from the share (set by worker)
+            let extranonce2 = hex::encode(&share.extranonce2);
+            let ntime = hex::encode(share.ntime.to_be_bytes());
             let nonce = hex::encode(share.nonce.to_le_bytes());
 
             match client.submit(
@@ -2224,6 +2232,8 @@ async fn run_pool_mode(cfg: Config) -> anyhow::Result<()> {
                     print_share_rejected();
                 }
                 Err(e) => {
+                    // Count as rejected for accurate statistics
+                    coordinator.stats().reject_share();
                     error!("Submit error: {}", e);
                 }
             }

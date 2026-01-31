@@ -179,6 +179,8 @@ impl Worker {
                         nonce: found_nonce,
                         hash,
                         worker_id: self.id,
+                        ntime: job.ntime,
+                        extranonce2: extranonce2.clone(),
                     };
 
                     // Check if it's a block (meets network target)
@@ -186,8 +188,10 @@ impl Worker {
                         self.stats.found_block();
                     }
 
-                    // Send share (non-blocking)
-                    let _ = self.share_tx.try_send(share);
+                    // Send share (non-blocking, log warning if channel full)
+                    if self.share_tx.try_send(share).is_err() {
+                        tracing::warn!("Share channel full, share may be lost!");
+                    }
                 }
 
                 // Advance nonce

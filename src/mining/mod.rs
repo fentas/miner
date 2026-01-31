@@ -168,6 +168,10 @@ pub struct Share {
     pub nonce: u32,
     pub hash: [u8; 32],
     pub worker_id: usize,
+    /// Block timestamp from the job (for pool submission)
+    pub ntime: u32,
+    /// Extranonce2 used by the worker (for pool submission)
+    pub extranonce2: Vec<u8>,
 }
 
 impl Coordinator {
@@ -402,12 +406,16 @@ mod tests {
             nonce: 0xDEADBEEF,
             hash: [0xAB; 32],
             worker_id: 7,
+            ntime: 0x12345678,
+            extranonce2: vec![0x01, 0x02, 0x03, 0x04],
         };
 
         assert_eq!(share.job_id, "test_job_123");
         assert_eq!(share.nonce, 0xDEADBEEF);
         assert_eq!(share.hash, [0xAB; 32]);
         assert_eq!(share.worker_id, 7);
+        assert_eq!(share.ntime, 0x12345678);
+        assert_eq!(share.extranonce2, vec![0x01, 0x02, 0x03, 0x04]);
     }
 
     #[test]
@@ -417,11 +425,15 @@ mod tests {
             nonce: 42,
             hash: [0; 32],
             worker_id: 0,
+            ntime: 1000,
+            extranonce2: vec![0xAA, 0xBB],
         };
 
         let cloned = share.clone();
         assert_eq!(cloned.job_id, share.job_id);
         assert_eq!(cloned.nonce, share.nonce);
+        assert_eq!(cloned.ntime, share.ntime);
+        assert_eq!(cloned.extranonce2, share.extranonce2);
     }
 
     #[test]
