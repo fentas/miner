@@ -186,6 +186,18 @@ assumeutxo = true      # Fast sync in minutes instead of days
 
 > **Warning:** Solo mining is extremely unlikely to find a block. This is for educational/lottery purposes.
 
+### Solo Mining Odds
+
+How does solo mining compare to playing the lottery?
+
+| Metric | German Lotto (6/49) | Solo Mining @ 135 MH/s |
+|--------|---------------------|------------------------|
+| Attempts/year | 1,248 (2x/week, 12 fields) | 4.26 × 10¹⁵ hashes |
+| Odds per year | ~1 in 11,200 | ~1 in 143,000,000 |
+| Jackpot | ~€10M | ~€290K (3.125 BTC) |
+
+**The math:** Bitcoin mining requires finding a hash with ~76 leading zero bits. That's 1 in 6×10²³ combinations - about **43 quadrillion times** harder than lotto. Even doing 135 million attempts per second, you'd need to mine for **~10 years** to match the odds of a single lotto ticket!
+
 &nbsp;
 
 ## GPU Mining
