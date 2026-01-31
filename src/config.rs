@@ -122,6 +122,9 @@ pub enum HasherConfig {
     Asm,
     /// V2 optimized (sha2 crate style with cpufeatures)
     AsmV2,
+    /// V3 optimized - NO #[target_feature] (requires global compilation flags)
+    /// WILL CRASH on CPUs without SHA-NI!
+    AsmV3,
 }
 
 impl HasherConfig {
@@ -132,6 +135,7 @@ impl HasherConfig {
             HasherConfig::Simd => crate::mining::HasherType::Simd,
             HasherConfig::Asm => crate::mining::HasherType::Assembly,
             HasherConfig::AsmV2 => crate::mining::HasherType::AsmV2,
+            HasherConfig::AsmV3 => crate::mining::HasherType::AsmV3,
         }
     }
 }

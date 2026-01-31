@@ -14,7 +14,7 @@
 
 use std::time::{Duration, Instant};
 use btcminer::mining::{Coordinator, Job, Hasher, HasherType};
-use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2};
+use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2, sha256d_midstate_v3};
 
 fn format_hashrate(hashrate: f64) -> String {
     if hashrate >= 1e12 { format!("{:.2} TH/s", hashrate / 1e12) }
@@ -96,6 +96,20 @@ fn bench_direct_calls() {
     }
     let rate_v2 = count as f64 / start.elapsed().as_secs_f64();
 
+    // Test 5: AsmV3 (no target_feature at all - requires global compilation flags)
+    println!("Testing AsmV3 (no target_feature)...");
+    count = 0;
+    nonce = 0;
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        for _ in 0..10000 {
+            let _ = sha256d_midstate_v3(&midstate, &tail, nonce);
+            nonce = nonce.wrapping_add(1);
+            count += 1;
+        }
+    }
+    let rate_v3 = count as f64 / start.elapsed().as_secs_f64();
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("  RESULTS (Direct Calls - Single Thread)");
@@ -107,6 +121,7 @@ fn bench_direct_calls() {
     println!("  {:25} {:>15} {:>10}", "SIMD", format_hashrate(rate_simd), format!("{:.1}x", rate_simd / rate_generic));
     println!("  {:25} {:>15} {:>10}", "Assembly", format_hashrate(rate_asm), format!("{:.1}x", rate_asm / rate_generic));
     println!("  {:25} {:>15} {:>10}", "AsmV2", format_hashrate(rate_v2), format!("{:.1}x", rate_v2 / rate_generic));
+    println!("  {:25} {:>15} {:>10}", "AsmV3 (no target_feature)", format_hashrate(rate_v3), format!("{:.1}x", rate_v3 / rate_generic));
     println!();
 }
 
@@ -130,6 +145,7 @@ fn bench_hasher_class() {
         (HasherType::Simd, "SIMD"),
         (HasherType::Assembly, "Assembly"),
         (HasherType::AsmV2, "AsmV2"),
+        (HasherType::AsmV3, "AsmV3 (no target_feature)"),
     ];
 
     let mut results = Vec::new();
@@ -185,6 +201,7 @@ fn bench_coordinator() {
         (HasherType::Simd, "SIMD"),
         (HasherType::Assembly, "Assembly"),
         (HasherType::AsmV2, "AsmV2"),
+        (HasherType::AsmV3, "AsmV3 (no target_feature)"),
     ];
 
     let mut results = Vec::new();
@@ -249,17 +266,33 @@ fn bench_coordinator() {
     let sha2_rate = results[0].1;
     let simd_rate = results[1].1;
     let asm_rate = results[2].1;
+    let v2_rate = results[3].1;
+    let v3_rate = results[4].1;
 
-    if sha2_rate > simd_rate && sha2_rate > asm_rate {
-        println!("  ✓ SHA2 Crate is fastest ({:.1}x vs SIMD, {:.1}x vs ASM)",
-            sha2_rate / simd_rate, sha2_rate / asm_rate);
-        println!("    This confirms the sha2 crate benefits from cross-unit inlining.");
-    } else if asm_rate > sha2_rate && asm_rate > simd_rate {
-        println!("  ✓ Assembly is fastest ({:.1}x vs SHA2, {:.1}x vs SIMD)",
-            asm_rate / sha2_rate, asm_rate / simd_rate);
-        println!("    Inline assembly successfully avoids #[target_feature] boundary!");
-    } else if simd_rate > sha2_rate {
-        println!("  ! SIMD is faster than SHA2 Crate - unexpected result");
+    // Find fastest implementation
+    let rates = [
+        ("SHA2 Crate", sha2_rate),
+        ("SIMD", simd_rate),
+        ("Assembly", asm_rate),
+        ("AsmV2", v2_rate),
+        ("AsmV3", v3_rate),
+    ];
+    let (fastest_name, fastest_rate) = rates.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap();
+
+    println!("  ✓ {} is fastest!", fastest_name);
+    println!();
+    for (name, rate) in &rates {
+        if name != fastest_name {
+            println!("    {} is {:.1}x vs {}", fastest_name, fastest_rate / rate, name);
+        }
+    }
+    println!();
+
+    if v3_rate > sha2_rate * 0.9 {
+        println!("  SUCCESS: AsmV3 matches SHA2 Crate performance!");
+        println!("  The global target-feature compilation allows full LLVM inlining.");
+    } else {
+        println!("  AsmV3 is {:.1}x slower than SHA2 Crate", sha2_rate / v3_rate);
     }
     println!();
 }

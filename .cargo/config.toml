@@ -1,0 +1,10 @@
+# Enable SHA-NI and required SSE extensions globally
+# This allows removing #[target_feature] from functions, enabling full LLVM inlining
+
+[build]
+# Note: This makes the binary require SHA-NI support to run
+# For production, use runtime detection instead
+# rustflags = ["-C", "target-feature=+sha,+sse4.1,+ssse3,+sse2"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+sha,+sse4.1,+ssse3,+sse2"]

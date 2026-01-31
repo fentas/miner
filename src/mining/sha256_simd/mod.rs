@@ -17,6 +17,8 @@ mod avx512;
 mod asm;
 #[cfg(target_arch = "x86_64")]
 mod asm_v2;
+#[cfg(target_arch = "x86_64")]
+mod asm_v3;
 
 use super::job::hash_meets_target;
 
@@ -162,6 +164,23 @@ pub fn sha256d_midstate_v2(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> 
     #[cfg(target_arch = "x86_64")]
     {
         return asm_v2::sha256d_midstate_v2(midstate, tail, nonce);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        generic::sha256d_midstate(midstate, tail, nonce)
+    }
+}
+
+/// Double SHA-256 with midstate - v3 (NO target_feature, requires global compilation flags)
+///
+/// This version has NO #[target_feature] on ANY function, allowing full LLVM inlining.
+/// IMPORTANT: Only use when compiled with -C target-feature=+sha,+sse4.1,+ssse3,+sse2
+/// Will crash on CPUs without SHA-NI!
+#[inline(always)]
+pub fn sha256d_midstate_v3(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    #[cfg(target_arch = "x86_64")]
+    {
+        return asm_v3::sha256d_midstate_v3(midstate, tail, nonce);
     }
     #[cfg(not(target_arch = "x86_64"))]
     {

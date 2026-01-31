@@ -1,5 +1,5 @@
 use sha2::{Sha256, Digest};
-use super::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2};
+use super::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2, sha256d_midstate_v3};
 use super::job::hash_meets_target;
 
 /// Hasher implementation selection
@@ -18,6 +18,10 @@ pub enum HasherType {
     /// V2 optimized implementation (sha2 crate style)
     /// Uses cpufeatures for one-time CPU detection, clean macro structure
     AsmV2,
+    /// V3 optimized - NO #[target_feature] at all (requires global compilation flags)
+    /// Uses -C target-feature=+sha,+sse4.1,+ssse3,+sse2 for full LLVM inlining
+    /// WILL CRASH on CPUs without SHA-NI!
+    AsmV3,
 }
 
 /// SHA256 double hasher for Bitcoin block headers
@@ -113,6 +117,7 @@ impl Hasher {
             HasherType::Sha2Crate => self.hash_nonce_range_sha2(header_prefix, start_nonce, count, target),
             HasherType::Assembly => self.hash_nonce_range_asm(header_prefix, start_nonce, count, target),
             HasherType::AsmV2 => self.hash_nonce_range_v2(header_prefix, start_nonce, count, target),
+            HasherType::AsmV3 => self.hash_nonce_range_v3(header_prefix, start_nonce, count, target),
         }
     }
 
@@ -247,6 +252,45 @@ impl Hasher {
         for i in 0..count {
             let nonce = start_nonce.wrapping_add(i);
             let hash = sha256d_midstate_v2(midstate, &tail, nonce);
+
+            if hash_meets_target(&hash, target) {
+                return Some((nonce, hash));
+            }
+        }
+
+        None
+    }
+
+    /// V3 optimized implementation - NO #[target_feature] anywhere
+    ///
+    /// This version requires global compilation with -C target-feature=+sha,+sse4.1,+ssse3,+sse2
+    /// It will CRASH on CPUs without SHA-NI!
+    /// Configure in btcminer.toml: hasher = "asm_v3"
+    #[inline(always)]
+    fn hash_nonce_range_v3(
+        &mut self,
+        header_prefix: &[u8; 76],
+        start_nonce: u32,
+        count: u32,
+        target: &[u8; 32],
+    ) -> Option<(u32, [u8; 32])> {
+        // Check if we need to recompute midstate (first 64 bytes changed)
+        let prefix_64: &[u8; 64] = header_prefix[..64].try_into().unwrap();
+        if self.midstate.is_none() || self.midstate_header_prefix != *prefix_64 {
+            self.midstate_header_prefix = *prefix_64;
+            self.midstate = Some(Midstate::from_header_prefix(prefix_64));
+        }
+
+        // Extract tail (bytes 64-76, padded to 16 bytes)
+        let mut tail = [0u8; 16];
+        tail[..12].copy_from_slice(&header_prefix[64..76]);
+
+        let midstate = self.midstate.as_ref().unwrap();
+
+        // HOT LOOP - NO #[target_feature] barrier, full LLVM inlining possible
+        for i in 0..count {
+            let nonce = start_nonce.wrapping_add(i);
+            let hash = sha256d_midstate_v3(midstate, &tail, nonce);
 
             if hash_meets_target(&hash, target) {
                 return Some((nonce, hash));

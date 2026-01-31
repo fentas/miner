@@ -668,3 +668,118 @@ Our implementations (SIMD, Assembly, AsmV2) cannot match this because the `#[tar
 4. Assembly: **198 MH/s** (manual asm)
 
 ---
+
+## AsmV3: Global Target-Feature Compilation (2026-01-31)
+
+### AsmV3 Hypothesis
+
+If we compile with global `-C target-feature=+sha,+sse4.1,+ssse3,+sse2`, we can remove ALL `#[target_feature]` attributes. This should allow full LLVM inlining.
+
+### AsmV3 Implementation
+
+1. Created `.cargo/config.toml`:
+```toml
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+sha,+sse4.1,+ssse3,+sse2"]
+```
+
+2. Created `src/mining/sha256_simd/asm_v3.rs`:
+   - **No `#[target_feature]` on ANY function**
+   - Uses `#[inline(always)]` on all functions
+   - Same algorithm as AsmV2
+
+### AsmV3 Benchmark Results
+
+#### Direct Calls (Single Thread with black_box)
+
+| Implementation | Hashrate | Notes |
+|----------------|----------|-------|
+| AsmV3 | 22.92 MH/s | Correct result |
+| SIMD | 22.80 MH/s | Correct result |
+| SHA2 Crate | 21.36 MH/s | Does MORE work (no midstate) |
+| Generic | 2.94 MH/s | Baseline |
+
+**Key finding**: Single-threaded, AsmV3 and SIMD are roughly equal (~23 MH/s). SHA2 crate doing full hashes (no midstate) is slightly slower at 21 MH/s.
+
+#### Single-Thread Coordinator Benchmark
+
+| Implementation | Hashrate |
+|----------------|----------|
+| SHA2 Crate | 21.91 MH/s |
+| AsmV3 | 22.65 MH/s |
+
+**AsmV3 is actually 3% FASTER than SHA2 crate per hash!**
+
+### Critical Bug Discovered: Hash Counting Error
+
+Running multi-threaded Coordinator benchmark revealed a critical bug:
+
+| Threads | SHA2 Crate Hashrate | Per Thread |
+|---------|---------------------|------------|
+| 1 | 22.02 MH/s | 22.02 MH/s |
+| 4 | 88.24 MH/s | 22.06 MH/s |
+| 8 | 162.95 MH/s | 20.37 MH/s |
+| 16 | 237.18 MH/s | 14.82 MH/s |
+| **17** | **217,770 MH/s** | **12,810 MH/s** |
+| 20 | 213,727 MH/s | 10,687 MH/s |
+| 24 | 193,413 MH/s | 8,059 MH/s |
+
+**The hash count explodes at exactly 17 threads!**
+
+- 16 threads: 1.2 billion hashes in 5 seconds (reasonable)
+- 17 threads: 1.1 TRILLION hashes in 5 seconds (impossible!)
+
+This is a bug in the benchmark or stats tracking, NOT a real performance difference.
+
+The earlier "188 GH/s" for SHA2 crate was caused by this bug - the hash counting is corrupted when using 17+ threads.
+
+### Bug Analysis
+
+The anomaly boundary is between 16 and 17 threads:
+- 16 = 2^4 (power of 2) → works correctly
+- 17 → hash count explodes by ~1000x
+
+Possible causes:
+1. Buffer overflow in some fixed-size array assumed max 16 threads
+2. Race condition that only triggers with >16 threads
+3. Memory corruption in Stats struct
+
+**Note**: The single-thread benchmark shows the TRUE performance:
+- SHA2 Crate: ~22 MH/s per thread
+- AsmV3: ~23 MH/s per thread
+
+Both are essentially equal! The "85 GH/s" production performance was likely due to this counting bug.
+
+### AsmV3 Conclusion
+
+1. Global target-feature compilation works - AsmV3 compiles without `#[target_feature]`
+2. AsmV3 achieves ~23 MH/s per thread, matching SHA2 crate
+3. **CRITICAL**: The multi-threaded benchmark has a bug that inflates hash counts at 17+ threads
+4. Need to investigate the hash counting bug to get accurate multi-threaded results
+
+---
+
+## Files Created/Modified in This Session
+
+- `.cargo/config.toml` - Global target-feature compilation flags
+- `src/mining/sha256_simd/asm_v3.rs` - No #[target_feature] implementation
+- `src/mining/sha256_simd/mod.rs` - Added asm_v3 module
+- `src/mining/hasher.rs` - Added HasherType::AsmV3
+- `src/config.rs` - Added HasherConfig::AsmV3
+- `tests/hasher_comparison_bench.rs` - Added AsmV3 to benchmark
+- `src/bin/bench_verify.rs` - Single-thread verification with black_box
+- `src/bin/single_thread_bench.rs` - Single-thread Coordinator benchmark
+- `src/bin/multi_thread_bench.rs` - Multi-thread verification showing bug
+
+---
+
+## Next Investigation: Hash Counting Bug
+
+The hash counting bug that triggers at 17+ threads needs investigation:
+
+1. Check PaddedAtomicU64 for overflow issues
+2. Check if Stats struct has alignment problems at certain thread counts
+3. Verify no fixed-size arrays assume max 16 threads
+4. Test with Ordering::SeqCst instead of Relaxed
+
+---
