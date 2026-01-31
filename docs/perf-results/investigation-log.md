@@ -829,3 +829,93 @@ After fix, all thread counts work correctly:
 3. True performance is ~22-23 MH/s per thread for all implementations
 
 ---
+
+## Final Benchmark Results: 5 Consecutive Runs (2026-01-31)
+
+After all bug fixes, ran 5 consecutive benchmarks for each hasher type to establish reliable performance numbers.
+
+**Configuration**: 24 threads, 5-second runs, Intel CPU with SHA-NI
+
+### Raw Results
+
+#### SHA2 Crate
+
+| Run | Total Hashes | Total MH/s | Per-Thread |
+|-----|--------------|------------|------------|
+| 1 | 1,352,663,040 | 270.53 | 11.26 MH/s |
+| 2 | 1,375,469,568 | 275.09 | 11.44 MH/s |
+| 3 | 1,313,341,440 | 262.67 | 10.93 MH/s |
+| 4 | 1,374,420,992 | 274.88 | 11.44 MH/s |
+| 5 | 1,383,071,744 | 276.61 | 11.51 MH/s |
+| **Avg** | 1,359,793,357 | **271.96** | **11.32 MH/s** |
+
+#### SIMD (Intrinsics with #[target_feature])
+
+| Run | Total Hashes | Total MH/s | Per-Thread |
+|-----|--------------|------------|------------|
+| 1 | 1,370,750,976 | 274.15 | 11.42 MH/s |
+| 2 | 1,443,627,008 | 288.73 | 12.01 MH/s |
+| 3 | 1,363,673,088 | 272.73 | 11.35 MH/s |
+| 4 | 1,362,624,512 | 272.52 | 11.34 MH/s |
+| 5 | 1,426,587,648 | 285.32 | 11.88 MH/s |
+| **Avg** | 1,393,452,646 | **278.69** | **11.60 MH/s** |
+
+#### Assembly (Manual inline asm)
+
+| Run | Total Hashes | Total MH/s | Per-Thread |
+|-----|--------------|------------|------------|
+| 1 | 1,038,352,384 | 207.67 | 8.64 MH/s |
+| 2 | 1,025,245,184 | 205.05 | 8.54 MH/s |
+| 3 | 1,006,108,672 | 201.22 | 8.38 MH/s |
+| 4 | 962,854,912 | 192.57 | 8.01 MH/s |
+| 5 | 1,050,148,864 | 210.03 | 8.70 MH/s |
+| **Avg** | 1,016,542,003 | **203.31** | **8.45 MH/s** |
+
+#### AsmV2 (sha2-style macros with cpufeatures)
+
+| Run | Total Hashes | Total MH/s | Per-Thread |
+|-----|--------------|------------|------------|
+| 1 | 1,372,848,128 | 274.57 | 11.43 MH/s |
+| 2 | 1,371,537,408 | 274.31 | 11.42 MH/s |
+| 3 | 1,386,479,616 | 277.30 | 11.55 MH/s |
+| 4 | 1,396,441,088 | 279.29 | 11.62 MH/s |
+| 5 | 1,293,942,784 | 258.79 | 10.73 MH/s |
+| **Avg** | 1,364,249,805 | **272.85** | **11.35 MH/s** |
+
+#### AsmV3 (Global target-feature, no #[target_feature])
+
+| Run | Total Hashes | Total MH/s | Per-Thread |
+|-----|--------------|------------|------------|
+| 1 | 1,362,100,224 | 272.42 | 11.35 MH/s |
+| 2 | 1,404,567,552 | 280.91 | 11.70 MH/s |
+| 3 | 1,405,091,840 | 281.02 | 11.70 MH/s |
+| 4 | 1,335,099,392 | 267.02 | 11.11 MH/s |
+| 5 | 1,417,412,608 | 283.48 | 11.80 MH/s |
+| **Avg** | 1,384,854,323 | **276.97** | **11.53 MH/s** |
+
+### Summary Table
+
+| Implementation | Avg MH/s | Per-Thread | Relative |
+|----------------|----------|------------|----------|
+| **SIMD** | 278.69 | 11.60 MH/s | 100% (baseline) |
+| **AsmV3** | 276.97 | 11.53 MH/s | 99.4% |
+| **AsmV2** | 272.85 | 11.35 MH/s | 97.9% |
+| **SHA2 Crate** | 271.96 | 11.32 MH/s | 97.6% |
+| **Assembly** | 203.31 | 8.45 MH/s | 73.0% |
+
+### Key Findings
+
+1. **All SHA-NI implementations perform similarly** (~272-279 MH/s)
+2. **SIMD (intrinsics) is marginally fastest** at 278.69 MH/s
+3. **AsmV3 nearly ties SIMD** at 276.97 MH/s - global target-feature works
+4. **Assembly is slowest** at 203 MH/s - manual asm not as optimized
+5. **Variance is ~5-10%** between runs due to system load
+
+### Recommendation
+
+Use **SHA2 Crate** (default) for production:
+- Well-tested, maintained library
+- Competitive performance (97.6% of fastest)
+- No custom assembly to maintain
+
+---
