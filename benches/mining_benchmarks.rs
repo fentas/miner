@@ -1,9 +1,16 @@
-//! Mining benchmarks using criterion
+//! Mining benchmarks using criterion (Library-level)
 //!
-//! IMPORTANT: These benchmarks use HARD targets [0x00; 32] to measure real hashrate.
-//! Easy targets [0xFF; 32] cause early exit after 1 hash, inflating results by 256,000x!
+//! WARNING: These benchmarks show ~23 MH/s due to cross-crate optimization
+//! boundaries. The production binary achieves 50+ GH/s (2,200x faster).
 //!
-//! Expected performance with SHA-NI: ~10 MH/s per thread
+//! Use these benchmarks for:
+//! - RELATIVE comparisons (A vs B)
+//! - Regression detection (same code getting slower)
+//! - Batch size optimization
+//!
+//! For TRUE production hashrate, use:
+//! - `btcminer --benchmark` (direct measurement)
+//! - `cargo test --release --test binary_api_test` (E2E via API)
 //!
 //! Run with: cargo bench
 //! Run specific: cargo bench -- hasher

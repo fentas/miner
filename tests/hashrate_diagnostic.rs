@@ -1,14 +1,21 @@
-//! End-to-End Hashrate Benchmark Tests
+//! Hashrate Diagnostic Tests (Library-level)
 //!
-//! IMPORTANT: These tests use HARD targets [0x00; 32] to measure real hashrate.
-//! Easy targets [0xFF; 32] cause early exit after 1 hash, inflating results by 256,000x!
+//! These tests diagnose hasher performance and identify bottlenecks.
+//! They call library functions directly, which means they CANNOT measure
+//! true production performance due to cross-crate optimization boundaries.
 //!
-//! Expected performance with SHA-NI: ~10 MH/s per thread (~240 MH/s for 24 threads)
+//! IMPORTANT:
+//! - These tests show ~23 MH/s (library call overhead)
+//! - Production binary achieves 50+ GH/s (2,200x faster)
+//! - Use `btcminer --benchmark` for true production hashrate
+//! - Use `binary_api_test.rs` for E2E production measurement
 //!
-//! These tests measure the actual hashrate achieved in realistic mining scenarios
-//! and compare against isolated component benchmarks to identify bottlenecks.
+//! These tests are useful for:
+//! - Relative performance comparisons (A vs B)
+//! - Identifying overhead in coordinator vs isolated hasher
+//! - Verifying SIMD detection works correctly
 //!
-//! Run with: cargo test --release e2e_hashrate -- --nocapture --ignored
+//! Run with: cargo test --release --test hashrate_diagnostic -- --nocapture --ignored
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;

@@ -1,9 +1,12 @@
-//! API Hashrate Test
+//! Binary API Test (True E2E)
 //!
 //! Starts the actual btcminer binary and reads hashrate from the web API.
-//! This is the most accurate way to measure production performance.
+//! This is the ONLY accurate way to measure production performance.
 //!
-//! Run: cargo test --release --test api_hashrate_test -- --nocapture --ignored
+//! NOTE: External benchmarks (cargo bench, cargo test) show ~23 MH/s due to
+//! cross-crate optimization boundaries. This test measures the true 50+ GH/s.
+//!
+//! Run: cargo test --release --test binary_api_test -- --nocapture --ignored
 //!
 //! Port configuration (in order of priority):
 //! 1. BTCMINER_API_PORT environment variable

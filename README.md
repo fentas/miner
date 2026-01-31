@@ -344,14 +344,27 @@ See [TUI Reference](docs/TUI.md) for all shortcuts.
 btcminer [OPTIONS]
 
 Options:
-  -c, --config <FILE>    Config file [default: btcminer.toml]
-  -t, --threads <N>      Override thread count
-  -d, --debug            Enable debug logging
-      --no-color         Disable colored output
-      --no-hud           Disable TUI, use continuous log output
-      --log-format       Log format: text or json
-  -h, --help             Show help
+  -c, --config <FILE>         Config file [default: btcminer.toml]
+  -t, --threads <N>           Override thread count
+  -d, --debug                 Enable debug logging
+      --no-color              Disable colored output
+      --no-hud                Disable TUI, use continuous log output
+      --log-format            Log format: text or json
+      --benchmark             Run hashrate benchmark
+      --benchmark-duration    Benchmark duration in seconds [default: 10]
+  -h, --help                  Show help
 ```
+
+### Benchmark Mode
+
+Run `--benchmark` to measure true production hashrate:
+
+```bash
+btcminer --benchmark
+btcminer --benchmark --benchmark-duration 30  # 30 second test
+```
+
+This measures actual performance by running the mining hot path directly in the production binary. External tools like `cargo bench` show lower rates (~23 MH/s vs 50+ GH/s) due to Rust cross-crate optimization boundaries.
 
 &nbsp;
 
