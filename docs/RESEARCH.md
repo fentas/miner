@@ -124,6 +124,7 @@ Filter approach:
 | v6: Implementation Profiling | **POSITIVE** | Hasher reuse: 2.41x, Memory pattern: 1.79x. Real optimizations exist! |
 | v7: Hasher Type Comparison | **MIXED** | All ~23 MH/s. Assembly v1 broken (0.65x). SIMD only 1% faster. |
 | v8: Thread Scaling | **POSITIVE** | Near-linear scaling. 8 threads = 9.25x. HT adds 28%. No contention. |
+| v9: CPU Features | **INSIGHT** | sha2 crate already uses SHA-NI. Custom SIMD adds overhead (0.97x). Compute-bound. |
 
 ---
 
@@ -138,6 +139,7 @@ Filter approach:
 - [RESEARCH-test-log-v6.md](RESEARCH-test-log-v6.md) - Implementation profiling
 - [RESEARCH-test-log-v7.md](RESEARCH-test-log-v7.md) - Hasher type comparison
 - [RESEARCH-test-log-v8.md](RESEARCH-test-log-v8.md) - Thread scaling analysis
+- [RESEARCH-test-log-v9.md](RESEARCH-test-log-v9.md) - CPU feature detection
 
 ---
 
