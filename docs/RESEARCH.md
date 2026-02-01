@@ -121,6 +121,7 @@ Filter approach:
 | v3: Input Space Reduction | **NEGATIVE** | Nonce space cannot be reduced. All values equally random. |
 | v4: Algebraic Structure | **NEGATIVE** | No linear, carry, or algebraic patterns. SHA-256 is perfect. |
 | v5: Near-Collision Guided Search | **NEGATIVE** | No clustering, no gradient, no hierarchy. Random is random. |
+| v6: Implementation Profiling | **POSITIVE** | Hasher reuse: 2.41x, Memory pattern: 1.79x. Real optimizations exist! |
 
 ---
 
@@ -132,6 +133,7 @@ Filter approach:
 - [RESEARCH-test-log-v3.md](RESEARCH-test-log-v3.md) - Input space reduction
 - [RESEARCH-test-log-v4.md](RESEARCH-test-log-v4.md) - Algebraic analysis
 - [RESEARCH-test-log-v5.md](RESEARCH-test-log-v5.md) - Near-collision analysis
+- [RESEARCH-test-log-v6.md](RESEARCH-test-log-v6.md) - Implementation profiling
 
 ---
 
@@ -161,16 +163,38 @@ Filter approach:
 
 ## Final Assessment
 
-After v1-v5, we have empirically verified what cryptographers have claimed theoretically:
+After v1-v5, we have empirically verified:
 
-**SHA-256 mining cannot be optimized beyond brute force.**
+### Algorithmic Optimization: EXHAUSTED ❌
 
-The remaining paths are:
-1. **Hardware optimization** - Faster circuits, not smarter algorithms
-2. **Parallelization** - More chips, not fewer operations
-3. **Quantum computing** - Grover's algorithm (theoretical, 10-20+ years away)
+**SHA-256 mining algorithm cannot be shortcut.**
 
-For software optimization, we have achieved theoretical maximum. Further improvements require hardware R&D.
+- Cannot skip hashes (no mathematical trick)
+- Cannot predict winning nonces
+- Cannot use partial computation as filter
+- Each hash must be fully computed
+
+### Implementation Optimization: OPEN ✓
+
+**SHA-256 implementation can still be improved.**
+
+Just as hardware continues to improve through better engineering, software can optimize:
+
+| Hardware Optimization | Software Equivalent |
+|----------------------|---------------------|
+| Wider datapaths | Better SIMD utilization |
+| Better pipelining | Instruction scheduling |
+| Cache hierarchy | Memory access patterns |
+| Speculative execution | Branch optimization |
+| Parallel ALUs | Instruction-level parallelism |
+
+Areas still to investigate:
+1. **Instruction-level parallelism** - Saturating all execution units
+2. **SIMD optimization** - AVX-512 vs AVX2 vs multiple streams
+3. **Memory prefetching** - Hiding memory latency
+4. **Loop unrolling** - Optimal depth for target CPU
+5. **Register allocation** - Minimizing spills to memory
+6. **Compiler tuning** - Best flags and codegen
 
 ---
 
