@@ -122,6 +122,7 @@ Filter approach:
 | v4: Algebraic Structure | **NEGATIVE** | No linear, carry, or algebraic patterns. SHA-256 is perfect. |
 | v5: Near-Collision Guided Search | **NEGATIVE** | No clustering, no gradient, no hierarchy. Random is random. |
 | v6: Implementation Profiling | **POSITIVE** | Hasher reuse: 2.41x, Memory pattern: 1.79x. Real optimizations exist! |
+| v7: Hasher Type Comparison | **MIXED** | All ~23 MH/s. Assembly v1 broken (0.65x). SIMD only 1% faster. |
 
 ---
 
@@ -134,6 +135,7 @@ Filter approach:
 - [RESEARCH-test-log-v4.md](RESEARCH-test-log-v4.md) - Algebraic analysis
 - [RESEARCH-test-log-v5.md](RESEARCH-test-log-v5.md) - Near-collision analysis
 - [RESEARCH-test-log-v6.md](RESEARCH-test-log-v6.md) - Implementation profiling
+- [RESEARCH-test-log-v7.md](RESEARCH-test-log-v7.md) - Hasher type comparison
 
 ---
 
