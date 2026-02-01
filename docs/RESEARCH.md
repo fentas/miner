@@ -77,6 +77,23 @@ This document captures verified insights, "aha moments", and confirmed findings 
 
 ---
 
+### Insight #5: Near-Misses Provide Zero Guidance
+
+*Date: 2026-02-01*
+*Experiment: [RESEARCH-test-log-v5.md](RESEARCH-test-log-v5.md)*
+
+**Finding:** "Almost good" hashes don't cluster and can't guide search:
+- Neighbor analysis: +0.0165 LZ difference (noise)
+- Good hash spacing: follows perfect geometric distribution
+- Gradient analysis: 83% chance of worsening after improvement (regression to mean)
+- Partial match: first byte doesn't predict remaining bytes
+
+**Implication:** There's no "gradient descent" for mining. Near-misses are random - you can't follow them toward valid solutions.
+
+**Gotcha:** If you find a hash with 7 zeros (close to target 8), the next nonce is no more likely to have 8 zeros than any random nonce. Searching "nearby" is futile.
+
+---
+
 ## Key Observations
 
 ### The Probabilistic Filter Hypothesis
@@ -103,6 +120,7 @@ Filter approach:
 | v2: Differential Nonce Analysis | **NEGATIVE** | Consecutive hashes are perfectly independent. No prediction possible. |
 | v3: Input Space Reduction | **NEGATIVE** | Nonce space cannot be reduced. All values equally random. |
 | v4: Algebraic Structure | **NEGATIVE** | No linear, carry, or algebraic patterns. SHA-256 is perfect. |
+| v5: Near-Collision Guided Search | **NEGATIVE** | No clustering, no gradient, no hierarchy. Random is random. |
 
 ---
 
@@ -113,6 +131,7 @@ Filter approach:
 - [RESEARCH-test-log-v2.md](RESEARCH-test-log-v2.md) - Differential nonce analysis
 - [RESEARCH-test-log-v3.md](RESEARCH-test-log-v3.md) - Input space reduction
 - [RESEARCH-test-log-v4.md](RESEARCH-test-log-v4.md) - Algebraic analysis
+- [RESEARCH-test-log-v5.md](RESEARCH-test-log-v5.md) - Near-collision analysis
 
 ---
 
@@ -136,11 +155,13 @@ Filter approach:
 
 9. **NSA Cryptographers Knew What They Were Doing** - SHA-256 was designed to resist exactly these attacks. After 20+ years and billions in mining investment, no shortcut has been found.
 
+10. **No Gradient Exists** - Mining is not an optimization problem. There's no direction to "descend" toward low hashes. Each nonce is an independent coin flip.
+
 ---
 
 ## Final Assessment
 
-After v1-v4, we have empirically verified what cryptographers have claimed theoretically:
+After v1-v5, we have empirically verified what cryptographers have claimed theoretically:
 
 **SHA-256 mining cannot be optimized beyond brute force.**
 
