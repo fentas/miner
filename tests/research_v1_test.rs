@@ -3,7 +3,8 @@
 //! Tests whether early SHA-256 rounds can predict final hash's leading bytes.
 //! If correlation exists, we can use partial computation as a filter.
 //!
-//! Run with: cargo test --release --test truncated_rounds_test -- --nocapture
+//! Correlates to: docs/RESEARCH-test-log-v1.md
+//! Run with: cargo test --release --test research_v1_test -- --nocapture
 
 use std::collections::HashMap;
 

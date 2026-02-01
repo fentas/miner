@@ -23,6 +23,23 @@ This document captures verified insights, "aha moments", and confirmed findings 
 
 ---
 
+### Insight #2: SHA-256 Avalanche is Mathematically Perfect
+
+*Date: 2026-02-01*
+*Experiment: [RESEARCH-test-log-v2.md](RESEARCH-test-log-v2.md)*
+
+**Finding:** Consecutive nonces produce **completely independent** hashes:
+- Exactly 50.00% bit flip rate (expected: 50%)
+- All 256 bit positions flip at identical rates
+- No clustering of "good" hashes
+- Step size (1, 256, 65536, 16M) makes zero difference
+
+**Implication:** Hash(N) provides ZERO information about Hash(N+1). The only "correlation" found was regression-to-mean (anti-correlation), which is not exploitable for mining.
+
+**Gotcha:** Direction anti-correlation (up→down more likely than up→up) is just statistics, not a mining shortcut. It doesn't change the probability of hitting the target.
+
+---
+
 ## Key Observations
 
 ### The Probabilistic Filter Hypothesis
@@ -46,6 +63,7 @@ Filter approach:
 | Experiment | Result | Insight |
 |------------|--------|---------|
 | v1: Truncated Rounds Correlation | **NEGATIVE** | Avalanche is immediate, not gradual. No filter viable. |
+| v2: Differential Nonce Analysis | **NEGATIVE** | Consecutive hashes are perfectly independent. No prediction possible. |
 
 ---
 
@@ -53,6 +71,7 @@ Filter approach:
 
 - [RESEARCH-ideas.md](RESEARCH-ideas.md) - Brainstorming and unexplored concepts
 - [RESEARCH-test-log-v1.md](RESEARCH-test-log-v1.md) - Truncated rounds experiment
+- [RESEARCH-test-log-v2.md](RESEARCH-test-log-v2.md) - Differential nonce analysis
 
 ---
 
@@ -63,6 +82,10 @@ Filter approach:
 2. **False Negative is the Killer Metric** - For mining filters, false negatives mean lost blocks. Even 1% is unacceptable; 93% is fatal.
 
 3. **SHA-256 Mixing is Fast** - Don't assume avalanche builds gradually. The first 8 rounds are as "mixed" as 64.
+
+4. **Regression to Mean ≠ Mining Advantage** - Statistical anti-correlation (high value followed by low value) is just probability, not a shortcut to finding zeros.
+
+5. **50% is Truly 50%** - SHA-256 avalanche is mathematically perfect. Every bit position flips at exactly 50% rate, not 49% or 51%.
 
 ---
 
