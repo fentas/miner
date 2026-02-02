@@ -8,3 +8,6 @@
 
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-feature=+sha,+sse4.1,+ssse3,+sse2"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+sha,+sse4.1,+ssse3,+sse2"]
