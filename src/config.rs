@@ -110,22 +110,26 @@ pub enum SimdLevelConfig {
 }
 
 /// Hasher implementation type (for debugging/comparison)
-/// All SHA-NI implementations perform within ~3% of each other (~272-279 MH/s @ 24 threads)
+/// All SHA-NI implementations perform within ~3% of each other (~290-300 MH/s @ 24 threads)
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum HasherConfig {
-    /// SHA2 crate - default, recommended (272 MH/s, well-tested)
+    /// SHA2 crate - default, recommended (300 MH/s, well-tested)
     #[default]
     Sha2,
-    /// Custom SIMD intrinsics with #[target_feature] (279 MH/s, fastest)
+    /// Custom SIMD intrinsics with #[target_feature] (297 MH/s)
     Simd,
-    /// Manual inline assembly (203 MH/s, slowest)
+    /// Manual inline assembly (215 MH/s, slowest)
     Asm,
-    /// sha2-style macros with cpufeatures (273 MH/s)
+    /// sha2-style macros with cpufeatures (291 MH/s)
     AsmV2,
-    /// Global target-feature, no #[target_feature] (277 MH/s)
+    /// Global target-feature, no #[target_feature] (294 MH/s)
     /// WILL CRASH on CPUs without SHA-NI!
     AsmV3,
+    /// Ultimate - combines ALL research optimizations
+    /// NO #[target_feature], pre-computed padding, fused state transfer
+    /// WILL CRASH on CPUs without SHA-NI!
+    Ultimate,
 }
 
 impl HasherConfig {
@@ -137,6 +141,7 @@ impl HasherConfig {
             HasherConfig::Asm => crate::mining::HasherType::Assembly,
             HasherConfig::AsmV2 => crate::mining::HasherType::AsmV2,
             HasherConfig::AsmV3 => crate::mining::HasherType::AsmV3,
+            HasherConfig::Ultimate => crate::mining::HasherType::Ultimate,
         }
     }
 }

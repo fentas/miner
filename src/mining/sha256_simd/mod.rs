@@ -19,6 +19,8 @@ mod asm;
 mod asm_v2;
 #[cfg(target_arch = "x86_64")]
 mod asm_v3;
+#[cfg(target_arch = "x86_64")]
+mod ultimate;
 
 use super::job::hash_meets_target;
 
@@ -185,6 +187,46 @@ pub fn sha256d_midstate_v3(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> 
     #[cfg(not(target_arch = "x86_64"))]
     {
         generic::sha256d_midstate(midstate, tail, nonce)
+    }
+}
+
+/// Ultimate double SHA-256 with midstate - combines all research optimizations
+///
+/// Combines the best from all implementations:
+/// - NO #[target_feature] for full LLVM inlining (from v3)
+/// - Pre-computed padding for second hash
+/// - Fused state transfer (state stays in registers)
+/// - Optimized mining loop with early exit
+///
+/// IMPORTANT: Requires -C target-feature=+sha,+sse4.1,+ssse3 compilation!
+/// Will crash on CPUs without SHA-NI!
+#[inline(always)]
+pub fn sha256d_midstate_ultimate(midstate: &Midstate, tail: &[u8; 16], nonce: u32) -> [u8; 32] {
+    #[cfg(target_arch = "x86_64")]
+    {
+        return ultimate::sha256d_midstate_ultimate(midstate, tail, nonce);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        generic::sha256d_midstate(midstate, tail, nonce)
+    }
+}
+
+/// Mine a range of nonces using the ultimate implementation
+pub fn mine_ultimate(
+    midstate: &Midstate,
+    tail: &[u8; 16],
+    start_nonce: u32,
+    count: u32,
+    target: &[u8; 32],
+) -> Option<(u32, [u8; 32])> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        return ultimate::mine_ultimate(midstate, tail, start_nonce, count, target);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        generic::mine(midstate, tail, start_nonce, count, target)
     }
 }
 

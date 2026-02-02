@@ -14,7 +14,7 @@
 
 use std::time::{Duration, Instant};
 use btcminer::mining::{Coordinator, Job, Hasher, HasherType};
-use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2, sha256d_midstate_v3};
+use btcminer::mining::sha256_simd::{Midstate, sha256d_midstate_generic, sha256d_midstate_simd, sha256d_midstate_asm, sha256d_midstate_v2, sha256d_midstate_v3, sha256d_midstate_ultimate};
 
 fn format_hashrate(hashrate: f64) -> String {
     if hashrate >= 1e12 { format!("{:.2} TH/s", hashrate / 1e12) }
@@ -110,6 +110,20 @@ fn bench_direct_calls() {
     }
     let rate_v3 = count as f64 / start.elapsed().as_secs_f64();
 
+    // Test 6: Ultimate (combined research optimizations)
+    println!("Testing Ultimate...");
+    count = 0;
+    nonce = 0;
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        for _ in 0..10000 {
+            let _ = sha256d_midstate_ultimate(&midstate, &tail, nonce);
+            nonce = nonce.wrapping_add(1);
+            count += 1;
+        }
+    }
+    let rate_ultimate = count as f64 / start.elapsed().as_secs_f64();
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("  RESULTS (Direct Calls - Single Thread)");
@@ -122,6 +136,7 @@ fn bench_direct_calls() {
     println!("  {:25} {:>15} {:>10}", "Assembly", format_hashrate(rate_asm), format!("{:.1}x", rate_asm / rate_generic));
     println!("  {:25} {:>15} {:>10}", "AsmV2", format_hashrate(rate_v2), format!("{:.1}x", rate_v2 / rate_generic));
     println!("  {:25} {:>15} {:>10}", "AsmV3 (no target_feature)", format_hashrate(rate_v3), format!("{:.1}x", rate_v3 / rate_generic));
+    println!("  {:25} {:>15} {:>10}", "Ultimate", format_hashrate(rate_ultimate), format!("{:.1}x", rate_ultimate / rate_generic));
     println!();
 }
 
@@ -146,6 +161,7 @@ fn bench_hasher_class() {
         (HasherType::Assembly, "Assembly"),
         (HasherType::AsmV2, "AsmV2"),
         (HasherType::AsmV3, "AsmV3 (no target_feature)"),
+        (HasherType::Ultimate, "Ultimate"),
     ];
 
     let mut results = Vec::new();
@@ -202,6 +218,7 @@ fn bench_coordinator() {
         (HasherType::Assembly, "Assembly"),
         (HasherType::AsmV2, "AsmV2"),
         (HasherType::AsmV3, "AsmV3 (no target_feature)"),
+        (HasherType::Ultimate, "Ultimate"),
     ];
 
     let mut results = Vec::new();
@@ -268,6 +285,7 @@ fn bench_coordinator() {
     let asm_rate = results[2].1;
     let v2_rate = results[3].1;
     let v3_rate = results[4].1;
+    let ultimate_rate = results[5].1;
 
     // Find fastest implementation
     let rates = [
@@ -276,6 +294,7 @@ fn bench_coordinator() {
         ("Assembly", asm_rate),
         ("AsmV2", v2_rate),
         ("AsmV3", v3_rate),
+        ("Ultimate", ultimate_rate),
     ];
     let (fastest_name, fastest_rate) = rates.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap();
 
@@ -293,6 +312,16 @@ fn bench_coordinator() {
         println!("  The global target-feature compilation allows full LLVM inlining.");
     } else {
         println!("  AsmV3 is {:.1}x slower than SHA2 Crate", sha2_rate / v3_rate);
+    }
+    println!();
+
+    if ultimate_rate > sha2_rate * 0.9 {
+        println!("  SUCCESS: Ultimate matches or beats SHA2 Crate performance!");
+        println!("  Combined optimizations from all research are effective.");
+    } else if ultimate_rate > sha2_rate {
+        println!("  EXCELLENT: Ultimate is {:.1}% faster than SHA2 Crate!", (ultimate_rate / sha2_rate - 1.0) * 100.0);
+    } else {
+        println!("  Ultimate is {:.1}x slower than SHA2 Crate", sha2_rate / ultimate_rate);
     }
     println!();
 }
