@@ -93,7 +93,7 @@ payout_address = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
 
 #[test]
 fn test_pool_presets() {
-    let presets = ["ckpool", "braiins", "ocean", "none", "custom"];
+    let presets = ["ckpool", "braiins", "ocean", "btcpowlab", "none", "custom"];
 
     for preset in presets {
         let content = format!(

@@ -17,7 +17,7 @@
 # ============================================
 
 [pool]
-# Solo pool preset - ckpool, braiins, ocean, none (true solo), custom
+# Pool preset - ckpool, braiins, ocean, btcpowlab, none (true solo), custom
 preset = "ckpool"
 
 # Custom pool address (only used when preset = "custom")
