@@ -21,6 +21,7 @@ pub enum PoolPreset {
     Ckpool,
     Braiins,
     Ocean,
+    Btcpowlab,
     None,
     Custom,
 }
@@ -32,6 +33,7 @@ impl PoolPreset {
             Self::Ckpool => Some("solo.ckpool.org:3333"),
             Self::Braiins => Some("solo.stratum.braiins.com:3333"),
             Self::Ocean => Some("mine.ocean.xyz:3334"),
+            Self::Btcpowlab => Some("stratum.btcpowlab-pool.com:3333"),
             Self::None => None,
             Self::Custom => None,
         }
@@ -40,7 +42,9 @@ impl PoolPreset {
     /// Get the stratum version for this preset
     pub fn stratum_version(&self) -> StratumVersion {
         match self {
-            Self::Ckpool | Self::Braiins | Self::Ocean => StratumVersion::V1,
+            Self::Ckpool | Self::Braiins | Self::Ocean | Self::Btcpowlab => {
+                StratumVersion::V1
+            }
             Self::None | Self::Custom => StratumVersion::V1,
         }
     }
@@ -613,6 +617,10 @@ mod tests {
         assert_eq!(PoolPreset::Ckpool.address(), Some("solo.ckpool.org:3333"));
         assert_eq!(PoolPreset::Braiins.address(), Some("solo.stratum.braiins.com:3333"));
         assert_eq!(PoolPreset::Ocean.address(), Some("mine.ocean.xyz:3334"));
+        assert_eq!(
+            PoolPreset::Btcpowlab.address(),
+            Some("stratum.btcpowlab-pool.com:3333")
+        );
         assert_eq!(PoolPreset::None.address(), None);
     }
 
@@ -783,6 +791,7 @@ mod tests {
         assert_eq!(PoolPreset::Ckpool.stratum_version(), StratumVersion::V1);
         assert_eq!(PoolPreset::Braiins.stratum_version(), StratumVersion::V1);
         assert_eq!(PoolPreset::Ocean.stratum_version(), StratumVersion::V1);
+        assert_eq!(PoolPreset::Btcpowlab.stratum_version(), StratumVersion::V1);
         assert_eq!(PoolPreset::None.stratum_version(), StratumVersion::V1);
         assert_eq!(PoolPreset::Custom.stratum_version(), StratumVersion::V1);
     }
@@ -792,6 +801,7 @@ mod tests {
         assert!(!PoolPreset::Ckpool.requires_bitcoind());
         assert!(!PoolPreset::Braiins.requires_bitcoind());
         assert!(!PoolPreset::Ocean.requires_bitcoind());
+        assert!(!PoolPreset::Btcpowlab.requires_bitcoind());
         assert!(PoolPreset::None.requires_bitcoind());
         assert!(!PoolPreset::Custom.requires_bitcoind());
     }

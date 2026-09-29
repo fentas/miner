@@ -100,7 +100,7 @@ TOML-based configuration for consistency with SRI ecosystem:
 # btcminer.toml
 
 [pool]
-preset = "ckpool"              # ckpool, braiins, ocean, none, custom
+preset = "ckpool"              # ckpool, braiins, ocean, btcpowlab, none, custom
 payout_address = "bc1q..."     # Your Bitcoin address (required)
 
 [mining]
@@ -144,7 +144,14 @@ system_bell = true             # Bell on share accepted
 | `ckpool`  | solo.ckpool.org           | Stratum V1  | 2%    | Reliable solo pool   |
 | `braiins` | solo.stratum.braiins.com  | Stratum V1  | 0.5%  | Low fee option       |
 | `ocean`   | mine.ocean.xyz:3334       | Stratum V1  | 0%    | DATUM support        |
+| `btcpowlab` | stratum.btcpowlab-pool.com:3333 | Stratum V1 | 5% | Hybrid Solo pool |
 | `none`    | Your Bitcoin Core         | Direct      | 0%    | **True solo mining** |
+
+BTC PoW Lab uses a Hybrid Solo reward model. The block finder receives 85%,
+eligible miners share 10% based on recent accepted work, and the operator fee is
+5%. See the [published reward model](https://btcpowlab-pool.com/model) and
+[public proof center](https://btcpowlab-pool.com/proof) before selecting the
+preset. Mining remains probabilistic and no block or reward is guaranteed.
 
 &nbsp;
 
